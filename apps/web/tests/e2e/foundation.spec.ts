@@ -18,7 +18,7 @@ async function capture(page: Page, name: string) {
 }
 
 test("foundation UI walkthrough", async ({ page }) => {
-  const profileName = `Foundation MOM test ${Date.now()}`;
+  const profileName = "Foundation MOM test";
   const meeting = {
     id: "meeting-e2e-001",
     title: "Foundation UI witness",
