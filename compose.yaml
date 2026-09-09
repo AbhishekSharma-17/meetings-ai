@@ -13,6 +13,9 @@ services:
       PROVIDER_CREDENTIAL_KEY: ${PROVIDER_CREDENTIAL_KEY:-development-only-change-me}
       VEXA_BASE_URL: http://vexa-lite:8056
       VEXA_API_KEY: ${VEXA_API_KEY:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM_NAME: ${RESEND_FROM_NAME:-Meetings AI}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-}
     ports:
       - "127.0.0.1:8320:8000"
     healthcheck:
