@@ -46,6 +46,7 @@ This development host is ARM64. The standard Vexa bot image is AMD64-only; the i
 ## Secrets
 
 Copy `.env.example` to `.env.local` and insert newly rotated credentials there. Do not paste credentials into source files, commits, issues or task transcripts. See [the secrets runbook](docs/security/secrets.md).
+`make compose-up` automatically loads `.env.local` when it exists.
 
 ## Source layout
 

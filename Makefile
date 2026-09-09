@@ -18,7 +18,11 @@ web-dev:
 
 compose-up:
 	docker network inspect vexa-lite-net >/dev/null 2>&1 || docker network create vexa-lite-net
-	docker compose up --build -d
+	@if [ -f .env.local ]; then \
+		docker compose --env-file .env.local up --build -d; \
+	else \
+		docker compose up --build -d; \
+	fi
 
 compose-down:
 	docker compose down
