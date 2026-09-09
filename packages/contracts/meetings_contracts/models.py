@@ -8,7 +8,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from .schemas import Capability, ExecutionLocation, FallbackPolicy, ProviderType
+from .schemas import (
+    Capability,
+    ExecutionLocation,
+    FallbackPolicy,
+    MeetingPlatform,
+    MeetingStatus,
+    ProviderType,
+)
 
 
 @dataclass(slots=True)
@@ -44,3 +51,24 @@ class DefaultSelection:
         else:
             candidates = (self.cloud_profile_id, self.local_profile_id)
         return tuple(candidate for candidate in candidates if candidate is not None)
+
+
+@dataclass(slots=True)
+class Meeting:
+    meeting_url: str
+    bot_name: str
+    platform: MeetingPlatform
+    native_meeting_id: str
+    title: str | None = None
+    language: str | None = None
+    transcribe_enabled: bool = True
+    recording_enabled: bool = False
+    status: MeetingStatus = MeetingStatus.CREATED
+    vexa_meeting_id: int | None = None
+    last_error: str | None = None
+    id: UUID = field(default_factory=uuid4)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    joined_at: datetime | None = None
+    stopped_at: datetime | None = None
+    last_refreshed_at: datetime | None = None

@@ -192,3 +192,81 @@ class EmbeddingResult(BaseModel):
     provider: str
     model: str
     dimensions: Annotated[int, Field(gt=0)]
+
+
+class MeetingPlatform(str, Enum):
+    GOOGLE_MEET = "google_meet"
+    TEAMS = "teams"
+    ZOOM = "zoom"
+    JITSI = "jitsi"
+
+
+class MeetingStatus(str, Enum):
+    CREATED = "created"
+    REQUESTED = "requested"
+    JOINING = "joining"
+    AWAITING_ADMISSION = "awaiting_admission"
+    ACTIVE = "active"
+    NEEDS_HUMAN_HELP = "needs_human_help"
+    STOPPING = "stopping"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class MeetingCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    meeting_url: HttpUrl
+    title: Annotated[str | None, Field(default=None, max_length=200)]
+    bot_name: Annotated[str, Field(default="Meetings AI", min_length=1, max_length=100)]
+    language: Annotated[str | None, Field(default=None, min_length=2, max_length=35)]
+    transcribe_enabled: bool = True
+    recording_enabled: bool = False
+
+
+class MeetingPublic(BaseModel):
+    id: UUID
+    meeting_url: str
+    title: str | None
+    bot_name: str
+    language: str | None
+    transcribe_enabled: bool
+    recording_enabled: bool
+    platform: MeetingPlatform
+    native_meeting_id: str
+    status: MeetingStatus
+    vexa_meeting_id: int | None
+    last_error: str | None
+    created_at: datetime
+    updated_at: datetime
+    joined_at: datetime | None
+    stopped_at: datetime | None
+    last_refreshed_at: datetime | None
+
+
+class MeetingListResponse(BaseModel):
+    items: list[MeetingPublic]
+    count: int
+
+
+class MeetingTranscriptSegment(BaseModel):
+    start_seconds: float = Field(ge=0)
+    end_seconds: float = Field(ge=0)
+    text: str
+    speaker: str | None = None
+    language: str | None = None
+    completed: bool = True
+
+    @model_validator(mode="after")
+    def validate_timestamps(self) -> "MeetingTranscriptSegment":
+        if self.end_seconds < self.start_seconds:
+            raise ValueError("end_seconds must not precede start_seconds")
+        return self
+
+
+class MeetingTranscriptResponse(BaseModel):
+    meeting_id: UUID
+    vexa_meeting_id: int
+    status: MeetingStatus
+    segments: list[MeetingTranscriptSegment]
+    segment_count: int

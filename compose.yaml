@@ -8,6 +8,11 @@ services:
     environment:
       APP_ENV: development
       WEB_ORIGIN: http://localhost:3020
+      DATABASE_URL: postgresql+psycopg://meetings_ai:meetings_ai_local_only@postgres:5432/meetings_ai
+      # Local development fallback only. Set a stable private key before storing real credentials.
+      PROVIDER_CREDENTIAL_KEY: ${PROVIDER_CREDENTIAL_KEY:-development-only-change-me}
+      VEXA_BASE_URL: http://vexa-lite:8056
+      VEXA_API_KEY: ${VEXA_API_KEY:-}
     ports:
       - "127.0.0.1:8320:8000"
     healthcheck:
@@ -18,6 +23,9 @@ services:
     networks:
       - default
       - vexa
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   web:
     build:
@@ -33,15 +41,19 @@ services:
 
   postgres:
     image: pgvector/pgvector:pg17
-    profiles: ["foundation"]
     environment:
       POSTGRES_DB: meetings_ai
       POSTGRES_USER: meetings_ai
       POSTGRES_PASSWORD: meetings_ai_local_only
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:5434:5432"
     volumes:
       - meetings-ai-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U meetings_ai -d meetings_ai"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
   minio:
     image: minio/minio:latest
@@ -51,8 +63,8 @@ services:
       MINIO_ROOT_USER: meetings-ai-local
       MINIO_ROOT_PASSWORD: meetings-ai-local-secret
     ports:
-      - "127.0.0.1:9000:9000"
-      - "127.0.0.1:9001:9001"
+      - "127.0.0.1:9010:9000"
+      - "127.0.0.1:9011:9001"
     volumes:
       - meetings-ai-minio:/data
 

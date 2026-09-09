@@ -65,9 +65,17 @@ function ProfileEditor({ profile, onSave, onChange, onNotice }: { profile: Provi
 
   async function testConnection() {
     setTesting(true); update("connectionState", "checking");
-    const tested = await meetingsService.testProviderConnection(draft, apiKey || undefined);
-    setDraft(tested); onChange(tested); setApiKey(""); setTesting(false);
-    onNotice(tested.connectionState === "configured" ? "Configuration is valid. The live network probe lands with the provider adapter." : "Add the required endpoint or credential and try again.");
+    try {
+      const tested = await meetingsService.testProviderConnection(draft, apiKey || undefined);
+      setDraft(tested); onChange(tested); setApiKey("");
+      onNotice(tested.connectionState === "configured" ? "Configuration fields are valid. Runtime connectivity is checked when that provider workflow is enabled." : "Add the required endpoint or credential and try again.");
+    } catch (error) {
+      const failed = { ...draft, connectionState: "failed" as const };
+      setDraft(failed); onChange(failed);
+      onNotice(error instanceof Error ? error.message : "Configuration validation failed.");
+    } finally {
+      setTesting(false);
+    }
   }
   async function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); await onSave(draft, apiKey || undefined); setApiKey(""); }
   function toggleCapability(capability: Capability) {
@@ -85,7 +93,7 @@ function ProfileEditor({ profile, onSave, onChange, onNotice }: { profile: Provi
       <label htmlFor="api-key">API key <span className="optional">write-only</span></label><div className="key-input"><input id="api-key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={draft.apiKeyConfigured ? "A key is already configured" : "Paste a new API key"} autoComplete="new-password" /><span aria-hidden="true">•••</span></div><p className="field-hint">Keys are sent only when you save or test. This UI never reads them back.</p>
       <fieldset><legend>Capabilities</legend><div className="capabilities">{capabilities.map((capability) => <label className="capability" key={capability}><input type="checkbox" checked={draft.capabilities.includes(capability)} onChange={() => toggleCapability(capability)} /><span>{capability.replace("_", " ")}</span></label>)}</div></fieldset>
       <label className="default-selector"><input type="checkbox" checked={draft.isDefault} onChange={(event) => update("isDefault", event.target.checked)} /><span><b>Use as the default {profileInfo[draft.kind].title.toLowerCase()} profile</b><small>New meetings will use this profile unless changed.</small></span></label>
-      <div className="editor-actions"><button className="button secondary" type="button" disabled={testing} onClick={() => void testConnection()}>{testing ? "Testing…" : "Test connection"}</button><button className="button primary" type="submit">Save profile</button></div>
+      <div className="editor-actions"><button className="button secondary" type="button" disabled={testing} onClick={() => void testConnection()}>{testing ? "Validating…" : "Validate configuration"}</button><button className="button primary" type="submit">Save profile</button></div>
     </form>
   </aside>;
 }

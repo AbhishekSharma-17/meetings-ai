@@ -1,6 +1,9 @@
 fastapi>=0.121,<1
 pydantic>=2.12,<3
 uvicorn[standard]>=0.38,<1
+SQLAlchemy>=2.0,<3
+psycopg[binary]>=3.3,<4
+cryptography>=46,<47
 
 # Test-only
 httpx>=0.28,<1

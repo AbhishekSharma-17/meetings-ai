@@ -19,6 +19,8 @@ node_modules/
 coverage/
 dist/
 *.tsbuildinfo
+apps/web/playwright-report/
+apps/web/test-results/
 
 # Runtime data
 .data/

@@ -1,6 +1,6 @@
 """Shared API contracts for Meetings AI."""
 
-from .models import DefaultSelection, ProviderProfile
+from .models import DefaultSelection, Meeting, ProviderProfile
 from .schemas import (
     AdapterTestResult,
     Capability,
@@ -11,6 +11,13 @@ from .schemas import (
     EmbeddingResult,
     ExecutionLocation,
     FallbackPolicy,
+    MeetingCreate,
+    MeetingListResponse,
+    MeetingPlatform,
+    MeetingPublic,
+    MeetingStatus,
+    MeetingTranscriptResponse,
+    MeetingTranscriptSegment,
     ProfileCreate,
     ProfilePublic,
     ProfileUpdate,
@@ -33,6 +40,14 @@ __all__ = [
     "EmbeddingResult",
     "ExecutionLocation",
     "FallbackPolicy",
+    "Meeting",
+    "MeetingCreate",
+    "MeetingListResponse",
+    "MeetingPlatform",
+    "MeetingPublic",
+    "MeetingStatus",
+    "MeetingTranscriptResponse",
+    "MeetingTranscriptSegment",
     "ProfileCreate",
     "ProfilePublic",
     "ProfileUpdate",

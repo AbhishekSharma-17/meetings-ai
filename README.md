@@ -4,18 +4,23 @@ Meetings AI is a provider-agnostic meeting agent built around a pinned Vexa capt
 
 ## Current implementation slice
 
-The first slice establishes:
+The current local capture slice establishes:
 
 - the product web application and manual meeting journey;
-- a FastAPI product API;
+- a FastAPI product API with PostgreSQL persistence;
+- product meeting creation, Vexa bot dispatch, lifecycle refresh and idempotent stop;
+- exact-meeting transcript reads with a durable cached fallback;
 - provider profiles for transcription, text generation and embeddings;
 - Vexa-native, OpenAI and OpenAI-compatible provider boundaries;
 - write-only credential handling and capability validation;
 - a pinned local Vexa `v0.12.27` checkout for the ARM64 Lite witness path.
 
-Meeting capture, OpenAI calls and Resend delivery are intentionally not activated until rotated credentials are supplied through the ignored local secret file.
+The Vexa capture path is active locally. OpenAI MOM generation and Resend delivery
+remain separate milestones and require newly rotated credentials in the ignored
+local secret file.
 
-See the [foundation verification record](docs/status/2026-09-09-foundation.md) for the exact checks already passed and the next incomplete slices.
+See the [local capture MVP verification record](docs/status/2026-09-09-capture-mvp.md)
+for the exact checks already passed and the next incomplete slices.
 
 ## Provider model
 
@@ -58,7 +63,7 @@ vendor/vexa/              pinned organization fork/submodule
 ## Vexa pin
 
 - Tag: `v0.12.27`
-- Commit: `f64a7653acdd845224f6d7de16b58c081ff7234c`
+- Commit: `cbaf88c6530d5e41368fc2df80e33c53240bd49e`
 - Upstream: <https://github.com/Vexa-ai/vexa>
 
 Organization fork: <https://github.com/Genaiprotos/vexa>. The product pins its tested fork commit as a submodule and retains the public Vexa repository as `upstream` inside that checkout.

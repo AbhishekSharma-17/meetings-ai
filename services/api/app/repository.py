@@ -1,4 +1,4 @@
-"""Small in-memory repository used by the first internal MVP."""
+"""Repository errors plus the in-memory test implementation."""
 
 from threading import RLock
 from uuid import UUID
@@ -7,6 +7,10 @@ from meetings_contracts import Capability, DefaultSelection, ProviderProfile
 
 
 class ProfileNotFoundError(KeyError):
+    pass
+
+
+class MeetingNotFoundError(KeyError):
     pass
 
 

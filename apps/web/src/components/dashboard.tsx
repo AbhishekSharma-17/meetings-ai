@@ -1,8 +1,19 @@
 import type { Meeting } from "@/lib/types";
 
-const statusLabel = { live: "Live", ready: "MOM ready", processing: "Processing" } as const;
+const statusLabel: Record<Meeting["status"], string> = {
+  created: "Created",
+  joining: "Joining",
+  waiting_room: "In lobby",
+  live: "Live",
+  needs_attention: "Needs attention",
+  stopping: "Stopping",
+  processing: "Processing",
+  ready: "Capture ready",
+  stopped: "Stopped",
+  failed: "Needs attention",
+};
 
-export function Dashboard({ meetings, onNewMeeting, onOpenProviders }: { meetings: Meeting[]; onNewMeeting(): void; onOpenProviders(): void }) {
+export function Dashboard({ meetings, onNewMeeting, onOpenProviders, onOpenMeeting }: { meetings: Meeting[]; onNewMeeting(): void; onOpenProviders(): void; onOpenMeeting(id: string): void }) {
   const readyCount = meetings.filter((meeting) => meeting.status === "ready").length;
   const liveCount = meetings.filter((meeting) => meeting.status === "live").length;
   return (
@@ -18,19 +29,19 @@ export function Dashboard({ meetings, onNewMeeting, onOpenProviders }: { meeting
 
       <div className="notice" role="status">
         <span className="notice-icon" aria-hidden="true">✦</span>
-        <div><b>Local foundation is running.</b><span>Configure and test an AI provider before the first live meeting witness.</span></div>
+        <div><b>Local capture slice is running.</b><span>Meeting records, lifecycle state and transcripts are persisted in PostgreSQL.</span></div>
       </div>
 
       <div className="stats" aria-label="Meeting summary">
         <article><span>Meetings captured</span><strong>{meetings.length}</strong><small>{liveCount ? `${liveCount} currently live` : "No live meeting"}</small></article>
-        <article><span>MOMs ready</span><strong>{readyCount}</strong><small>Evidence review comes in Milestone 2</small></article>
+        <article><span>Captures ready</span><strong>{readyCount}</strong><small>MOM generation comes in the next milestone</small></article>
         <article><span>Follow-ups sent</span><strong>0</strong><small>Resend delivery comes in Milestone 3</small></article>
       </div>
 
       <div className="section-heading"><div><h2>Recent meetings</h2><p>Everything is a draft until you publish it.</p></div><button className="text-button">View all <span aria-hidden="true">→</span></button></div>
       {meetings.length ? <div className="meeting-list">
-        {meetings.map((meeting) => <MeetingRow key={meeting.id} meeting={meeting} />)}
-      </div> : <div className="empty-state"><b>No meeting records yet.</b><p>The first real Meet, Zoom, or Teams witness will appear here after the capture adapter is connected.</p></div>}
+        {meetings.map((meeting) => <MeetingRow key={meeting.id} meeting={meeting} onOpen={() => onOpenMeeting(meeting.id)} />)}
+      </div> : <div className="empty-state"><b>No meeting records yet.</b><p>Paste a Meet, Zoom, Teams or Jitsi link to create the first capture record.</p></div>}
 
       <section className="setup-card" aria-labelledby="setup-title">
         <div className="setup-icon" aria-hidden="true">⚙</div>
@@ -41,11 +52,11 @@ export function Dashboard({ meetings, onNewMeeting, onOpenProviders }: { meeting
   );
 }
 
-function MeetingRow({ meeting }: { meeting: Meeting }) {
+function MeetingRow({ meeting, onOpen }: { meeting: Meeting; onOpen(): void }) {
   return <article className="meeting-row">
     <div className="meeting-platform" aria-hidden="true">{meeting.platform === "Zoom" ? "Z" : meeting.platform === "Microsoft Teams" ? "T" : "G"}</div>
     <div className="meeting-info"><h3>{meeting.title}</h3><p>{meeting.platform} · {meeting.startsAt} · {meeting.participants} participants</p></div>
     <div className="meeting-meta"><span className={`status ${meeting.status}`}>{statusLabel[meeting.status]}</span><span>{meeting.duration}</span></div>
-    <button className="row-action" aria-label={`Open ${meeting.title}`}>→</button>
+    <button className="row-action" aria-label={`Open ${meeting.title}`} onClick={onOpen}>→</button>
   </article>;
 }

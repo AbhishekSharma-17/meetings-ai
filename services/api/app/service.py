@@ -18,7 +18,6 @@ from meetings_contracts import (
 
 from .adapters import OpenAIAdapter, OpenAICompatibleAdapter, VexaNativeAdapter
 from .adapters.base import ProviderAdapter
-from .repository import InMemoryProviderRepository
 
 
 class ProfileValidationError(ValueError):
@@ -26,7 +25,7 @@ class ProfileValidationError(ValueError):
 
 
 class ProviderProfileService:
-    def __init__(self, repository: InMemoryProviderRepository) -> None:
+    def __init__(self, repository: object) -> None:
         self.repository = repository
         self.adapters: dict[ProviderType, ProviderAdapter] = {
             ProviderType.OPENAI: OpenAIAdapter(),
