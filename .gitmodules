@@ -1,0 +1,3 @@
+[submodule "vendor/vexa"]
+	path = vendor/vexa
+	url = git@github.com:Genaiprotos/vexa.git

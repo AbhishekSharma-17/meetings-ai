@@ -1,0 +1,66 @@
+name: meetings-ai
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    environment:
+      APP_ENV: development
+      WEB_ORIGIN: http://localhost:3020
+    ports:
+      - "127.0.0.1:8320:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks:
+      - default
+      - vexa
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8320
+    ports:
+      - "127.0.0.1:3020:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    profiles: ["foundation"]
+    environment:
+      POSTGRES_DB: meetings_ai
+      POSTGRES_USER: meetings_ai
+      POSTGRES_PASSWORD: meetings_ai_local_only
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - meetings-ai-postgres:/var/lib/postgresql/data
+
+  minio:
+    image: minio/minio:latest
+    profiles: ["foundation"]
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: meetings-ai-local
+      MINIO_ROOT_PASSWORD: meetings-ai-local-secret
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - meetings-ai-minio:/data
+
+volumes:
+  meetings-ai-postgres:
+  meetings-ai-minio:
+
+networks:
+  vexa:
+    name: vexa-lite-net
+    external: true

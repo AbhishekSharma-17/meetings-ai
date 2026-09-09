@@ -1,0 +1,46 @@
+"""Shared API contracts for Meetings AI."""
+
+from .models import DefaultSelection, ProviderProfile
+from .schemas import (
+    AdapterTestResult,
+    Capability,
+    CapabilityConfig,
+    DefaultSelectionRequest,
+    DefaultSelectionResponse,
+    EmbeddingRequest,
+    EmbeddingResult,
+    ExecutionLocation,
+    FallbackPolicy,
+    ProfileCreate,
+    ProfilePublic,
+    ProfileUpdate,
+    ProviderType,
+    TextGenerationRequest,
+    TextGenerationResult,
+    TranscriptionRequest,
+    TranscriptionResult,
+    TranscriptionSegment,
+)
+
+__all__ = [
+    "AdapterTestResult",
+    "Capability",
+    "CapabilityConfig",
+    "DefaultSelection",
+    "DefaultSelectionRequest",
+    "DefaultSelectionResponse",
+    "EmbeddingRequest",
+    "EmbeddingResult",
+    "ExecutionLocation",
+    "FallbackPolicy",
+    "ProfileCreate",
+    "ProfilePublic",
+    "ProfileUpdate",
+    "ProviderProfile",
+    "ProviderType",
+    "TextGenerationRequest",
+    "TextGenerationResult",
+    "TranscriptionRequest",
+    "TranscriptionResult",
+    "TranscriptionSegment",
+]
