@@ -1,5 +1,16 @@
 import type { NextConfig } from "next";
 
-const nextConfig: NextConfig = {};
+const apiBaseUrl = process.env.API_INTERNAL_BASE_URL ?? "http://localhost:8320";
+
+const nextConfig: NextConfig = {
+  async rewrites() {
+    return [
+      {
+        source: "/v1/:path*",
+        destination: `${apiBaseUrl}/v1/:path*`,
+      },
+    ];
+  },
+};
 
 export default nextConfig;

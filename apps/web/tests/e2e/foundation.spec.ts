@@ -17,6 +17,17 @@ async function capture(page: Page, name: string) {
   if (walkthroughDelay > 0) await page.waitForTimeout(walkthroughDelay);
 }
 
+test("same-origin API proxy reaches the product API", async ({ page }) => {
+  await page.goto("/");
+  const response = await page.evaluate(async () => {
+    const result = await fetch("/v1/meetings");
+    return { status: result.status, body: await result.json() };
+  });
+
+  expect(response.status).toBe(200);
+  expect(response.body).toMatchObject({ items: expect.any(Array), count: expect.any(Number) });
+});
+
 test("foundation UI walkthrough", async ({ page }) => {
   const profileName = "Foundation MOM test";
   const meeting = {

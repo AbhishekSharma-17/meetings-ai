@@ -64,7 +64,9 @@ type BackendTranscriptSegment = {
   completed?: boolean | null;
 };
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8320";
+// Same-origin by default so browser-port forwarding and deployed custom domains
+// work without exposing the private API container address to the browser.
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
 const initialProfiles: ProviderProfile[] = [
   { id: "new-transcription-openai", kind: "transcription", label: "OpenAI transcription", provider: "OpenAI", executionLocation: "cloud", endpoint: "https://api.openai.com/v1", model: "gpt-4o-transcribe", capabilities: ["transcription"], connectionState: "not_configured", isDefault: false, apiKeyConfigured: false },
