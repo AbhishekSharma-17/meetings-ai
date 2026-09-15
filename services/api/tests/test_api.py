@@ -1,5 +1,18 @@
-from fastapi.testclient import TestClient
+import asyncio
+import json
 
+import httpx
+from fastapi.testclient import TestClient
+from meetings_contracts import (
+    Capability,
+    ExecutionLocation,
+    ProviderProfile,
+    ProviderType,
+    TextGenerationRequest,
+)
+
+from app.adapters.openai import OpenAIAdapter
+from app.adapters.openai_compatible import OpenAICompatibleAdapter
 from app.main import create_app
 
 
@@ -176,3 +189,76 @@ def test_default_rejects_wrong_location_and_missing_capability() -> None:
     )
     assert missing_capability.status_code == 422
     assert "does not support transcription" in missing_capability.json()["detail"]
+
+
+def test_openai_text_runtime_uses_responses_structured_output() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "output": [{"content": [{"type": "output_text", "text": '{"title":"MOM"}'}]}],
+                "usage": {"input_tokens": 10, "output_tokens": 4},
+            },
+        )
+
+    async def scenario() -> None:
+        profile = ProviderProfile(
+            name="OpenAI",
+            provider_type=ProviderType.OPENAI,
+            execution_location=ExecutionLocation.CLOUD,
+            base_url=None,
+            models={Capability.TEXT_GENERATION: "economy-model"},
+            api_key="secret-key",
+        )
+        result = await OpenAIAdapter(transport=httpx.MockTransport(handler)).generate_text(
+            profile,
+            TextGenerationRequest(
+                prompt="Create MOM",
+                response_schema={"type": "object", "properties": {"title": {"type": "string"}}},
+            ),
+        )
+        assert result.structured_output == {"title": "MOM"}
+        assert result.input_tokens == 10
+
+    asyncio.run(scenario())
+    assert requests[0].url.path == "/v1/responses"
+    assert requests[0].headers["authorization"] == "Bearer secret-key"
+    payload = json.loads(requests[0].content)
+    assert payload["store"] is False
+    assert payload["text"]["format"]["type"] == "json_schema"
+
+
+def test_compatible_text_runtime_uses_chat_completions() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": '{"title":"Compatible MOM"}'}}],
+                "usage": {"prompt_tokens": 8, "completion_tokens": 3},
+            },
+        )
+
+    async def scenario() -> None:
+        profile = ProviderProfile(
+            name="Compatible",
+            provider_type=ProviderType.OPENAI_COMPATIBLE,
+            execution_location=ExecutionLocation.CLOUD,
+            base_url="https://provider.example/v1",
+            models={Capability.TEXT_GENERATION: "compatible-model"},
+            api_key="compatible-secret",
+        )
+        result = await OpenAICompatibleAdapter(
+            transport=httpx.MockTransport(handler)
+        ).generate_text(profile, TextGenerationRequest(prompt="Create MOM"))
+        assert result.structured_output == {"title": "Compatible MOM"}
+        assert result.output_tokens == 3
+
+    asyncio.run(scenario())
+    assert requests[0].url.path == "/v1/chat/completions"
+    assert requests[0].headers["authorization"] == "Bearer compatible-secret"

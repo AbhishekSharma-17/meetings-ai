@@ -62,7 +62,7 @@ def test_repository_persists_meetings_and_encrypts_credentials(tmp_path) -> None
         assert row is not None
         assert row.credential_ciphertext != secret
         assert secret not in row.credential_ciphertext
-        assert session.get(SchemaVersionRow, 2) is not None
+        assert session.get(SchemaVersionRow, Database.SCHEMA_VERSION) is not None
     first_database.engine.dispose()
 
     # A new repository instance using the same database and server key can read both.

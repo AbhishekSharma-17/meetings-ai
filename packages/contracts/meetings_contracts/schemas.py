@@ -1,5 +1,6 @@
 """Pydantic request/response contracts shared by the API and future workers."""
 
+import re
 from datetime import datetime
 from enum import Enum
 from typing import Annotated, Any, Literal
@@ -270,3 +271,76 @@ class MeetingTranscriptResponse(BaseModel):
     status: MeetingStatus
     segments: list[MeetingTranscriptSegment]
     segment_count: int
+
+
+class MinutesStatus(str, Enum):
+    DRAFT = "draft"
+    APPROVED = "approved"
+    SENT = "sent"
+
+
+class ActionItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    description: Annotated[str, Field(min_length=1, max_length=1000)]
+    owner: Annotated[str | None, Field(default=None, max_length=200)]
+    due_date: Annotated[str | None, Field(default=None, max_length=100)]
+
+
+class MeetingMinutesDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: Annotated[str, Field(min_length=1, max_length=300)]
+    executive_summary: Annotated[str, Field(min_length=1, max_length=10000)]
+    discussion_points: list[Annotated[str, Field(min_length=1, max_length=2000)]] = Field(
+        default_factory=list, max_length=100
+    )
+    decisions: list[Annotated[str, Field(min_length=1, max_length=2000)]] = Field(
+        default_factory=list, max_length=100
+    )
+    action_items: list[ActionItem] = Field(default_factory=list, max_length=100)
+    open_questions: list[Annotated[str, Field(min_length=1, max_length=2000)]] = Field(
+        default_factory=list, max_length=100
+    )
+
+
+class MeetingMinutesPublic(MeetingMinutesDraft):
+    meeting_id: UUID
+    status: MinutesStatus
+    provider_profile_id: UUID | None
+    provider: str | None
+    model: str | None
+    created_at: datetime
+    updated_at: datetime
+    approved_at: datetime | None
+    sent_at: datetime | None
+    last_error: str | None
+
+
+class MinutesEmailRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    recipients: Annotated[list[str], Field(min_length=1, max_length=50)]
+    include_transcript: bool = False
+
+    @model_validator(mode="after")
+    def validate_recipients(self) -> "MinutesEmailRequest":
+        normalized: list[str] = []
+        for recipient in self.recipients:
+            value = recipient.strip().lower()
+            if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value):
+                raise ValueError(f"invalid recipient email address: {recipient}")
+            if value not in normalized:
+                normalized.append(value)
+        self.recipients = normalized
+        return self
+
+
+class EmailDeliveryPublic(BaseModel):
+    id: UUID
+    meeting_id: UUID
+    recipients: list[str]
+    status: Literal["sent", "failed"]
+    provider_message_id: str | None
+    error: str | None
+    created_at: datetime

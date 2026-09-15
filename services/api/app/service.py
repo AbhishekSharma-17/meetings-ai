@@ -14,13 +14,20 @@ from meetings_contracts import (
     ProfileUpdate,
     ProviderProfile,
     ProviderType,
+    TextGenerationRequest,
+    TextGenerationResult,
 )
 
 from .adapters import OpenAIAdapter, OpenAICompatibleAdapter, VexaNativeAdapter
 from .adapters.base import ProviderAdapter
+from .adapters.base import ProviderExecutionError
 
 
 class ProfileValidationError(ValueError):
+    pass
+
+
+class ProviderSelectionError(RuntimeError):
     pass
 
 
@@ -106,6 +113,28 @@ class ProviderProfileService:
     async def test(self, profile_id: UUID) -> AdapterTestResult:
         profile = self.repository.get_profile(profile_id)
         return await self.adapters[profile.provider_type].test_configuration(profile)
+
+    async def generate_text(
+        self, request: TextGenerationRequest
+    ) -> tuple[ProviderProfile, TextGenerationResult]:
+        selection = self.repository.get_default(Capability.TEXT_GENERATION)
+        if selection is None or not selection.ordered_profile_ids():
+            raise ProviderSelectionError("no default MOM text-generation provider is selected")
+
+        failures: list[str] = []
+        for profile_id in selection.ordered_profile_ids():
+            profile = self.repository.get_profile(profile_id)
+            if not profile.supports(Capability.TEXT_GENERATION):
+                failures.append(f"{profile.name}: text generation is not configured")
+                continue
+            try:
+                result = await self.adapters[profile.provider_type].generate_text(
+                    profile, request
+                )
+                return profile, result
+            except (ProviderExecutionError, RuntimeError) as exc:
+                failures.append(f"{profile.name}: {exc}")
+        raise ProviderExecutionError("; ".join(failures) or "all selected providers failed")
 
     def select_default(
         self, capability: Capability, request: DefaultSelectionRequest

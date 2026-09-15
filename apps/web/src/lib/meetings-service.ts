@@ -1,4 +1,4 @@
-import type { Capability, ConnectionState, CreateMeetingInput, Meeting, MeetingDetail, MeetingStatus, ProfileKind, ProviderProfile, TranscriptSegment } from "./types";
+import type { Capability, ConnectionState, CreateMeetingInput, EmailDelivery, Meeting, MeetingDetail, MeetingMinutes, MeetingStatus, MinutesDraft, ProfileKind, ProviderProfile, TranscriptSegment } from "./types";
 
 export interface MeetingsService {
   listMeetings(): Promise<Meeting[]>;
@@ -8,6 +8,11 @@ export interface MeetingsService {
   stopMeeting(id: string): Promise<MeetingDetail>;
   refreshMeeting(id: string): Promise<MeetingDetail>;
   getTranscript(id: string): Promise<TranscriptSegment[]>;
+  getMinutes(id: string): Promise<MeetingMinutes | null>;
+  generateMinutes(id: string): Promise<MeetingMinutes>;
+  saveMinutes(id: string, draft: MinutesDraft): Promise<MeetingMinutes>;
+  approveMinutes(id: string): Promise<MeetingMinutes>;
+  sendMinutes(id: string, recipients: string[], includeTranscript: boolean): Promise<EmailDelivery>;
   listProviderProfiles(): Promise<ProviderProfile[]>;
   saveProviderProfile(profile: ProviderProfile, apiKey?: string): Promise<ProviderProfile>;
   testProviderConnection(profile: ProviderProfile, apiKey?: string): Promise<ProviderProfile>;
@@ -247,6 +252,37 @@ class HttpMeetingsService implements MeetingsService {
     const response = await api<BackendTranscriptSegment[] | { segments?: BackendTranscriptSegment[] }>(`/v1/meetings/${id}/transcript`);
     const segments = Array.isArray(response) ? response : response.segments ?? [];
     return segments.map(toTranscriptSegment);
+  }
+
+  async getMinutes(id: string): Promise<MeetingMinutes | null> {
+    try {
+      return await api<MeetingMinutes>(`/v1/meetings/${id}/minutes`);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) return null;
+      throw error;
+    }
+  }
+
+  async generateMinutes(id: string): Promise<MeetingMinutes> {
+    return api<MeetingMinutes>(`/v1/meetings/${id}/minutes/generate`, { method: "POST" });
+  }
+
+  async saveMinutes(id: string, draft: MinutesDraft): Promise<MeetingMinutes> {
+    return api<MeetingMinutes>(`/v1/meetings/${id}/minutes`, {
+      method: "PUT",
+      body: JSON.stringify(draft),
+    });
+  }
+
+  async approveMinutes(id: string): Promise<MeetingMinutes> {
+    return api<MeetingMinutes>(`/v1/meetings/${id}/minutes/approve`, { method: "POST" });
+  }
+
+  async sendMinutes(id: string, recipients: string[], includeTranscript: boolean): Promise<EmailDelivery> {
+    return api<EmailDelivery>(`/v1/meetings/${id}/minutes/send`, {
+      method: "POST",
+      body: JSON.stringify({ recipients, include_transcript: includeTranscript }),
+    });
   }
 
   async listProviderProfiles(): Promise<ProviderProfile[]> {

@@ -13,21 +13,28 @@ from meetings_contracts import (
     Capability,
     DefaultSelectionRequest,
     DefaultSelectionResponse,
+    EmailDeliveryPublic,
     MeetingCreate,
     MeetingListResponse,
+    MeetingMinutesDraft,
+    MeetingMinutesPublic,
     MeetingPublic,
     MeetingTranscriptResponse,
+    MinutesEmailRequest,
     ProfileCreate,
     ProfilePublic,
     ProfileUpdate,
 )
 
 from .adapters.vexa import VexaAPIError, VexaCaptureAdapter
+from .adapters.resend import EmailDeliveryError, ResendAdapter
+from .adapters.base import ProviderExecutionError
 from .database import Database
 from .meeting_service import MeetingConflictError, MeetingService, MeetingValidationError
-from .repository import MeetingNotFoundError, ProfileNotFoundError
+from .minutes_service import MinutesConflictError, MinutesGenerationError, MinutesService
+from .repository import MeetingNotFoundError, MinutesNotFoundError, ProfileNotFoundError
 from .security import CredentialCipher
-from .service import ProfileValidationError, ProviderProfileService
+from .service import ProfileValidationError, ProviderProfileService, ProviderSelectionError
 from .sqlalchemy_repository import SQLAlchemyRepository
 
 
@@ -47,6 +54,7 @@ def create_app(
     database_url: str | None = None,
     credential_key: str | None = None,
     vexa_adapter: VexaCaptureAdapter | None = None,
+    resend_adapter: ResendAdapter | None = None,
 ) -> FastAPI:
     database = Database(
         database_url
@@ -64,6 +72,13 @@ def create_app(
         os.getenv("VEXA_API_KEY") or os.getenv("VEXA_ADMIN_TOKEN") or None,
     )
     meeting_service = MeetingService(repository, vexa)
+    resend_from = os.getenv("RESEND_FROM_EMAIL") or "onboarding@resend.dev"
+    resend_name = os.getenv("RESEND_FROM_NAME") or "Meetings AI"
+    resend = resend_adapter or ResendAdapter(
+        os.getenv("RESEND_API_KEY") or None,
+        resend_from if "<" in resend_from else f"{resend_name} <{resend_from}>",
+    )
+    minutes_service = MinutesService(repository, service, resend)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -85,6 +100,7 @@ def create_app(
     app.state.repository = repository
     app.state.profile_service = service
     app.state.meeting_service = meeting_service
+    app.state.minutes_service = minutes_service
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(
@@ -101,8 +117,14 @@ def create_app(
             return HTTPException(status_code=404, detail="provider profile not found")
         if isinstance(exc, MeetingNotFoundError):
             return HTTPException(status_code=404, detail="meeting not found")
-        if isinstance(exc, MeetingConflictError):
+        if isinstance(exc, MinutesNotFoundError):
+            return HTTPException(status_code=404, detail="MOM has not been generated")
+        if isinstance(exc, (MeetingConflictError, MinutesConflictError)):
             return HTTPException(status_code=409, detail=str(exc))
+        if isinstance(exc, (MinutesGenerationError, ProviderSelectionError, ProviderExecutionError)):
+            return HTTPException(status_code=502, detail=str(exc))
+        if isinstance(exc, EmailDeliveryError):
+            return HTTPException(status_code=502, detail=str(exc))
         if isinstance(exc, VexaAPIError):
             safe_upstream_codes = {401, 403, 409, 422, 429, 502, 503}
             code = exc.status_code if exc.status_code in safe_upstream_codes else 502
@@ -226,6 +248,74 @@ def create_app(
         try:
             return await meeting_service.transcript(meeting_id)
         except MEETING_EXCEPTIONS as exc:
+            raise api_error(exc) from exc
+
+    MINUTES_EXCEPTIONS = (
+        MeetingNotFoundError,
+        MinutesNotFoundError,
+        MinutesConflictError,
+        MinutesGenerationError,
+        ProviderSelectionError,
+        ProviderExecutionError,
+        EmailDeliveryError,
+        VexaAPIError,
+    )
+
+    @app.get(
+        "/v1/meetings/{meeting_id}/minutes", response_model=MeetingMinutesPublic
+    )
+    def get_meeting_minutes(meeting_id: UUID) -> MeetingMinutesPublic:
+        try:
+            return minutes_service.to_public(minutes_service.get(meeting_id))
+        except MINUTES_EXCEPTIONS as exc:
+            raise api_error(exc) from exc
+
+    @app.post(
+        "/v1/meetings/{meeting_id}/minutes/generate",
+        response_model=MeetingMinutesPublic,
+    )
+    async def generate_meeting_minutes(meeting_id: UUID) -> MeetingMinutesPublic:
+        try:
+            meeting = repository.get_meeting(meeting_id)
+            if meeting.vexa_meeting_id is not None:
+                # Pull the final upstream snapshot before freezing the MOM input.
+                await meeting_service.transcript(meeting_id)
+            return minutes_service.to_public(await minutes_service.generate(meeting_id))
+        except MINUTES_EXCEPTIONS as exc:
+            raise api_error(exc) from exc
+
+    @app.put(
+        "/v1/meetings/{meeting_id}/minutes", response_model=MeetingMinutesPublic
+    )
+    def update_meeting_minutes(
+        meeting_id: UUID, payload: MeetingMinutesDraft
+    ) -> MeetingMinutesPublic:
+        try:
+            return minutes_service.to_public(minutes_service.update(meeting_id, payload))
+        except MINUTES_EXCEPTIONS as exc:
+            raise api_error(exc) from exc
+
+    @app.post(
+        "/v1/meetings/{meeting_id}/minutes/approve",
+        response_model=MeetingMinutesPublic,
+    )
+    def approve_meeting_minutes(meeting_id: UUID) -> MeetingMinutesPublic:
+        try:
+            return minutes_service.to_public(minutes_service.approve(meeting_id))
+        except MINUTES_EXCEPTIONS as exc:
+            raise api_error(exc) from exc
+
+    @app.post(
+        "/v1/meetings/{meeting_id}/minutes/send",
+        response_model=EmailDeliveryPublic,
+    )
+    async def send_meeting_minutes(
+        meeting_id: UUID, payload: MinutesEmailRequest
+    ) -> EmailDeliveryPublic:
+        try:
+            delivery = await minutes_service.send(meeting_id, payload)
+            return minutes_service.delivery_to_public(delivery)
+        except MINUTES_EXCEPTIONS as exc:
             raise api_error(exc) from exc
 
     return app

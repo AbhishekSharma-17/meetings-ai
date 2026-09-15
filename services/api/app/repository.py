@@ -14,6 +14,10 @@ class MeetingNotFoundError(KeyError):
     pass
 
 
+class MinutesNotFoundError(KeyError):
+    pass
+
+
 class InMemoryProviderRepository:
     def __init__(self) -> None:
         self._profiles: dict[UUID, ProviderProfile] = {}

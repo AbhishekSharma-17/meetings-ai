@@ -10,14 +10,18 @@ The current local capture slice establishes:
 - a FastAPI product API with PostgreSQL persistence;
 - product meeting creation, Vexa bot dispatch, lifecycle refresh and idempotent stop;
 - exact-meeting transcript reads with a durable cached fallback;
+- structured MOM generation through the selected text-generation provider;
+- persisted human review, explicit approval, and sent-version locking;
+- manual-recipient recap delivery through Resend, with optional transcript inclusion;
 - provider profiles for transcription, text generation and embeddings;
 - Vexa-native, OpenAI and OpenAI-compatible provider boundaries;
 - write-only credential handling and capability validation;
 - a pinned local Vexa `v0.12.27` checkout for the ARM64 Lite witness path.
 
-The Vexa capture path is active locally. OpenAI MOM generation and Resend delivery
-remain separate milestones and require newly rotated credentials in the ignored
-local secret file.
+The Vexa capture and OpenAI MOM paths are active locally. Resend delivery is wired,
+but a custom sender must be verified in Resend before using the product domain.
+All provider credentials belong in the ignored local secret file and must be rotated
+if they have appeared in a chat or task transcript.
 
 See the [local capture MVP verification record](docs/status/2026-09-09-capture-mvp.md)
 for the exact checks already passed and the next incomplete slices.
@@ -53,10 +57,10 @@ Copy `.env.example` to `.env.local` and insert newly rotated credentials there. 
 ```text
 apps/web/                 Next.js product UI
 services/api/             FastAPI product API
-services/worker/          durable meeting workflows (next slice)
+services/worker/          durable/background workflows (production slice)
 services/stt-bridge/      provider-normalized audio boundary (next slice)
 packages/contracts/       application-owned provider and meeting schemas
-packages/email-templates/ recap templates (email slice)
+packages/email-templates/ reusable branded templates (later slice)
 integrations/             Vexa, provider and email adapters
 vendor/vexa/              pinned organization fork/submodule
 ```

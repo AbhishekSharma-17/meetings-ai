@@ -1,6 +1,6 @@
 # Local capture MVP verification
 
-Date: 2026-09-09
+Last updated: 2026-09-15
 
 ## Delivered
 
@@ -13,26 +13,37 @@ Date: 2026-09-09
   states, with transcript timestamps and speaker labels when Vexa supplies them.
 - Provider-agnostic settings for Vexa-native, OpenAI and OpenAI-compatible routes.
   Credentials are encrypted at rest and remain write-only through the public API.
+- Durable structured MOM drafts with executive summary, discussion points,
+  decisions, action items, owners, due dates, and open questions.
+- Human editing and explicit approval before any recap delivery.
+- Resend delivery with manual recipients, optional transcript inclusion, persisted
+  delivery outcome, and locking of the sent MOM version.
 
 ## Verified locally
 
-- API unit/integration suite: 22 tests passed, including the live PostgreSQL witness.
+- API unit/integration suite: 26 tests passed, including MOM generation, approval,
+  email gating, provider HTTP contracts, and the live PostgreSQL witness.
 - PostgreSQL repository witness: passed against the Compose PostgreSQL service.
 - Persistence: the local Vexa transcription profile and its default selection
   survived an API container restart.
 - Web: TypeScript, lint and production build passed.
-- Browser walkthrough: two Playwright scenarios passed for create/join lifecycle
-  and durable join-failure recovery, with Vexa network calls safely mocked so no
-  external bot was launched.
+- Browser walkthrough: four Playwright scenarios passed for same-origin routing,
+  create/join lifecycle, durable join-failure recovery, and the complete MOM
+  review/approve/send workflow. Provider and Vexa mutations are mocked and isolated.
 - Vexa preflight: the running local gateway accepted the configured key with
   `bot`, `tx` and `browser` scopes and reported a concurrency limit of three.
+- Live Google Meet witness: the product dispatched the bot, the host admitted it,
+  and attributed transcript segments appeared in the Meetings AI UI.
+- Real OpenAI MOM witness: a synthetic transcript produced a schema-validated draft
+  through the configured economy text model. The synthetic database rows were removed.
 
 ## Not yet claimed
 
-- A live Google Meet, Zoom or Teams witness still requires a real meeting URL and
-  a host available to admit the assistant.
-- MOM/action extraction, approval, Resend delivery and organizational knowledge
-  compilation are later slices and are not represented as complete in the UI.
+- Zoom and Teams still require live platform witnesses.
+- Resend's request path is implemented and mocked end-to-end; live delivery from
+  `genaiprotos.com` remains blocked until the sending domain is verified.
+- Automatic recipient discovery, organization policy, authentication, background
+  jobs, knowledge compilation, search, and chat over meetings remain later slices.
 - The current schema bootstrap is suitable for the local MVP; production will
   move to versioned Alembic migrations and durable workflow workers.
 

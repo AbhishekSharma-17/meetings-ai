@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { meetingsService } from "@/lib/meetings-service";
 import type { MeetingDetail, TranscriptSegment } from "@/lib/types";
+import { MinutesPanel } from "./minutes-panel";
 
 const pollableStatuses = new Set<MeetingDetail["status"]>(["created", "joining", "waiting_room", "live", "stopping", "processing"]);
 const lifecycleCopy: Record<MeetingDetail["status"], { label: string; detail: string }> = {
@@ -89,6 +90,7 @@ export function MeetingDetailScreen({ meetingId, onBack, onMeetingChange }: { me
     </div>
 
     <section className="transcript-panel" aria-labelledby="transcript-title"><div className="section-heading"><div><h2 id="transcript-title">Live transcript</h2><p>Speaker attribution and timestamps come from the capture pipeline.</p></div><span className="polling-indicator">{pollableStatuses.has(meeting.status) ? "Updates every 5 seconds" : "Capture complete"}</span></div>{segments.length ? <ol className="transcript-list">{segments.map((segment) => <li key={segment.id}><div className="segment-meta"><b>{segment.speaker}</b><span>{formatTimestamp(segment.startedAt)}{segment.isFinal ? "" : " · provisional"}</span></div><p>{segment.text}</p></li>)}</ol> : <div className="empty-state"><b>No transcript segments yet.</b><p>{meeting.status === "live" ? "The assistant is live; the first finalized segment will appear here when the API returns it." : "Transcript segments will appear after the capture adapter produces them."}</p></div>}</section>
+    <MinutesPanel meeting={meeting} transcriptCount={segments.filter((segment) => segment.isFinal).length} />
   </section>;
 }
 

@@ -2,26 +2,32 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from meetings_contracts import (
+    ActionItem,
     Capability,
     DefaultSelection,
+    EmailDelivery,
     ExecutionLocation,
     FallbackPolicy,
     Meeting,
+    MeetingMinutes,
     MeetingPlatform,
     MeetingStatus,
     MeetingTranscriptSegment,
+    MinutesStatus,
     ProviderProfile,
     ProviderType,
 )
 
 from .database import (
     Database,
+    EmailDeliveryRow,
     MeetingRow,
+    MeetingMinutesRow,
     ProviderDefaultRow,
     ProviderProfileRow,
     TranscriptSegmentRow,
 )
-from .repository import MeetingNotFoundError, ProfileNotFoundError
+from .repository import MeetingNotFoundError, MinutesNotFoundError, ProfileNotFoundError
 from .security import CredentialCipher
 
 
@@ -166,6 +172,53 @@ class SQLAlchemyRepository:
                 for row in rows
             ]
 
+    def get_minutes(self, meeting_id: UUID) -> MeetingMinutes:
+        with self.database.session_factory() as session:
+            row = session.get(MeetingMinutesRow, str(meeting_id))
+            if row is None:
+                raise MinutesNotFoundError(meeting_id)
+            return self._minutes_from_row(row)
+
+    def save_minutes(self, minutes: MeetingMinutes) -> MeetingMinutes:
+        with self.database.session_factory.begin() as session:
+            row = session.get(MeetingMinutesRow, str(minutes.meeting_id))
+            if row is None:
+                row = MeetingMinutesRow(meeting_id=str(minutes.meeting_id))
+                session.add(row)
+            row.status = minutes.status.value
+            row.title = minutes.title
+            row.executive_summary = minutes.executive_summary
+            row.discussion_points = minutes.discussion_points
+            row.decisions = minutes.decisions
+            row.action_items = [item.model_dump() for item in minutes.action_items]
+            row.open_questions = minutes.open_questions
+            row.provider_profile_id = (
+                str(minutes.provider_profile_id) if minutes.provider_profile_id else None
+            )
+            row.provider = minutes.provider
+            row.model = minutes.model
+            row.last_error = minutes.last_error
+            row.created_at = minutes.created_at
+            row.updated_at = minutes.updated_at
+            row.approved_at = minutes.approved_at
+            row.sent_at = minutes.sent_at
+        return minutes
+
+    def save_email_delivery(self, delivery: EmailDelivery) -> EmailDelivery:
+        with self.database.session_factory.begin() as session:
+            session.add(
+                EmailDeliveryRow(
+                    id=str(delivery.id),
+                    meeting_id=str(delivery.meeting_id),
+                    recipients=delivery.recipients,
+                    status=delivery.status,
+                    provider_message_id=delivery.provider_message_id,
+                    error=delivery.error,
+                    created_at=delivery.created_at,
+                )
+            )
+        return delivery
+
     def save_meeting(self, meeting: Meeting) -> Meeting:
         with self.database.session_factory.begin() as session:
             row = session.get(MeetingRow, str(meeting.id))
@@ -210,4 +263,25 @@ class SQLAlchemyRepository:
             joined_at=_utc(row.joined_at),
             stopped_at=_utc(row.stopped_at),
             last_refreshed_at=_utc(row.last_refreshed_at),
+        )
+
+    @staticmethod
+    def _minutes_from_row(row: MeetingMinutesRow) -> MeetingMinutes:
+        return MeetingMinutes(
+            meeting_id=UUID(row.meeting_id),
+            title=row.title,
+            executive_summary=row.executive_summary,
+            discussion_points=list(row.discussion_points or []),
+            decisions=list(row.decisions or []),
+            action_items=[ActionItem.model_validate(item) for item in row.action_items or []],
+            open_questions=list(row.open_questions or []),
+            status=MinutesStatus(row.status),
+            provider_profile_id=(UUID(row.provider_profile_id) if row.provider_profile_id else None),
+            provider=row.provider,
+            model=row.model,
+            created_at=_utc(row.created_at),
+            updated_at=_utc(row.updated_at),
+            approved_at=_utc(row.approved_at),
+            sent_at=_utc(row.sent_at),
+            last_error=row.last_error,
         )

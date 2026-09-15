@@ -44,3 +44,7 @@ class ProviderAdapter(
 
 class RuntimeAdapterNotImplementedError(NotImplementedError):
     """Raised when an MVP adapter is invoked for inference."""
+
+
+class ProviderExecutionError(RuntimeError):
+    """Safe provider runtime failure that never includes credentials."""

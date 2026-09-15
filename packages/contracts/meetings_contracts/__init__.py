@@ -1,7 +1,8 @@
 """Shared API contracts for Meetings AI."""
 
-from .models import DefaultSelection, Meeting, ProviderProfile
+from .models import DefaultSelection, EmailDelivery, Meeting, MeetingMinutes, ProviderProfile
 from .schemas import (
+    ActionItem,
     AdapterTestResult,
     Capability,
     CapabilityConfig,
@@ -9,15 +10,20 @@ from .schemas import (
     DefaultSelectionResponse,
     EmbeddingRequest,
     EmbeddingResult,
+    EmailDeliveryPublic,
     ExecutionLocation,
     FallbackPolicy,
     MeetingCreate,
     MeetingListResponse,
+    MeetingMinutesDraft,
+    MeetingMinutesPublic,
     MeetingPlatform,
     MeetingPublic,
     MeetingStatus,
     MeetingTranscriptResponse,
     MeetingTranscriptSegment,
+    MinutesEmailRequest,
+    MinutesStatus,
     ProfileCreate,
     ProfilePublic,
     ProfileUpdate,
@@ -30,6 +36,7 @@ from .schemas import (
 )
 
 __all__ = [
+    "ActionItem",
     "AdapterTestResult",
     "Capability",
     "CapabilityConfig",
@@ -38,16 +45,23 @@ __all__ = [
     "DefaultSelectionResponse",
     "EmbeddingRequest",
     "EmbeddingResult",
+    "EmailDelivery",
+    "EmailDeliveryPublic",
     "ExecutionLocation",
     "FallbackPolicy",
     "Meeting",
     "MeetingCreate",
     "MeetingListResponse",
+    "MeetingMinutes",
+    "MeetingMinutesDraft",
+    "MeetingMinutesPublic",
     "MeetingPlatform",
     "MeetingPublic",
     "MeetingStatus",
     "MeetingTranscriptResponse",
     "MeetingTranscriptSegment",
+    "MinutesEmailRequest",
+    "MinutesStatus",
     "ProfileCreate",
     "ProfilePublic",
     "ProfileUpdate",

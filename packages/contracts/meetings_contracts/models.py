@@ -9,11 +9,13 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from .schemas import (
+    ActionItem,
     Capability,
     ExecutionLocation,
     FallbackPolicy,
     MeetingPlatform,
     MeetingStatus,
+    MinutesStatus,
     ProviderType,
 )
 
@@ -72,3 +74,34 @@ class Meeting:
     joined_at: datetime | None = None
     stopped_at: datetime | None = None
     last_refreshed_at: datetime | None = None
+
+
+@dataclass(slots=True)
+class MeetingMinutes:
+    meeting_id: UUID
+    title: str
+    executive_summary: str
+    discussion_points: list[str] = field(default_factory=list)
+    decisions: list[str] = field(default_factory=list)
+    action_items: list[ActionItem] = field(default_factory=list)
+    open_questions: list[str] = field(default_factory=list)
+    status: MinutesStatus = MinutesStatus.DRAFT
+    provider_profile_id: UUID | None = None
+    provider: str | None = None
+    model: str | None = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    approved_at: datetime | None = None
+    sent_at: datetime | None = None
+    last_error: str | None = None
+
+
+@dataclass(slots=True)
+class EmailDelivery:
+    meeting_id: UUID
+    recipients: list[str]
+    status: str
+    provider_message_id: str | None = None
+    error: str | None = None
+    id: UUID = field(default_factory=uuid4)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))

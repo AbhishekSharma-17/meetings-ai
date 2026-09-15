@@ -34,8 +34,8 @@ export function Dashboard({ meetings, onNewMeeting, onOpenProviders, onOpenMeeti
 
       <div className="stats" aria-label="Meeting summary">
         <article><span>Meetings captured</span><strong>{meetings.length}</strong><small>{liveCount ? `${liveCount} currently live` : "No live meeting"}</small></article>
-        <article><span>Captures ready</span><strong>{readyCount}</strong><small>MOM generation comes in the next milestone</small></article>
-        <article><span>Follow-ups sent</span><strong>0</strong><small>Resend delivery comes in Milestone 3</small></article>
+        <article><span>Captures ready</span><strong>{readyCount}</strong><small>Open a finished capture to generate its MOM</small></article>
+        <article><span>Follow-up workflow</span><strong>Review</strong><small>Approved recaps can be delivered with Resend</small></article>
       </div>
 
       <div className="section-heading"><div><h2>Recent meetings</h2><p>Everything is a draft until you publish it.</p></div><button className="text-button">View all <span aria-hidden="true">→</span></button></div>
