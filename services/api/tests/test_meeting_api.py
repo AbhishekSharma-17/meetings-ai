@@ -148,6 +148,52 @@ def test_join_failure_is_persisted_as_failed() -> None:
         assert "transcription is not configured" in detail["last_error"]
 
 
+def test_asynchronous_vexa_failure_reason_is_persisted() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/bots":
+            return httpx.Response(
+                201,
+                json={
+                    "id": 51,
+                    "platform": "google_meet",
+                    "native_meeting_id": "abc-defg-hij",
+                    "status": "joining",
+                },
+            )
+        if request.method == "GET" and request.url.path == "/meetings/51":
+            return httpx.Response(
+                200,
+                json={
+                    "id": 51,
+                    "status": "failed",
+                    "failure_stage": "joining",
+                    "data": {
+                        "reason": "browser launch failed\nMissing X server or $DISPLAY"
+                    },
+                },
+            )
+        raise AssertionError(f"unexpected Vexa request: {request.method} {request.url.path}")
+
+    adapter = VexaCaptureAdapter(
+        "http://vexa.test", transport=httpx.MockTransport(handler)
+    )
+    app = create_app(vexa_adapter=adapter, credential_key="test-key")
+    with TestClient(app) as client:
+        created = client.post(
+            "/v1/meetings",
+            json={"meeting_url": "https://meet.google.com/abc-defg-hij"},
+        ).json()
+        joined = client.post(f"/v1/meetings/{created['id']}/join")
+        assert joined.status_code == 200
+
+        refreshed = client.post(f"/v1/meetings/{created['id']}/refresh")
+        assert refreshed.status_code == 200
+        assert refreshed.json()["status"] == "failed"
+        assert refreshed.json()["last_error"] == (
+            "Vexa browser could not start because its local display server was unavailable."
+        )
+
+
 def test_unjoined_meeting_actions_are_conflicts() -> None:
     adapter = VexaCaptureAdapter(
         "http://vexa.test",

@@ -100,6 +100,7 @@ class MeetingService:
             upstream.get("native_meeting_id") or meeting.native_meeting_id
         )
         meeting.status = _status(upstream.get("status"), MeetingStatus.REQUESTED)
+        meeting.last_error = _upstream_failure(upstream, meeting.status)
         now = datetime.now(UTC)
         if meeting.status is MeetingStatus.ACTIVE:
             meeting.joined_at = meeting.joined_at or now
@@ -117,7 +118,7 @@ class MeetingService:
             meeting.joined_at = meeting.joined_at or now
         meeting.last_refreshed_at = now
         meeting.updated_at = now
-        meeting.last_error = None
+        meeting.last_error = _upstream_failure(upstream, meeting.status)
         return self.repository.save_meeting(meeting)
 
     async def stop(self, meeting_id: UUID) -> Meeting:
@@ -193,6 +194,43 @@ def _number(value: object, fallback: float) -> float:
 
 def _status(value: object, fallback: MeetingStatus) -> MeetingStatus:
     return _VEXA_STATUSES.get(str(value), fallback)
+
+
+def _upstream_failure(
+    upstream: dict[str, object], status: MeetingStatus
+) -> str | None:
+    """Keep Vexa's asynchronous failure reason visible on the product record."""
+    if status is not MeetingStatus.FAILED:
+        return None
+
+    data = upstream.get("data")
+    nested = data if isinstance(data, dict) else {}
+    join_evidence = nested.get("join_evidence")
+    evidence = join_evidence if isinstance(join_evidence, dict) else {}
+    candidates = (
+        upstream.get("failure_reason"),
+        upstream.get("error"),
+        upstream.get("detail"),
+        nested.get("reason"),
+        evidence.get("detail"),
+    )
+    for candidate in candidates:
+        if candidate:
+            # Browser failures can contain multi-line Chromium logs. Preserve the
+            # useful diagnosis while keeping the API/UI response bounded.
+            detail = " ".join(str(candidate).split())
+            if "without having a XServer running" in detail or "Missing X server" in detail:
+                return (
+                    "Vexa browser could not start because its local display server "
+                    "was unavailable."
+                )
+            detail = detail[:1000]
+            return f"Vexa capture failed: {detail}"
+
+    stage = upstream.get("failure_stage") or nested.get("failure_stage")
+    if stage:
+        return f"Vexa capture failed during {stage}."
+    return "Vexa capture failed without a diagnostic reason."
 
 
 def _enum_or_current(value: object, enum_type: type, current: object) -> object:
