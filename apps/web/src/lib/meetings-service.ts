@@ -93,6 +93,11 @@ function providerType(label: string): BackendProviderType {
 function toFrontend(profile: BackendProfile, defaults: BackendDefault[]): ProviderProfile {
   const configured = profile.capabilities[0];
   const capability = configured?.capability ?? "text_generation";
+  const connectionConfigured = profile.provider_type === "openai"
+    ? profile.credential_configured
+    : profile.provider_type === "vexa_native"
+      ? Boolean(profile.base_url)
+      : Boolean(profile.base_url) && (profile.execution_location === "local" || profile.credential_configured);
   return {
     id: profile.id,
     kind: kindFor(capability),
@@ -102,7 +107,7 @@ function toFrontend(profile: BackendProfile, defaults: BackendDefault[]): Provid
     endpoint: profile.base_url ?? "",
     model: configured?.model ?? "",
     capabilities: profile.capabilities.map((item) => item.capability),
-    connectionState: "not_configured",
+    connectionState: connectionConfigured ? "configured" : "not_configured",
     isDefault: defaults.some((item) => item.capability === capability && item.ordered_profile_ids[0] === profile.id),
     apiKeyConfigured: profile.credential_configured,
   };
