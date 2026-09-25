@@ -7,16 +7,26 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "lint:design": "bash scripts/lint-design.sh",
     "typecheck": "tsc --noEmit",
+    "test:contrast": "node scripts/contrast.mjs",
+    "test:css-comments": "node scripts/css-comments.mjs",
+    "test:smoke": "node scripts/smoke-routes.mjs",
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@base-ui/react": "^1.8.0",
+    "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "22.15.3",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "lucide-react": "^1.48.0",
     "next": "^16.3.4",
+    "next-themes": "^0.4.6",
+    "postcss": "^8.5.28",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "tailwindcss": "^4.3.3",
     "typescript": "5.8.3"
   },
   "devDependencies": {

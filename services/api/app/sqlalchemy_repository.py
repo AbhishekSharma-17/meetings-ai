@@ -1,18 +1,25 @@
+import json
+import re
+from hashlib import sha256
 from datetime import UTC, datetime
 from uuid import UUID
 
 from meetings_contracts import (
     ActionItem,
+    AttributedQuestion,
     Capability,
     DefaultSelection,
     EmailDelivery,
     ExecutionLocation,
     FallbackPolicy,
     Meeting,
+    MeetingDeliverySettings,
     MeetingMinutes,
     MeetingPlatform,
     MeetingStatus,
     MeetingTranscriptSegment,
+    SpeakerContribution,
+    SpeakerIdentityPublic,
     MinutesStatus,
     ProviderProfile,
     ProviderType,
@@ -22,19 +29,54 @@ from .database import (
     Database,
     EmailDeliveryRow,
     MeetingRow,
+    MeetingTranscriptionRouteRow,
+    MeetingKnowledgeSettingsRow,
+    MeetingKnowledgeBaseRow,
+    KnowledgeBaseRow,
+    LEGACY_ORGANIZATION_ID,
+    MeetingDeliverySettingsRow,
     MeetingMinutesRow,
+    MeetingMinutesEvidenceRow,
+    MeetingSpeakerIdentityRow,
+    PostMeetingJobRow,
     ProviderDefaultRow,
     ProviderProfileRow,
     TranscriptSegmentRow,
+    TranscriptSegmentMetadataRow,
+    TranscriptSpeakerCorrectionRow,
+    TranscriptReviewStateRow,
+    MinutesSourceRow,
 )
 from .repository import MeetingNotFoundError, MinutesNotFoundError, ProfileNotFoundError
 from .security import CredentialCipher
+
+
+class TranscriptSegmentNotFoundError(LookupError):
+    pass
+
+
+class TranscriptReviewConflictError(RuntimeError):
+    pass
+
+
+class SpeakerIdentityConflictError(RuntimeError):
+    pass
 
 
 def _utc(value: datetime | None) -> datetime | None:
     if value is None or value.tzinfo is not None:
         return value
     return value.replace(tzinfo=UTC)
+
+
+def _trusted_speaker(raw: str | None, source: str | None = None) -> str | None:
+    """A technical cluster label is not a person's identity."""
+    value = (raw or "").strip()
+    if not value or source == "provisional-cluster-id":
+        return None
+    if re.fullmatch(r"(?:seg|spk|speaker|cluster)[_ -]?\d+", value, re.IGNORECASE):
+        return None
+    return value
 
 
 class SQLAlchemyRepository:
@@ -71,6 +113,27 @@ class SQLAlchemyRepository:
             row.created_at = profile.created_at
             row.updated_at = profile.updated_at
         return profile
+
+    def delete_profile(self, profile_id: UUID) -> None:
+        """Remove a configuration; preserve historical meeting/model snapshots."""
+        with self.database.session_factory.begin() as session:
+            row = session.get(ProviderProfileRow, str(profile_id))
+            if row is None:
+                raise ProfileNotFoundError(profile_id)
+            for default in session.query(ProviderDefaultRow).all():
+                if default.local_profile_id == str(profile_id):
+                    default.local_profile_id = None
+                if default.cloud_profile_id == str(profile_id):
+                    default.cloud_profile_id = None
+                if not default.local_profile_id and not default.cloud_profile_id:
+                    session.delete(default)
+                elif not default.local_profile_id:
+                    default.policy = FallbackPolicy.CLOUD_ONLY.value
+                elif not default.cloud_profile_id:
+                    default.policy = FallbackPolicy.LOCAL_ONLY.value
+            for base in session.query(KnowledgeBaseRow).filter_by(text_profile_id=str(profile_id)).all():
+                base.text_profile_id = None
+            session.delete(row)
 
     def _profile_from_row(self, row: ProviderProfileRow) -> ProviderProfile:
         return ProviderProfile(
@@ -122,20 +185,104 @@ class SQLAlchemyRepository:
     def list_meetings(self) -> list[Meeting]:
         with self.database.session_factory() as session:
             rows = session.query(MeetingRow).order_by(MeetingRow.created_at.desc()).all()
-            return [self._meeting_from_row(row) for row in rows]
+            settings = {
+                row.meeting_id: row for row in session.query(MeetingKnowledgeSettingsRow)
+                .filter(MeetingKnowledgeSettingsRow.meeting_id.in_([item.id for item in rows])).all()
+            } if rows else {}
+            bases = {
+                row.meeting_id: row for row in session.query(MeetingKnowledgeBaseRow)
+                .filter(MeetingKnowledgeBaseRow.meeting_id.in_([item.id for item in rows])).all()
+            } if rows else {}
+            return [self._meeting_from_row(row, settings.get(row.id), bases.get(row.id)) for row in rows]
 
     def get_meeting(self, meeting_id: UUID) -> Meeting:
         with self.database.session_factory() as session:
             row = session.get(MeetingRow, str(meeting_id))
             if row is None:
                 raise MeetingNotFoundError(meeting_id)
-            return self._meeting_from_row(row)
+            knowledge = session.get(MeetingKnowledgeSettingsRow, str(meeting_id))
+            base = session.get(MeetingKnowledgeBaseRow, str(meeting_id))
+            return self._meeting_from_row(row, knowledge, base)
+
+    def get_delivery_settings(self, meeting_id: UUID) -> MeetingDeliverySettings:
+        self.get_meeting(meeting_id)
+        with self.database.session_factory() as session:
+            row = session.get(MeetingDeliverySettingsRow, str(meeting_id))
+            if row is None:
+                return MeetingDeliverySettings()
+            return MeetingDeliverySettings(
+                internal_recipients=row.internal_recipients,
+                participant_recipients=row.participant_recipients,
+                send_to_participants=row.send_to_participants,
+                include_transcript=row.include_transcript,
+            )
+
+    def save_delivery_settings(
+        self, meeting_id: UUID, settings: MeetingDeliverySettings
+    ) -> MeetingDeliverySettings:
+        self.get_meeting(meeting_id)
+        with self.database.session_factory.begin() as session:
+            row = session.get(MeetingDeliverySettingsRow, str(meeting_id))
+            if row is None:
+                row = MeetingDeliverySettingsRow(meeting_id=str(meeting_id))
+                session.add(row)
+            row.internal_recipients = settings.internal_recipients
+            row.participant_recipients = settings.participant_recipients
+            row.send_to_participants = settings.send_to_participants
+            row.include_transcript = settings.include_transcript
+        return settings
+
+    def get_post_meeting_job(self, meeting_id: UUID) -> PostMeetingJobRow | None:
+        with self.database.session_factory() as session:
+            row = session.get(PostMeetingJobRow, str(meeting_id))
+            if row is None:
+                return None
+            session.expunge(row)
+            return row
+
+    def initialize_post_meeting_job(self, meeting_id: UUID) -> None:
+        with self.database.session_factory.begin() as session:
+            if session.get(PostMeetingJobRow, str(meeting_id)) is None:
+                session.add(PostMeetingJobRow(
+                    meeting_id=str(meeting_id), attempts=0, next_retry_at=None,
+                    last_error=None, completed_at=None,
+                ))
+
+    def save_post_meeting_job(
+        self, meeting_id: UUID, *, attempts: int, next_retry_at: datetime | None,
+        last_error: str | None, completed_at: datetime | None,
+    ) -> None:
+        with self.database.session_factory.begin() as session:
+            row = session.get(PostMeetingJobRow, str(meeting_id))
+            if row is None:
+                row = PostMeetingJobRow(meeting_id=str(meeting_id))
+                session.add(row)
+            row.attempts = attempts
+            row.next_retry_at = next_retry_at
+            row.last_error = last_error
+            row.completed_at = completed_at
 
     def replace_transcript(
         self, meeting_id: UUID, segments: list[MeetingTranscriptSegment]
     ) -> None:
+        normalized = []
+        for position, segment in enumerate(segments):
+            if not segment.segment_id:
+                identity = f"{position}:{segment.start_seconds}:{segment.end_seconds}:{segment.text}"
+                segment = segment.model_copy(update={
+                    "segment_id": f"legacy-{sha256(identity.encode()).hexdigest()[:32]}"
+                })
+            normalized.append(segment)
+        fingerprint = sha256(json.dumps([
+            [item.segment_id, item.start_seconds, item.end_seconds, item.text,
+             item.speaker, item.completed, item.attribution_source]
+            for item in normalized
+        ], ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
         with self.database.session_factory.begin() as session:
             session.query(TranscriptSegmentRow).filter_by(
+                meeting_id=str(meeting_id)
+            ).delete()
+            session.query(TranscriptSegmentMetadataRow).filter_by(
                 meeting_id=str(meeting_id)
             ).delete()
             session.add_all(
@@ -149,8 +296,25 @@ class SQLAlchemyRepository:
                     language=segment.language,
                     completed=segment.completed,
                 )
-                for position, segment in enumerate(segments)
+                for position, segment in enumerate(normalized)
             )
+            session.add_all(
+                TranscriptSegmentMetadataRow(
+                    meeting_id=str(meeting_id), segment_id=segment.segment_id,
+                    position=position, speaker_key=segment.speaker_key,
+                    attribution_source=segment.attribution_source,
+                )
+                for position, segment in enumerate(normalized)
+            )
+            state = session.get(TranscriptReviewStateRow, str(meeting_id))
+            if state is None:
+                session.add(TranscriptReviewStateRow(
+                    meeting_id=str(meeting_id), revision=1, fingerprint=fingerprint,
+                ))
+            elif state.fingerprint != fingerprint:
+                state.revision += 1
+                state.fingerprint = fingerprint
+                self._invalidate_approved_minutes(session, meeting_id)
 
     def get_transcript(self, meeting_id: UUID) -> list[MeetingTranscriptSegment]:
         with self.database.session_factory() as session:
@@ -160,24 +324,156 @@ class SQLAlchemyRepository:
                 .order_by(TranscriptSegmentRow.position)
                 .all()
             )
+            metadata = {
+                row.position: row for row in session.query(TranscriptSegmentMetadataRow)
+                .filter_by(meeting_id=str(meeting_id)).all()
+            }
+            corrections = {
+                row.segment_id: row for row in session.query(TranscriptSpeakerCorrectionRow)
+                .filter_by(meeting_id=str(meeting_id)).all()
+            }
             return [
                 MeetingTranscriptSegment(
+                    segment_id=metadata[row.position].segment_id if row.position in metadata else None,
                     start_seconds=row.start_seconds,
                     end_seconds=row.end_seconds,
                     text=row.text,
-                    speaker=row.speaker,
+                    speaker=(corrections[metadata[row.position].segment_id].display_name
+                             if row.position in metadata and metadata[row.position].segment_id in corrections
+                             else _trusted_speaker(row.speaker, metadata[row.position].attribution_source if row.position in metadata else None)),
+                    raw_speaker=row.speaker,
+                    speaker_key=metadata[row.position].speaker_key if row.position in metadata else None,
+                    attribution_source=metadata[row.position].attribution_source if row.position in metadata else None,
+                    speaker_reviewed=(row.position in metadata and metadata[row.position].segment_id in corrections),
                     language=row.language,
                     completed=row.completed,
                 )
                 for row in rows
             ]
 
+    def correct_speaker(
+        self, meeting_id: UUID, segment_id: str, display_name: str | None,
+        apply_to_raw_label: bool = False,
+    ) -> None:
+        with self.database.session_factory.begin() as session:
+            metadata = session.get(TranscriptSegmentMetadataRow, (str(meeting_id), segment_id))
+            if metadata is None:
+                raise TranscriptSegmentNotFoundError(segment_id)
+            minutes = session.get(MeetingMinutesRow, str(meeting_id))
+            if minutes and minutes.status == MinutesStatus.SENT.value:
+                raise TranscriptReviewConflictError("sent MOM is locked; speaker corrections require a new version")
+            raw = session.query(TranscriptSegmentRow).filter_by(
+                meeting_id=str(meeting_id), position=metadata.position,
+            ).one().speaker
+            targets = [metadata]
+            if apply_to_raw_label and raw:
+                positions = [row.position for row in session.query(TranscriptSegmentRow)
+                             .filter_by(meeting_id=str(meeting_id), speaker=raw).all()]
+                targets = session.query(TranscriptSegmentMetadataRow).filter(
+                    TranscriptSegmentMetadataRow.meeting_id == str(meeting_id),
+                    TranscriptSegmentMetadataRow.position.in_(positions),
+                ).all()
+            changed = False
+            for target in targets:
+                key = (str(meeting_id), target.segment_id)
+                existing = session.get(TranscriptSpeakerCorrectionRow, key)
+                if display_name is None:
+                    if existing:
+                        session.delete(existing)
+                        changed = True
+                elif existing is None:
+                    session.add(TranscriptSpeakerCorrectionRow(
+                        meeting_id=str(meeting_id), segment_id=target.segment_id,
+                        display_name=display_name, reviewed_at=datetime.now(UTC),
+                    ))
+                    changed = True
+                elif existing.display_name != display_name:
+                    existing.display_name = display_name
+                    existing.reviewed_at = datetime.now(UTC)
+                    changed = True
+            if changed:
+                state = session.get(TranscriptReviewStateRow, str(meeting_id))
+                if state is None:
+                    state = TranscriptReviewStateRow(meeting_id=str(meeting_id), revision=0, fingerprint="")
+                    session.add(state)
+                state.revision += 1
+                self._invalidate_approved_minutes(session, meeting_id)
+
+    @staticmethod
+    def _invalidate_approved_minutes(session: object, meeting_id: UUID) -> None:
+        minutes = session.get(MeetingMinutesRow, str(meeting_id))
+        if minutes and minutes.status == MinutesStatus.APPROVED.value:
+            minutes.status = MinutesStatus.DRAFT.value
+            minutes.approved_at = None
+            minutes.last_error = "Transcript attribution changed; regenerate MOM before approval."
+            minutes.updated_at = datetime.now(UTC)
+
+    def get_transcript_revision(self, meeting_id: UUID) -> int:
+        with self.database.session_factory() as session:
+            state = session.get(TranscriptReviewStateRow, str(meeting_id))
+            return state.revision if state else 0
+
+    def list_speaker_identities(self, meeting_id: UUID) -> list[SpeakerIdentityPublic]:
+        self.get_meeting(meeting_id)
+        current = {segment.speaker for segment in self.get_transcript(meeting_id) if segment.speaker}
+        with self.database.session_factory() as session:
+            rows = session.query(MeetingSpeakerIdentityRow).filter_by(meeting_id=str(meeting_id)).all()
+            return [SpeakerIdentityPublic(
+                speaker=row.speaker, email=row.email, confirmed_at=_utc(row.confirmed_at),
+            ) for row in rows if row.speaker in current]
+
+    def save_speaker_identity(
+        self, meeting_id: UUID, speaker: str, email: str | None
+    ) -> list[SpeakerIdentityPublic]:
+        self.get_meeting(meeting_id)
+        current = {segment.speaker for segment in self.get_transcript(meeting_id) if segment.speaker}
+        if speaker not in current:
+            raise SpeakerIdentityConflictError("speaker must first be named in this meeting transcript")
+        with self.database.session_factory.begin() as session:
+            row = session.get(MeetingSpeakerIdentityRow, (str(meeting_id), speaker))
+            if email is None:
+                if row:
+                    session.delete(row)
+            elif row is None:
+                session.add(MeetingSpeakerIdentityRow(
+                    meeting_id=str(meeting_id), speaker=speaker,
+                    email=email, confirmed_at=datetime.now(UTC),
+                ))
+            else:
+                row.email = email
+                row.confirmed_at = datetime.now(UTC)
+        return self.list_speaker_identities(meeting_id)
+
+    def save_minutes_source_revision(self, meeting_id: UUID, revision: int) -> None:
+        with self.database.session_factory.begin() as session:
+            row = session.get(MinutesSourceRow, str(meeting_id))
+            if row is None:
+                row = MinutesSourceRow(meeting_id=str(meeting_id))
+                session.add(row)
+            row.transcript_revision = revision
+
+    def get_minutes_source_revision(self, meeting_id: UUID) -> int | None:
+        with self.database.session_factory() as session:
+            row = session.get(MinutesSourceRow, str(meeting_id))
+            return row.transcript_revision if row else None
+
     def get_minutes(self, meeting_id: UUID) -> MeetingMinutes:
         with self.database.session_factory() as session:
             row = session.get(MeetingMinutesRow, str(meeting_id))
             if row is None:
                 raise MinutesNotFoundError(meeting_id)
-            return self._minutes_from_row(row)
+            evidence = session.get(MeetingMinutesEvidenceRow, str(meeting_id))
+            minutes = self._minutes_from_row(row)
+            if evidence:
+                minutes.speaker_contributions = [
+                    SpeakerContribution.model_validate(item)
+                    for item in evidence.speaker_contributions or []
+                ]
+                minutes.questions_asked = [
+                    AttributedQuestion.model_validate(item)
+                    for item in evidence.questions_asked or []
+                ]
+            return minutes
 
     def save_minutes(self, minutes: MeetingMinutes) -> MeetingMinutes:
         with self.database.session_factory.begin() as session:
@@ -202,6 +498,12 @@ class SQLAlchemyRepository:
             row.updated_at = minutes.updated_at
             row.approved_at = minutes.approved_at
             row.sent_at = minutes.sent_at
+            evidence = session.get(MeetingMinutesEvidenceRow, str(minutes.meeting_id))
+            if evidence is None:
+                evidence = MeetingMinutesEvidenceRow(meeting_id=str(minutes.meeting_id))
+                session.add(evidence)
+            evidence.speaker_contributions = [item.model_dump() for item in minutes.speaker_contributions]
+            evidence.questions_asked = [item.model_dump() for item in minutes.questions_asked]
         return minutes
 
     def save_email_delivery(self, delivery: EmailDelivery) -> EmailDelivery:
@@ -241,10 +543,70 @@ class SQLAlchemyRepository:
             row.joined_at = meeting.joined_at
             row.stopped_at = meeting.stopped_at
             row.last_refreshed_at = meeting.last_refreshed_at
+            knowledge = session.get(MeetingKnowledgeSettingsRow, str(meeting.id))
+            if knowledge is None:
+                knowledge = MeetingKnowledgeSettingsRow(
+                    meeting_id=str(meeting.id), organization_id=str(LEGACY_ORGANIZATION_ID),
+                    tags=meeting.tags, knowledge_enabled=meeting.knowledge_enabled,
+                    updated_at=datetime.now(UTC),
+                )
+                session.add(knowledge)
         return meeting
 
+    def save_knowledge_settings(
+        self, meeting_id: UUID, *, tags: list[str], knowledge_enabled: bool,
+    ) -> None:
+        with self.database.session_factory.begin() as session:
+            row = session.get(MeetingKnowledgeSettingsRow, str(meeting_id))
+            if row is None:
+                row = MeetingKnowledgeSettingsRow(
+                    meeting_id=str(meeting_id), organization_id=str(LEGACY_ORGANIZATION_ID)
+                )
+                session.add(row)
+            row.tags = tags
+            row.knowledge_enabled = knowledge_enabled
+            row.updated_at = datetime.now(UTC)
+
+    def save_transcription_route(
+        self, meeting_id: UUID, profile: ProviderProfile, endpoint_host: str,
+    ) -> None:
+        with self.database.session_factory.begin() as session:
+            row = session.get(MeetingTranscriptionRouteRow, str(meeting_id))
+            if row is None:
+                row = MeetingTranscriptionRouteRow(meeting_id=str(meeting_id))
+                session.add(row)
+            row.profile_id = str(profile.id)
+            row.profile_name = profile.name
+            row.provider_type = profile.provider_type.value
+            row.model = profile.models[Capability.TRANSCRIPTION]
+            row.endpoint_host = endpoint_host
+            row.selected_at = datetime.now(UTC)
+
+    def get_transcription_route(self, meeting_id: UUID) -> dict[str, object] | None:
+        with self.database.session_factory() as session:
+            row = session.get(MeetingTranscriptionRouteRow, str(meeting_id))
+            if row is None:
+                return None
+            return {
+                "profile_id": row.profile_id,
+                "profile_name": row.profile_name,
+                "provider_type": row.provider_type,
+                "model": row.model,
+                "endpoint_host": row.endpoint_host,
+                "selected_at": _utc(row.selected_at),
+            }
+
+    def clear_transcription_route(self, meeting_id: UUID) -> None:
+        with self.database.session_factory.begin() as session:
+            row = session.get(MeetingTranscriptionRouteRow, str(meeting_id))
+            if row is not None:
+                session.delete(row)
+
     @staticmethod
-    def _meeting_from_row(row: MeetingRow) -> Meeting:
+    def _meeting_from_row(
+        row: MeetingRow, knowledge: MeetingKnowledgeSettingsRow | None = None,
+        base: MeetingKnowledgeBaseRow | None = None,
+    ) -> Meeting:
         return Meeting(
             id=UUID(row.id),
             meeting_url=row.meeting_url,
@@ -253,6 +615,9 @@ class SQLAlchemyRepository:
             language=row.language,
             transcribe_enabled=row.transcribe_enabled,
             recording_enabled=row.recording_enabled,
+            tags=list(knowledge.tags) if knowledge else [],
+            knowledge_enabled=knowledge.knowledge_enabled if knowledge else False,
+            knowledge_base_id=UUID(base.knowledge_base_id) if base else None,
             platform=MeetingPlatform(row.platform),
             native_meeting_id=row.native_meeting_id,
             status=MeetingStatus(row.status),

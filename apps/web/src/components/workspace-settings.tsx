@@ -1,0 +1,95 @@
+"use client";
+
+import { FormEvent, useEffect, useState } from "react";
+import { meetingsService } from "@/lib/meetings-service";
+import type { CurrentAccount, InviteResult, Workspace, WorkspaceMember } from "@/lib/types";
+
+export function WorkspaceSettings({ workspace, account, onWorkspaceChange }: {
+  workspace: Workspace;
+  account: CurrentAccount | null;
+  onWorkspaceChange(workspace: Workspace): void;
+}) {
+  const [name, setName] = useState(workspace.display_name);
+  const [contactEmail, setContactEmail] = useState(workspace.contact_email ?? "");
+  const [members, setMembers] = useState<WorkspaceMember[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteName, setInviteName] = useState("");
+  const [inviteRole, setInviteRole] = useState<"admin" | "member" | "viewer">("member");
+  const [inviteResult, setInviteResult] = useState<InviteResult | null>(null);
+  const [inviting, setInviting] = useState(false);
+  const canManage = account?.role === "owner" || account?.role === "admin";
+
+  useEffect(() => {
+    void meetingsService.listWorkspaceMembers().then(setMembers).catch(() => {
+      setError("Could not load workspace members.");
+    });
+  }, []);
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true); setError(null); setMessage(null);
+    try {
+      const updated = await meetingsService.updateWorkspace({
+        display_name: name.trim(), contact_email: contactEmail.trim() || null,
+      });
+      onWorkspaceChange(updated);
+      setName(updated.display_name);
+      setContactEmail(updated.contact_email ?? "");
+      setMessage("Workspace profile saved.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not save workspace profile.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function invite(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setInviting(true); setError(null); setInviteResult(null);
+    try {
+      const result = await meetingsService.inviteMember(inviteEmail.trim(), inviteName.trim(), inviteRole);
+      setInviteResult(result); setInviteEmail(""); setInviteName("");
+      setMembers(await meetingsService.listWorkspaceMembers());
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not create invitation.");
+    } finally { setInviting(false); }
+  }
+
+  async function resetMember(userId: string) {
+    setError(null); setInviteResult(null);
+    try {
+      setInviteResult(await meetingsService.resetMemberPassword(userId));
+      setMembers(await meetingsService.listWorkspaceMembers());
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not reset member access.");
+    }
+  }
+
+  return <section className="page workspace-page" aria-labelledby="workspace-page-title">
+    <div className="workspace-heading">
+      <div><p className="eyebrow">ORGANIZATION</p><h1 id="workspace-page-title">Workspace settings</h1><p className="intro">Manage organization details, people, and access.</p></div>
+    </div>
+    <div className="workspace-layout">
+      {canManage ? <form className="workspace-card" onSubmit={(event) => void save(event)}>
+        <h2>Organization profile</h2>
+        <p>These details are stored in PostgreSQL and survive an app restart.</p>
+        <label htmlFor="workspace-name">Workspace name</label>
+        <input id="workspace-name" value={name} minLength={2} maxLength={120} required onChange={(event) => setName(event.target.value)} disabled={saving} />
+        <label htmlFor="workspace-contact">Contact email <span className="optional">optional</span></label>
+        <input id="workspace-contact" type="email" maxLength={320} value={contactEmail} onChange={(event) => setContactEmail(event.target.value)} disabled={saving} placeholder="team@example.com" />
+        <div className="workspace-field-readonly"><span>Workspace slug</span><b>{workspace.slug}</b><small>Reserved for future organization URLs; it cannot be changed here.</small></div>
+        {error ? <p className="form-error" role="alert">{error}</p> : null}
+        {message ? <p className="workspace-success" role="status">{message}</p> : null}
+        <div className="workspace-actions"><button className="button primary" type="submit" disabled={saving}>{saving ? "Saving…" : "Save workspace"}</button></div>
+      </form> : <div className="workspace-card"><h2>{workspace.display_name}</h2><p>{workspace.contact_email ?? "No organization contact email"}</p><p>Only an admin can edit this profile.</p></div>}
+      <section className="workspace-card" aria-labelledby="workspace-members-title">
+        <h2 id="workspace-members-title">People & access</h2>
+        <p>People in {workspace.display_name}. Invitees receive a temporary password that must be changed on first sign-in.</p>
+        <ul className="workspace-members">{members.map((member) => <li key={member.user_id}><span className="workspace-member-avatar" aria-hidden="true">{member.display_name[0]}</span><span><b>{member.display_name}</b><small>{member.email ?? "Local password sign-in"} · {workspace.display_name}</small></span><em>{member.role} · {member.status}</em>{canManage && member.role !== "owner" ? <button className="text-button" type="button" onClick={() => void resetMember(member.user_id)}>Reset access</button> : null}</li>)}</ul>
+        {canManage ? <><form className="workspace-invite" onSubmit={(event) => void invite(event)}><h3>Add a teammate</h3><label htmlFor="invite-name">Name</label><input id="invite-name" value={inviteName} onChange={(event) => setInviteName(event.target.value)} minLength={2} maxLength={120} required /><label htmlFor="invite-email">Work email</label><input id="invite-email" type="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} required /><label htmlFor="invite-role">Role</label><select id="invite-role" value={inviteRole} onChange={(event) => setInviteRole(event.target.value as "admin" | "member" | "viewer")}><option value="member">Member · shared knowledge</option><option value="admin">Admin · workspace management</option><option value="viewer">Viewer · shared knowledge</option></select><button className="button primary" disabled={inviting}>{inviting ? "Creating…" : "Generate temporary password"}</button></form>{inviteResult ? <div className="workspace-invite-secret" role="status"><b>{inviteResult.account.display_name} can sign in</b><p>Share these privately. This password is shown only now; it is not emailed automatically.</p><code>{inviteResult.account.email}</code><code>{inviteResult.temporary_password}</code><button type="button" className="text-button" onClick={() => void navigator.clipboard.writeText(inviteResult.temporary_password)}>Copy temporary password</button></div> : null}</> : null}
+      </section>
+    </div>
+  </section>;
+}

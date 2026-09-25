@@ -1,6 +1,5 @@
 .git
-.env
-.env.local
+.env*
 .data
 artifacts
 recordings
@@ -10,3 +9,5 @@ vendor
 **/__pycache__
 **/.pytest_cache
 **/*.pyc
+**/playwright-report
+**/test-results

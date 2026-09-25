@@ -1,5 +1,7 @@
 import json
 import asyncio
+import hmac
+import hashlib
 
 import httpx
 from fastapi.testclient import TestClient
@@ -103,7 +105,9 @@ def test_meeting_vertical_slice_with_mocked_vexa() -> None:
         transcript = client.get(f"/v1/meetings/{meeting_id}/transcript")
         assert transcript.status_code == 200
         assert transcript.json()["segment_count"] == 1
-        assert transcript.json()["segments"][0] == {
+        assert {key: transcript.json()["segments"][0][key] for key in (
+            "start_seconds", "end_seconds", "text", "speaker", "language", "completed"
+        )} == {
             "start_seconds": 1.0,
             "end_seconds": 2.5,
             "text": "This is Anna.",
@@ -126,6 +130,177 @@ def test_meeting_vertical_slice_with_mocked_vexa() -> None:
 
     delete_calls = [request for request in requests if request.method == "DELETE"]
     assert len(delete_calls) == 1
+
+
+def test_default_stt_profile_switches_new_bot_invocation_without_browser_secret(monkeypatch) -> None:
+    monkeypatch.setenv("VEXA_STT_OVERRIDE_SECRET", "local-test-signing-secret")
+    spawns = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/health":
+            return httpx.Response(200, json={
+                "status": "ok", "features": {"signed_stt_override": True},
+            })
+        if request.method == "GET" and request.url.path.startswith("/meetings/"):
+            return httpx.Response(200, json={"status": "joining"})
+        if request.url.path != "/bots":
+            raise AssertionError(request.url.path)
+        spawns.append(json.loads(request.content))
+        return httpx.Response(201, json={
+            "id": 40 + len(spawns), "platform": "google_meet",
+            "native_meeting_id": "abc-defg-hij", "status": "joining",
+            "data": {"stt_override_profile_id": spawns[-1]["stt_override"]["profile_id"]},
+        })
+
+    app = create_app(
+        database_url="sqlite+pysqlite:///:memory:", credential_key="test-key",
+        vexa_adapter=VexaCaptureAdapter(
+            "http://vexa.test", transport=httpx.MockTransport(handler)
+        ),
+    )
+    with TestClient(app) as client:
+        openai = client.post("/v1/provider-profiles", json={
+            "name": "OpenAI STT", "provider_type": "openai", "execution_location": "cloud",
+            "capabilities": [{"capability": "transcription", "model": "gpt-4o-mini-transcribe"}],
+            "api_key": "openai-secret-test",
+        }).json()
+        router = client.post("/v1/provider-profiles", json={
+            "name": "OpenRouter STT", "provider_type": "openai_compatible",
+            "execution_location": "cloud", "base_url": "https://openrouter.ai/api/v1",
+            "capabilities": [{"capability": "transcription", "model": "economy-stt-test"}],
+            "api_key": "router-secret-test",
+        }).json()
+        assert "openai-secret-test" not in json.dumps(openai)
+        assert "router-secret-test" not in json.dumps(router)
+        for profile, code in ((openai, "abc-defg-hij"), (router, "abc-defg-hik")):
+            client.put("/v1/provider-defaults/transcription", json={
+                "policy": "cloud_only", "cloud_profile_id": profile["id"],
+            })
+            meeting = client.post("/v1/meetings", json={
+                "meeting_url": f"https://meet.google.com/{code}",
+            }).json()
+            assert client.get(f"/v1/meetings/{meeting['id']}/transcription-route").json()["mode"] == "pending"
+            assert client.post(f"/v1/meetings/{meeting['id']}/join").status_code == 200
+            assert "secret-test" not in json.dumps(client.get(f"/v1/meetings/{meeting['id']}").json())
+            route = client.get(f"/v1/meetings/{meeting['id']}/transcription-route").json()
+            assert route["mode"] == "profile"
+            assert route["profile_id"] == profile["id"]
+            assert route["model"] in {"gpt-4o-mini-transcribe", "economy-stt-test"}
+            assert "secret-test" not in json.dumps(route)
+
+    assert len(spawns) == 2
+    first, second = (spawn["stt_override"] for spawn in spawns)
+    assert first["url"] == "https://api.openai.com/v1/audio/transcriptions"
+    assert first["model"] == "gpt-4o-mini-transcribe"
+    assert first["token"] == "openai-secret-test"
+    assert second["url"] == "https://openrouter.ai/api/v1/audio/transcriptions"
+    assert second["model"] == "economy-stt-test"
+    assert second["token"] == "router-secret-test"
+    assert first["profile_id"] != second["profile_id"]
+    for spawn in spawns:
+        signed = spawn["stt_override"]
+        claims = {key: value for key, value in signed.items() if key != "signature"}
+        canonical = json.dumps(claims, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+        assert signed["signature"] == hmac.new(
+            b"local-test-signing-secret", canonical, hashlib.sha256
+        ).hexdigest()
+
+
+def test_selected_stt_profile_fails_closed_without_vexa_signing_secret(monkeypatch) -> None:
+    monkeypatch.delenv("VEXA_STT_OVERRIDE_SECRET", raising=False)
+    app = create_app(database_url="sqlite+pysqlite:///:memory:", credential_key="test-key")
+    with TestClient(app) as client:
+        profile = client.post("/v1/provider-profiles", json={
+            "name": "STT", "provider_type": "openai", "execution_location": "cloud",
+            "capabilities": [{"capability": "transcription", "model": "gpt-4o-mini-transcribe"}],
+            "api_key": "test-only",
+        }).json()
+        client.put("/v1/provider-defaults/transcription", json={
+            "policy": "cloud_only", "cloud_profile_id": profile["id"],
+        })
+        meeting = client.post("/v1/meetings", json={
+            "meeting_url": "https://meet.google.com/abc-defg-hij",
+        }).json()
+        response = client.post(f"/v1/meetings/{meeting['id']}/join")
+        assert response.status_code == 409
+        assert "signing secret" in response.json()["detail"]
+        assert client.get(f"/v1/meetings/{meeting['id']}").json()["status"] == "created"
+
+
+def test_old_vexa_cannot_silently_ignore_selected_stt_profile(monkeypatch) -> None:
+    monkeypatch.setenv("VEXA_STT_OVERRIDE_SECRET", "test-signing-key")
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        return httpx.Response(200, json={"status": "ok", "service": "gateway"})
+
+    app = create_app(
+        database_url="sqlite+pysqlite:///:memory:", credential_key="test-key",
+        vexa_adapter=VexaCaptureAdapter("http://old-vexa.test", transport=httpx.MockTransport(handler)),
+    )
+    with TestClient(app) as client:
+        profile = client.post("/v1/provider-profiles", json={
+            "name": "STT", "provider_type": "openai", "execution_location": "cloud",
+            "capabilities": [{"capability": "transcription", "model": "gpt-4o-mini-transcribe"}],
+            "api_key": "test-only",
+        }).json()
+        client.put("/v1/provider-defaults/transcription", json={
+            "policy": "cloud_only", "cloud_profile_id": profile["id"],
+        })
+        meeting = client.post("/v1/meetings", json={
+            "meeting_url": "https://meet.google.com/abc-defg-hij",
+        }).json()
+        response = client.post(f"/v1/meetings/{meeting['id']}/join")
+        assert response.status_code == 503
+        assert "does not advertise" in response.json()["detail"]
+        assert calls == ["/health"]  # No bot was started with the wrong STT route.
+
+
+def test_vexa_missing_stt_attestation_requests_bot_stop(monkeypatch) -> None:
+    monkeypatch.setenv("VEXA_STT_OVERRIDE_SECRET", "test-signing-key")
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.method, request.url.path))
+        if request.url.path == "/health":
+            return httpx.Response(200, json={
+                "status": "ok", "features": {"signed_stt_override": True},
+            })
+        if request.method == "POST" and request.url.path == "/bots":
+            return httpx.Response(201, json={
+                "id": 67, "platform": "google_meet",
+                "native_meeting_id": "abc-defg-hij", "status": "joining",
+            })
+        if request.method == "DELETE" and request.url.path == "/bots/google_meet/abc-defg-hij":
+            return httpx.Response(200, json={"status": "stopping"})
+        raise AssertionError(f"unexpected Vexa request: {request.method} {request.url.path}")
+
+    app = create_app(
+        database_url="sqlite+pysqlite:///:memory:", credential_key="test-key",
+        vexa_adapter=VexaCaptureAdapter("http://vexa.test", transport=httpx.MockTransport(handler)),
+    )
+    with TestClient(app) as client:
+        profile = client.post("/v1/provider-profiles", json={
+            "name": "STT", "provider_type": "openai", "execution_location": "cloud",
+            "capabilities": [{"capability": "transcription", "model": "gpt-4o-mini-transcribe"}],
+            "api_key": "test-only",
+        }).json()
+        client.put("/v1/provider-defaults/transcription", json={
+            "policy": "cloud_only", "cloud_profile_id": profile["id"],
+        })
+        meeting = client.post("/v1/meetings", json={
+            "meeting_url": "https://meet.google.com/abc-defg-hij",
+        }).json()
+        response = client.post(f"/v1/meetings/{meeting['id']}/join")
+        assert response.status_code == 502
+        assert "did not attest" in response.json()["detail"]
+        assert client.get(f"/v1/meetings/{meeting['id']}").json()["status"] == "failed"
+        assert client.get(f"/v1/meetings/{meeting['id']}/transcription-route").json()["mode"] == "pending"
+        assert calls == [
+            ("GET", "/health"), ("POST", "/bots"),
+            ("DELETE", "/bots/google_meet/abc-defg-hij"),
+        ]
 
 
 def test_join_failure_is_persisted_as_failed() -> None:

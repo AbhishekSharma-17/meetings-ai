@@ -1,58 +1,182 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import { meetingsService } from "@/lib/meetings-service";
-import type { Meeting, ProviderProfile } from "@/lib/types";
+import type { CurrentAccount, Meeting, ProviderProfile, Workspace } from "@/lib/types";
 import { Dashboard } from "./dashboard";
 import { NewMeetingDialog } from "./new-meeting-dialog";
 import { MeetingDetailScreen } from "./meeting-detail-screen";
 import { ProviderSettings } from "./provider-settings";
+import { WorkspaceSettings } from "./workspace-settings";
+import { ProfileSettings } from "./profile-settings";
+import { KnowledgeScreen } from "./knowledge-screen";
+import { KnowledgeEvidenceScreen } from "./knowledge-evidence-screen";
+import { MeetingsIcon, ProvidersIcon } from "./ui-icons";
+import { ThemeSwitcher } from "./theme-switcher";
+import { Dialog } from "@base-ui/react/dialog";
+import { BookOpenText, Building2, ChevronUp, LogOut, Menu, UserRound, X } from "lucide-react";
 
-type View = "dashboard" | "providers" | "meeting";
+type View = "dashboard" | "providers" | "meeting" | "workspace" | "knowledge" | "profile";
 
 export function AppShell() {
   const [view, setView] = useState<View>("dashboard");
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [profiles, setProfiles] = useState<ProviderProfile[]>([]);
+  const [providersLoadError, setProvidersLoadError] = useState<string | null>(null);
+  const [workspace, setWorkspace] = useState<Workspace | null>(null);
+  const [workspaceLoading, setWorkspaceLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [activeMeetingId, setActiveMeetingId] = useState<string | null>(null);
+  const [focusSegmentId, setFocusSegmentId] = useState<string | null>(null);
+  const [meetingReturnView, setMeetingReturnView] = useState<View>("dashboard");
+  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
+  const [account, setAccount] = useState<CurrentAccount | null>(null);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [loggingIn, setLoggingIn] = useState(false);
 
   useEffect(() => {
-    void Promise.all([meetingsService.listMeetings(), meetingsService.listProviderProfiles()]).then(([nextMeetings, nextProfiles]) => {
-      setMeetings(nextMeetings);
-      setProfiles(nextProfiles);
-    });
+    void meetingsService.getSession().then(async (active) => {
+      if (active) {
+        const current = await meetingsService.getCurrentAccount();
+        setAccount(current);
+        if (current.role !== "owner" && current.role !== "admin") setView("knowledge");
+      }
+      setAuthenticated(active);
+    }).catch(() => setLoginError("Could not reach the API. Check that the local services are running."));
+    const expired = () => setAuthenticated(false);
+    window.addEventListener("meetings-ai-session-expired", expired);
+    return () => window.removeEventListener("meetings-ai-session-expired", expired);
   }, []);
 
-  const openMeeting = useCallback((id: string) => { setActiveMeetingId(id); setView("meeting"); }, []);
+  useEffect(() => {
+    if (!authenticated || !account || account.must_change_password) return;
+    if (account.role === "owner" || account.role === "admin") {
+      void meetingsService.listMeetings().then(setMeetings).catch(() => undefined);
+      void meetingsService.listProviderProfiles().then((nextProfiles) => { setProfiles(nextProfiles); setProvidersLoadError(null); }).catch(() => setProvidersLoadError("Could not load provider configurations. Check the API connection and retry."));
+    }
+    void meetingsService.getWorkspace().then(setWorkspace).catch(() => setWorkspace(null)).finally(() => setWorkspaceLoading(false));
+  }, [authenticated, account]);
+
+  async function signIn(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setLoggingIn(true); setLoginError(null);
+    try {
+      await meetingsService.login(loginEmail.trim(), loginPassword);
+      const current = await meetingsService.getCurrentAccount();
+      setLoginPassword(""); setAccount(current); setAuthenticated(true);
+      if (current.role !== "owner" && current.role !== "admin") setView("knowledge");
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : "Sign in failed.");
+    } finally { setLoggingIn(false); }
+  }
+
+  async function changePassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setLoggingIn(true); setLoginError(null);
+    try {
+      await meetingsService.changePassword(loginPassword, newPassword);
+      setAccount(await meetingsService.getCurrentAccount());
+      setLoginPassword(""); setNewPassword("");
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : "Could not change password.");
+    } finally { setLoggingIn(false); }
+  }
+
+  const openMeeting = useCallback((id: string, segmentId?: string) => {
+    setActiveMeetingId(id); setFocusSegmentId(segmentId ?? null);
+    setMeetingReturnView(view === "knowledge" || segmentId ? "knowledge" : "dashboard"); setView("meeting");
+  }, [view]);
   const updateMeeting = useCallback((meeting: Meeting) => {
     setMeetings((current) => current.some((candidate) => candidate.id === meeting.id) ? current.map((candidate) => candidate.id === meeting.id ? meeting : candidate) : [meeting, ...current]);
   }, []);
+  const signOut = useCallback(() => { void meetingsService.logout().finally(() => { setAuthenticated(false); setAccount(null); }); }, []);
+
+  if (!authenticated) return <main className="login-page">
+    <form className="login-card" onSubmit={(event) => void signIn(event)}>
+      <div className="login-brand"><span className="brand-mark" aria-hidden="true"><Image src="/icon.svg" width={28} height={28} alt="" /></span><span>Meetings <b>AI</b></span></div>
+      <p className="eyebrow">YOUR MEETING WORKSPACE</p>
+      <h1>Make every conversation count.</h1>
+      <p>{authenticated === null ? "Checking your session…" : "Sign in to review conversations, decisions, and next steps."}</p>
+      <ThemeSwitcher />
+      {authenticated === false ? <><label htmlFor="login-email">Work email</label><input id="login-email" type="email" autoComplete="username" value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} required /><label htmlFor="admin-password">Password</label><input id="admin-password" type="password" autoComplete="current-password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} required /><button className="button primary" disabled={loggingIn}>{loggingIn ? "Signing in…" : "Sign in"}</button></> : null}
+      {loginError ? <p className="form-error" role="alert">{loginError} <button type="button" onClick={() => void meetingsService.getSession().then(setAuthenticated).catch(() => setLoginError("Could not reach the API."))}>Retry</button></p> : null}
+    </form>
+  </main>;
+
+  if (account?.must_change_password) return <main className="login-page"><form className="login-card" onSubmit={(event) => void changePassword(event)}><p className="eyebrow">ACCOUNT SETUP</p><h1>Change your temporary password.</h1><p>{account.email} · {account.display_name}</p><label htmlFor="temporary-password">Temporary password</label><input id="temporary-password" type="password" autoComplete="current-password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} required /><label htmlFor="new-password">New password</label><input id="new-password" type="password" autoComplete="new-password" minLength={12} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required /><button className="button primary" disabled={loggingIn}>{loggingIn ? "Saving…" : "Set new password"}</button>{loginError ? <p className="form-error" role="alert">{loginError}</p> : null}</form></main>;
 
   return (
     <div className="app-frame">
       <a className="skip-link" href="#main-content">Skip to content</a>
+      <SidebarPanel view={view} onNavigate={setView} workspace={workspace} account={account} onSignOut={signOut} className="desktop-sidebar" />
+      <div className="workspace-main">
       <header className="topbar">
-        <button className="brand" onClick={() => setView("dashboard")} aria-label="Meetings AI home">
-          <span className="brand-mark" aria-hidden="true">M</span>
-          <span>Meetings <b>AI</b></span>
-        </button>
-        <nav aria-label="Main navigation">
-          <button className={view === "dashboard" ? "nav-link active" : "nav-link"} onClick={() => setView("dashboard")}>Meetings</button>
-          <button className={view === "providers" ? "nav-link active" : "nav-link"} onClick={() => setView("providers")}>AI providers</button>
-        </nav>
-        <button className="avatar" aria-label="Open account menu">A</button>
+        <button className="mobile-nav-trigger" aria-label="Open navigation" onClick={() => setMobileNavOpen(true)}><Menu /></button>
+        <div className="topbar-context"><span className="topbar-kicker">MEETINGS AI</span><span className="topbar-location">{view === "providers" ? "AI providers" : view === "workspace" ? "Workspace" : view === "knowledge" ? "AI knowledge" : view === "profile" ? "My profile" : view === "meeting" ? "Meeting details" : "Overview"}</span></div>
+        <span className="topbar-environment"><span aria-hidden="true" /> Local environment</span>
       </header>
       <main id="main-content">
         {view === "dashboard" ? <Dashboard meetings={meetings} onNewMeeting={() => setDialogOpen(true)} onOpenProviders={() => setView("providers")} onOpenMeeting={openMeeting} /> : null}
-        {view === "providers" ? <ProviderSettings profiles={profiles} onProfilesChange={setProfiles} /> : null}
-        {view === "meeting" && activeMeetingId ? <MeetingDetailScreen meetingId={activeMeetingId} onBack={() => setView("dashboard")} onMeetingChange={updateMeeting} /> : null}
+        {view === "providers" ? providersLoadError ? <section className="page" role="alert"><h1>AI providers are unavailable</h1><p className="intro">{providersLoadError}</p><button className="button secondary" onClick={() => void meetingsService.listProviderProfiles().then((nextProfiles) => { setProfiles(nextProfiles); setProvidersLoadError(null); }).catch(() => undefined)}>Retry</button></section> : <ProviderSettings profiles={profiles} onProfilesChange={setProfiles} /> : null}
+        {view === "knowledge" ? <KnowledgeScreen account={account} onOpenSource={openMeeting} /> : null}
+        {view === "workspace" ? workspace
+          ? <WorkspaceSettings workspace={workspace} account={account} onWorkspaceChange={setWorkspace} />
+          : <section className="page" role="status">{workspaceLoading ? "Loading workspace…" : "Workspace profile is unavailable. Refresh the page to try again."}</section>
+          : null}
+        {view === "profile" && account ? <ProfileSettings account={account} workspace={workspace} /> : null}
+        {view === "meeting" && activeMeetingId ? account?.role === "owner" || account?.role === "admin"
+          ? <MeetingDetailScreen meetingId={activeMeetingId} focusSegmentId={focusSegmentId} onBack={() => setView(meetingReturnView)} onMeetingChange={updateMeeting} />
+          : <KnowledgeEvidenceScreen meetingId={activeMeetingId} focusSegmentId={focusSegmentId} onBack={() => setView("knowledge")} /> : null}
       </main>
-      <NewMeetingDialog open={dialogOpen} onClose={() => setDialogOpen(false)} onMeetingJoined={(meeting) => {
+      </div>
+      <Dialog.Root open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+        <Dialog.Portal>
+          <Dialog.Backdrop className="mobile-nav-backdrop" />
+          <Dialog.Popup className="mobile-nav-sheet">
+            <Dialog.Title className="sr-only">Workspace navigation</Dialog.Title>
+            <Dialog.Close className="mobile-nav-close" aria-label="Close navigation"><X /></Dialog.Close>
+            <SidebarPanel view={view} onNavigate={(next) => { setView(next); setMobileNavOpen(false); }} workspace={workspace} account={account} onSignOut={signOut} className="drawer-sidebar" />
+          </Dialog.Popup>
+        </Dialog.Portal>
+      </Dialog.Root>
+      <NewMeetingDialog open={dialogOpen && (account?.role === "owner" || account?.role === "admin")} onClose={() => setDialogOpen(false)} onMeetingJoined={(meeting) => {
         setDialogOpen(false);
         updateMeeting(meeting);
         openMeeting(meeting.id);
       }} />
     </div>
   );
+}
+
+function SidebarPanel({ view, onNavigate, workspace, account, onSignOut, className }: { view: View; onNavigate(view: View): void; workspace: Workspace | null; account: CurrentAccount | null; onSignOut(): void; className: string }) {
+  const canManageMeetings = account?.role === "owner" || account?.role === "admin";
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onPointerDown = (event: PointerEvent) => { if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false); };
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") setMenuOpen(false); };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => { document.removeEventListener("pointerdown", onPointerDown); document.removeEventListener("keydown", onKeyDown); };
+  }, [menuOpen]);
+  const navigate = (next: View) => { setMenuOpen(false); onNavigate(next); };
+  return <aside className={`workspace-sidebar ${className}`} aria-label="Workspace navigation">
+    <button className="brand" onClick={() => navigate("dashboard")} aria-label="Meetings AI home"><span className="brand-mark" aria-hidden="true"><Image src="/icon.svg" width={28} height={28} alt="" /></span><span>Meetings <b>AI</b></span></button>
+    <button className="workspace-switcher" onClick={() => navigate("workspace")} aria-label={`Open ${workspace?.display_name ?? "organization"} settings`}><span className="workspace-avatar" aria-hidden="true">{(workspace?.display_name ?? "W")[0]}</span><span><b>{workspace?.display_name ?? "Organization"}</b><small>{workspace?.contact_email ?? "Organization workspace"}</small></span></button>
+    <p className="sidebar-label">WORKSPACE</p>
+    <nav aria-label="Main navigation">
+      {canManageMeetings ? <button aria-current={view === "dashboard" || view === "meeting" ? "page" : undefined} className={view === "dashboard" || view === "meeting" ? "nav-link active" : "nav-link"} onClick={() => onNavigate("dashboard")}><MeetingsIcon /> Meetings</button> : null}
+      {canManageMeetings ? <button aria-current={view === "providers" ? "page" : undefined} className={view === "providers" ? "nav-link active" : "nav-link"} onClick={() => onNavigate("providers")}><ProvidersIcon /> AI providers</button> : null}
+      <button aria-current={view === "knowledge" ? "page" : undefined} className={view === "knowledge" ? "nav-link active" : "nav-link"} onClick={() => onNavigate("knowledge")}><BookOpenText /> AI knowledge</button>
+      <button aria-current={view === "workspace" ? "page" : undefined} className={view === "workspace" ? "nav-link active" : "nav-link"} onClick={() => onNavigate("workspace")}><Building2 /> Workspace</button>
+    </nav>
+    <div className="sidebar-foot" ref={menuRef}>
+      {menuOpen ? <div className="profile-popover" role="menu" aria-label="Account menu"><div className="profile-popover-heading"><b>{account?.display_name ?? "Account"}</b><small>{account?.email ?? "Local account"}</small></div><button role="menuitem" onClick={() => navigate("profile")}><UserRound /> My profile & password</button><button role="menuitem" onClick={() => navigate("workspace")}><Building2 /> Organization & people</button><div className="profile-popover-theme"><span>Appearance</span><ThemeSwitcher /></div><button role="menuitem" className="profile-signout" onClick={() => { setMenuOpen(false); onSignOut(); }}><LogOut /> Sign out</button></div> : null}
+      <button className="profile-trigger" aria-expanded={menuOpen} aria-haspopup="menu" onClick={() => setMenuOpen((value) => !value)}><span className="profile-trigger-avatar" aria-hidden="true">{account?.display_name[0]?.toUpperCase() ?? "U"}</span><span className="profile-trigger-copy"><b>{account?.display_name ?? "Account"}</b><small>{account?.email ?? account?.role ?? "User"}</small></span><ChevronUp className={menuOpen ? "profile-chevron open" : "profile-chevron"} /></button>
+    </div>
+  </aside>;
 }

@@ -1,6 +1,9 @@
+import asyncio
 import json
+import re
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 from meetings_contracts import (
     MeetingStatus,
@@ -9,7 +12,7 @@ from meetings_contracts import (
     TextGenerationResult,
 )
 
-from app.adapters.resend import ResendAdapter
+from app.adapters.resend import EmailDeliveryError, ResendAdapter
 from app.adapters.vexa import VexaCaptureAdapter
 from app.main import create_app
 
@@ -17,6 +20,7 @@ from app.main import create_app
 class FakeTextAdapter:
     async def generate_text(self, profile, request):
         assert "Anna: We approved the internal MVP" in request.prompt
+        segment_id = re.search(r"\[([^ ]+) @", request.prompt).group(1)
         payload = {
             "title": "Internal MVP review",
             "executive_summary": "The team approved continued internal validation.",
@@ -27,9 +31,15 @@ class FakeTextAdapter:
                     "description": "Run another meeting test",
                     "owner": "Abhishek",
                     "due_date": None,
+                    "evidence_segment_ids": [segment_id],
                 }
             ],
             "open_questions": ["When should production deployment begin?"],
+            "speaker_contributions": [{
+                "speaker": "Anna", "summary": "Approved another internal MVP test.",
+                "evidence_segment_ids": [segment_id],
+            }],
+            "questions_asked": [],
         }
         return TextGenerationResult(
             text=json.dumps(payload),
@@ -44,6 +54,7 @@ def test_generate_review_approve_and_send_minutes() -> None:
 
     def resend_handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["authorization"] == "Bearer resend-test-key"
+        assert request.headers["idempotency-key"].startswith("minutes-")
         sent_payloads.append(json.loads(request.content))
         return httpx.Response(200, json={"id": "email_123"})
 
@@ -99,7 +110,7 @@ def test_generate_review_approve_and_send_minutes() -> None:
                     start_seconds=0,
                     end_seconds=4,
                     speaker="Anna",
-                    text="We approved the internal MVP for another test.",
+                    text="We approved the internal MVP for another test. Abhishek will run another meeting test.",
                 )
             ],
         )
@@ -154,6 +165,33 @@ def test_generate_review_approve_and_send_minutes() -> None:
         final = client.get(f"/v1/meetings/{meeting_id}/minutes")
         assert final.json()["status"] == "sent"
         assert final.json()["sent_at"] is not None
+
+
+def test_resend_status_and_missing_sender_do_not_silently_use_test_domain() -> None:
+    adapter = ResendAdapter("send-only-test-key", None)
+    app = create_app(
+        database_url="sqlite+pysqlite:///:memory:",
+        credential_key="test-key",
+        resend_adapter=adapter,
+    )
+    with TestClient(app) as client:
+        status = client.get("/v1/integrations/resend/status")
+        assert status.status_code == 200
+        assert status.json() == {
+            "api_key_configured": True,
+            "sender_configured": False,
+            "sender": None,
+            "can_attempt_send": False,
+            "domain_verification": "not_checked",
+        }
+
+    with pytest.raises(EmailDeliveryError, match="RESEND_FROM_EMAIL"):
+        asyncio.run(adapter.send(
+            recipients=["team@example.test"],
+            subject="Test",
+            html="<p>Test</p>",
+            text="Test",
+        ))
 
 
 def test_minutes_require_finished_capture_and_transcript() -> None:

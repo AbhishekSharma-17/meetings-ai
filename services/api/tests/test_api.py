@@ -79,6 +79,7 @@ def test_create_list_update_and_test_profile_without_leaking_secret() -> None:
     assert created.status_code == 201
     profile_id = created.json()["id"]
     assert created.json()["credential_configured"] is True
+    assert created.json()["credential_hint"] == "••••turn"
     assert "api_key" not in created.json()
     assert secret not in created.text
 
@@ -86,6 +87,7 @@ def test_create_list_update_and_test_profile_without_leaking_secret() -> None:
     assert listed.status_code == 200
     assert listed.json()[0]["id"] == profile_id
     assert secret not in listed.text
+    assert listed.json()[0]["credential_hint"] == "••••turn"
     assert "api_key" not in listed.text
 
     # Omitting api_key retains it; explicitly sending null clears it.
@@ -104,6 +106,40 @@ def test_create_list_update_and_test_profile_without_leaking_secret() -> None:
     assert test_result.status_code == 200
     assert test_result.json()["status"] == "configuration_invalid"
     assert test_result.json()["network_call_performed"] is False
+
+
+def test_delete_profile_clears_default_and_knowledge_reference() -> None:
+    client = make_client()
+    created = client.post("/v1/provider-profiles", json=cloud_profile_payload()).json()
+    profile_id = created["id"]
+    selected = client.put("/v1/provider-defaults/text_generation", json={
+        "policy": "cloud_only", "cloud_profile_id": profile_id,
+    })
+    assert selected.status_code == 200
+    base = client.post("/v1/knowledge-bases", json={
+        "name": "Client notes", "text_profile_id": profile_id,
+    })
+    assert base.status_code == 201
+    deleted = client.delete(f"/v1/provider-profiles/{profile_id}")
+    assert deleted.status_code == 204
+    assert client.get("/v1/provider-profiles").json() == []
+    assert client.get("/v1/provider-defaults").json() == []
+    assert client.get(f"/v1/knowledge-bases/{base.json()['id']}").json()["text_profile_id"] is None
+    assert client.delete(f"/v1/provider-profiles/{profile_id}").status_code == 404
+
+
+def test_delete_profile_preserves_other_fallback() -> None:
+    client = make_client()
+    local = client.post("/v1/provider-profiles", json=local_profile_payload()).json()
+    cloud = client.post("/v1/provider-profiles", json=cloud_profile_payload()).json()
+    client.put("/v1/provider-defaults/text_generation", json={
+        "policy": "local_then_cloud", "local_profile_id": local["id"],
+        "cloud_profile_id": cloud["id"],
+    })
+    assert client.delete(f"/v1/provider-profiles/{local['id']}").status_code == 204
+    selection = client.get("/v1/provider-defaults").json()[0]
+    assert selection["policy"] == "cloud_only"
+    assert selection["ordered_profile_ids"] == [cloud["id"]]
 
 
 def test_validation_enforces_provider_and_capability_rules_and_redacts_input() -> None:

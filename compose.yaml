@@ -13,13 +13,17 @@ services:
       PROVIDER_CREDENTIAL_KEY: ${PROVIDER_CREDENTIAL_KEY:-development-only-change-me}
       VEXA_BASE_URL: http://vexa-lite:8056
       VEXA_API_KEY: ${VEXA_API_KEY:-}
+      VEXA_STT_OVERRIDE_SECRET: ${VEXA_STT_OVERRIDE_SECRET:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       RESEND_FROM_NAME: ${RESEND_FROM_NAME:-Meetings AI}
       RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-}
+      AUTO_MOM_ENABLED: ${AUTO_MOM_ENABLED:-1}
+      MEETINGS_AI_ADMIN_PASSWORD: ${MEETINGS_AI_ADMIN_PASSWORD:-}
+      MEETINGS_AI_SESSION_SECRET: ${MEETINGS_AI_SESSION_SECRET:-}
     ports:
       - "127.0.0.1:8320:8000"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready')"]
       interval: 5s
       timeout: 3s
       retries: 12

@@ -1,4 +1,5 @@
 import type { Meeting } from "@/lib/types";
+import { ArrowRightIcon, MicIcon, PlusIcon, ProvidersIcon, SparkIcon } from "./ui-icons";
 
 const statusLabel: Record<Meeting["status"], string> = {
   created: "Created",
@@ -20,32 +21,38 @@ export function Dashboard({ meetings, onNewMeeting, onOpenProviders, onOpenMeeti
     <section className="page dashboard">
       <div className="hero-row">
         <div>
-          <p className="eyebrow">WORKSPACE</p>
-          <h1>Your meetings, made useful.</h1>
-          <p className="intro">Send a bot, review a reliable MOM, and make the follow-up happen.</p>
+          <p className="eyebrow">OVERVIEW <span className="eyebrow-separator">/</span> YOUR WORKSPACE</p>
+          <h1>From conversation<br /><span>to clarity.</span></h1>
+          <p className="intro">Capture the meeting, review what matters, and move decisions forward.</p>
         </div>
-        <button className="button primary" onClick={onNewMeeting}><span aria-hidden="true">+</span> New meeting</button>
+        <button className="button primary" onClick={onNewMeeting}><PlusIcon /> New meeting</button>
       </div>
 
       <div className="notice" role="status">
-        <span className="notice-icon" aria-hidden="true">✦</span>
-        <div><b>Local capture slice is running.</b><span>Meeting records, lifecycle state and transcripts are persisted in PostgreSQL.</span></div>
+        <span className="notice-icon"><SparkIcon /></span>
+        <div><b>Your local workspace is ready.</b><span>Launch a capture, then review its transcript and AI-generated minutes before sharing.</span></div>
       </div>
 
       <div className="stats" aria-label="Meeting summary">
-        <article><span>Meetings captured</span><strong>{meetings.length}</strong><small>{liveCount ? `${liveCount} currently live` : "No live meeting"}</small></article>
-        <article><span>Captures ready</span><strong>{readyCount}</strong><small>Open a finished capture to generate its MOM</small></article>
-        <article><span>Follow-up workflow</span><strong>Review</strong><small>Approved recaps can be delivered with Resend</small></article>
+        <article><span>All meetings</span><strong>{meetings.length}</strong><small>Total capture records</small></article>
+        <article><span>Live now</span><strong>{liveCount}</strong><small>{liveCount ? "Transcripts are updating" : "No active captures"}</small></article>
+        <article><span>Ready to review</span><strong>{readyCount}</strong><small>Completed captures</small></article>
       </div>
 
-      <div className="section-heading"><div><h2>Recent meetings</h2><p>Everything is a draft until you publish it.</p></div><button className="text-button">View all <span aria-hidden="true">→</span></button></div>
+      <div className="workflow-strip" aria-label="How Meetings AI works">
+        <div><span>01</span><b>Capture</b><small>Assistant joins and transcribes</small></div>
+        <div><span>02</span><b>Review</b><small>Check speakers and minutes</small></div>
+        <div><span>03</span><b>Share</b><small>Approve before email delivery</small></div>
+      </div>
+
+      <div className="section-heading"><div><p className="eyebrow">YOUR ACTIVITY</p><h2>Recent meetings</h2><p>Open a meeting to review the transcript and follow-up.</p></div><span className="section-count">{meetings.length} total</span></div>
       {meetings.length ? <div className="meeting-list">
         {meetings.map((meeting) => <MeetingRow key={meeting.id} meeting={meeting} onOpen={() => onOpenMeeting(meeting.id)} />)}
-      </div> : <div className="empty-state"><b>No meeting records yet.</b><p>Paste a Meet, Zoom, Teams or Jitsi link to create the first capture record.</p></div>}
+      </div> : <div className="empty-state"><span className="empty-icon"><MicIcon /></span><b>No meetings yet</b><p>Send your assistant to a Google Meet, Zoom, Teams, or Jitsi call. Your captures will appear here.</p><button className="button secondary" onClick={onNewMeeting}>Create your first meeting <ArrowRightIcon /></button></div>}
 
       <section className="setup-card" aria-labelledby="setup-title">
-        <div className="setup-icon" aria-hidden="true">⚙</div>
-        <div><h2 id="setup-title">Configure your AI pipeline</h2><p>Choose the transcription, MOM and embedding providers that fit your workflow. OpenAI, open-source and compatible endpoints are all supported.</p></div>
+        <div className="setup-icon"><ProvidersIcon /></div>
+        <div><h2 id="setup-title">Your AI, your choice</h2><p>Choose named configurations for transcription, minutes, and Ask AI. A new transcription default applies to the next assistant join; active calls keep their current route.</p></div>
         <button className="button secondary" onClick={onOpenProviders}>Manage providers</button>
       </section>
     </section>
@@ -57,6 +64,6 @@ function MeetingRow({ meeting, onOpen }: { meeting: Meeting; onOpen(): void }) {
     <div className="meeting-platform" aria-hidden="true">{meeting.platform === "Zoom" ? "Z" : meeting.platform === "Microsoft Teams" ? "T" : "G"}</div>
     <div className="meeting-info"><h3>{meeting.title}</h3><p>{meeting.platform} · {meeting.startsAt} · {meeting.participants} participants</p></div>
     <div className="meeting-meta"><span className={`status ${meeting.status}`}>{statusLabel[meeting.status]}</span><span>{meeting.duration}</span></div>
-    <button className="row-action" aria-label={`Open ${meeting.title}`} onClick={onOpen}>→</button>
+    <button className="row-action" aria-label={`Open ${meeting.title}`} onClick={onOpen}><ArrowRightIcon /></button>
   </article>;
 }

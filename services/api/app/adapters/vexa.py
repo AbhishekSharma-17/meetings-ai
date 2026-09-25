@@ -44,6 +44,7 @@ class VexaCaptureAdapter:
         language: str | None,
         transcribe_enabled: bool,
         recording_enabled: bool,
+        stt_override: dict[str, object] | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "meeting_url": meeting_url,
@@ -53,6 +54,17 @@ class VexaCaptureAdapter:
         }
         if language:
             payload["language"] = language
+        if stt_override is not None:
+            health = await self._request(
+                "GET", "/health", operation="verify per-bot STT capability"
+            )
+            features = health.get("features")
+            if not isinstance(features, dict) or features.get("signed_stt_override") is not True:
+                raise VexaAPIError(
+                    "verify per-bot STT capability", 503,
+                    "connected Vexa does not advertise signed per-bot STT routing",
+                )
+            payload["stt_override"] = stt_override
         return await self._request("POST", "/bots", operation="join", json=payload)
 
     async def preflight(self) -> dict[str, Any]:
@@ -107,6 +119,13 @@ class VexaCaptureAdapter:
             "GET",
             f"/transcripts/by-id/{vexa_meeting_id}",
             operation="retrieve transcript",
+        )
+
+    async def get_participants(self, platform: str, native_meeting_id: str) -> dict[str, Any]:
+        return await self._request(
+            "GET",
+            f"/meetings/{quote(platform, safe='')}/{quote(native_meeting_id, safe='')}/participants",
+            operation="retrieve participants",
         )
 
     async def _request(

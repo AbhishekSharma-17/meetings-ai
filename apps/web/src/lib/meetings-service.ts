@@ -1,21 +1,54 @@
-import type { Capability, ConnectionState, CreateMeetingInput, EmailDelivery, Meeting, MeetingDetail, MeetingMinutes, MeetingStatus, MinutesDraft, ProfileKind, ProviderProfile, TranscriptSegment } from "./types";
+import type { Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeSearchResponse, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, PostMeetingJob, ProfileKind, ProviderProfile, ResendStatus, SpeakerIdentity, TranscriptSegment, TranscriptionRoute, Workspace, WorkspaceMember } from "./types";
 
 export interface MeetingsService {
+  getSession(): Promise<boolean>;
+  getCurrentAccount(): Promise<CurrentAccount>;
+  login(email: string, password: string): Promise<void>;
+  changePassword(currentPassword: string, newPassword: string): Promise<void>;
+  inviteMember(email: string, displayName: string, role: "admin" | "member" | "viewer"): Promise<InviteResult>;
+  resetMemberPassword(userId: string): Promise<InviteResult>;
+  logout(): Promise<void>;
+  getWorkspace(): Promise<Workspace>;
+  updateWorkspace(patch: { display_name: string; contact_email: string | null }): Promise<Workspace>;
+  listWorkspaceMembers(): Promise<WorkspaceMember[]>;
+  listKnowledgeBases(): Promise<KnowledgeBase[]>;
+  getKnowledgeOverview(baseId: string): Promise<KnowledgeWikiOverview>;
+  createKnowledgeBase(name: string, description?: string): Promise<KnowledgeBase>;
+  updateKnowledgeBase(id: string, patch: { name?: string; description?: string | null; text_profile_id?: string | null }): Promise<KnowledgeBase>;
+  shareKnowledgeBase(id: string, visibility: "private" | "organization" | "specific", userIds: string[]): Promise<KnowledgeBase>;
+  listKnowledgeConversations(baseId: string): Promise<KnowledgeConversation[]>;
+  getKnowledgeConversation(baseId: string, conversationId: string): Promise<KnowledgeConversation>;
+  searchKnowledge(query: string, tags: string[], knowledgeBaseId?: string | null): Promise<KnowledgeSearchResponse>;
+  chatKnowledge(query: string, tags: string[], knowledgeBaseId?: string | null, conversationId?: string | null): Promise<KnowledgeChatResponse>;
   listMeetings(): Promise<Meeting[]>;
   createMeeting(input: CreateMeetingInput): Promise<MeetingDetail>;
   getMeeting(id: string): Promise<MeetingDetail>;
+  updateMeetingKnowledge(id: string, tags: string[], knowledgeEnabled: boolean, knowledgeBaseId?: string | null): Promise<MeetingDetail>;
+  getTranscriptionRoute(id: string): Promise<TranscriptionRoute>;
   joinMeeting(id: string): Promise<MeetingDetail>;
   stopMeeting(id: string): Promise<MeetingDetail>;
   refreshMeeting(id: string): Promise<MeetingDetail>;
   getTranscript(id: string): Promise<TranscriptSegment[]>;
+  exportTranscript(id: string): Promise<string>;
+  getParticipants(id: string): Promise<MeetingParticipants>;
+  getSpeakerIdentities(id: string): Promise<SpeakerIdentity[]>;
+  saveSpeakerIdentity(id: string, speaker: string, email: string | null): Promise<SpeakerIdentity[]>;
+  correctSpeaker(id: string, segmentId: string, displayName: string | null, applyToRawLabel: boolean): Promise<TranscriptSegment[]>;
   getMinutes(id: string): Promise<MeetingMinutes | null>;
   generateMinutes(id: string): Promise<MeetingMinutes>;
   saveMinutes(id: string, draft: MinutesDraft): Promise<MeetingMinutes>;
   approveMinutes(id: string): Promise<MeetingMinutes>;
   sendMinutes(id: string, recipients: string[], includeTranscript: boolean): Promise<EmailDelivery>;
+  getDeliverySettings(id: string): Promise<MeetingDeliverySettings>;
+  getPostMeetingJob(id: string): Promise<PostMeetingJob>;
+  retryPostMeetingJob(id: string): Promise<PostMeetingJob>;
+  saveDeliverySettings(id: string, settings: MeetingDeliverySettings): Promise<MeetingDeliverySettings>;
+  sendConfiguredMinutes(id: string): Promise<EmailDelivery>;
+  getResendStatus(): Promise<ResendStatus>;
   listProviderProfiles(): Promise<ProviderProfile[]>;
   saveProviderProfile(profile: ProviderProfile, apiKey?: string): Promise<ProviderProfile>;
-  testProviderConnection(profile: ProviderProfile, apiKey?: string): Promise<ProviderProfile>;
+  deleteProviderProfile(id: string): Promise<void>;
+  testProviderConnection(profile: ProviderProfile): Promise<ProviderProfile>;
 }
 
 type BackendProviderType = "openai" | "openai_compatible" | "vexa_native";
@@ -27,6 +60,7 @@ type BackendProfile = {
   base_url: string | null;
   capabilities: Array<{ capability: Capability; model: string }>;
   credential_configured: boolean;
+  credential_hint?: string | null;
 };
 type BackendDefault = {
   capability: Capability;
@@ -49,13 +83,20 @@ type BackendMeeting = {
   participant_count?: number | null;
   participants?: number | null;
   error_message?: string | null;
+  tags?: string[];
+  knowledge_enabled?: boolean;
+  knowledge_base_id?: string | null;
   last_error?: string | null;
   detail?: string | null;
 };
 
 type BackendTranscriptSegment = {
   id?: string;
+  segment_id?: string | null;
   speaker?: string | null;
+  raw_speaker?: string | null;
+  speaker_reviewed?: boolean;
+  attribution_source?: string | null;
   speaker_name?: string | null;
   text?: string | null;
   content?: string | null;
@@ -72,12 +113,6 @@ type BackendTranscriptSegment = {
 // Same-origin by default so browser-port forwarding and deployed custom domains
 // work without exposing the private API container address to the browser.
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
-
-const initialProfiles: ProviderProfile[] = [
-  { id: "new-transcription-openai", kind: "transcription", label: "OpenAI transcription", provider: "OpenAI", executionLocation: "cloud", endpoint: "https://api.openai.com/v1", model: "gpt-4o-transcribe", capabilities: ["transcription"], connectionState: "not_configured", isDefault: false, apiKeyConfigured: false },
-  { id: "new-mom-openai", kind: "mom", label: "OpenAI MOM", provider: "OpenAI", executionLocation: "cloud", endpoint: "https://api.openai.com/v1", model: "", capabilities: ["text_generation"], connectionState: "not_configured", isDefault: false, apiKeyConfigured: false },
-  { id: "new-embedding-local", kind: "embedding", label: "Local embeddings", provider: "OpenAI-compatible", executionLocation: "local", endpoint: "http://localhost:11434/v1", model: "", capabilities: ["embeddings"], connectionState: "not_configured", isDefault: false, apiKeyConfigured: false },
-];
 
 function kindFor(capability: Capability): ProfileKind {
   if (capability === "transcription") return "transcription";
@@ -109,7 +144,7 @@ function toFrontend(profile: BackendProfile, defaults: BackendDefault[]): Provid
     id: profile.id,
     kind: kindFor(capability),
     label: profile.name,
-    provider: providerLabel(profile.provider_type),
+    provider: profile.provider_type === "openai_compatible" && profile.base_url?.replace(/\/$/, "") === "https://openrouter.ai/api/v1" ? "OpenRouter" : providerLabel(profile.provider_type),
     executionLocation: profile.execution_location,
     endpoint: profile.base_url ?? "",
     model: configured?.model ?? "",
@@ -117,6 +152,7 @@ function toFrontend(profile: BackendProfile, defaults: BackendDefault[]): Provid
     connectionState: connectionConfigured ? "configured" : "not_configured",
     isDefault: defaults.some((item) => item.capability === capability && item.ordered_profile_ids[0] === profile.id),
     apiKeyConfigured: profile.credential_configured,
+    credentialHint: profile.credential_hint ?? null,
   };
 }
 
@@ -126,9 +162,13 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { "content-type": "application/json", ...init?.headers },
   });
   if (!response.ok) {
+    if (response.status === 401 && !path.startsWith("/v1/auth/")) {
+      window.dispatchEvent(new Event("meetings-ai-session-expired"));
+    }
     const payload = await response.json().catch(() => null) as { detail?: string } | null;
     throw new ApiError(payload?.detail ?? `API request failed (${response.status})`, response.status);
   }
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
@@ -185,6 +225,9 @@ function toMeetingDetail(meeting: BackendMeeting): MeetingDetail {
     joinedAt: meeting.joined_at ?? null,
     stoppedAt: meeting.stopped_at ?? null,
     errorMessage: meeting.error_message ?? meeting.last_error ?? meeting.detail ?? null,
+    tags: meeting.tags ?? [],
+    knowledgeEnabled: meeting.knowledge_enabled ?? false,
+    knowledgeBaseId: meeting.knowledge_base_id ?? null,
     startsAt: relativeTimestamp(createdAt),
     duration: meeting.duration || "—",
     participants: meeting.participant_count ?? meeting.participants ?? 0,
@@ -192,9 +235,14 @@ function toMeetingDetail(meeting: BackendMeeting): MeetingDetail {
 }
 
 function toTranscriptSegment(segment: BackendTranscriptSegment, index: number): TranscriptSegment {
+  const segmentId = segment.segment_id ?? segment.id ?? `segment-${index}`;
   return {
-    id: segment.id ?? `segment-${index}`,
+    id: segmentId,
+    segmentId,
     speaker: segment.speaker_name || segment.speaker || "Unidentified speaker",
+    rawSpeaker: segment.raw_speaker ?? segment.speaker ?? null,
+    speakerReviewed: segment.speaker_reviewed ?? false,
+    attributionSource: segment.attribution_source ?? null,
     text: segment.text ?? segment.content ?? "",
     startedAt: timestamp(segment.started_at ?? segment.start_time ?? segment.start_seconds),
     endedAt: timestamp(segment.ended_at ?? segment.end_time ?? segment.end_seconds),
@@ -203,6 +251,96 @@ function toTranscriptSegment(segment: BackendTranscriptSegment, index: number): 
 }
 
 class HttpMeetingsService implements MeetingsService {
+  async getSession(): Promise<boolean> {
+    return (await api<{ authenticated: boolean }>("/v1/auth/session")).authenticated;
+  }
+
+  async getCurrentAccount(): Promise<CurrentAccount> {
+    return api<CurrentAccount>("/v1/auth/me");
+  }
+
+  async login(email: string, password: string): Promise<void> {
+    await api("/v1/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+  }
+
+  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    await api("/v1/auth/change-password", {
+      method: "POST", body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    });
+  }
+
+  async inviteMember(email: string, displayName: string, role: "admin" | "member" | "viewer"): Promise<InviteResult> {
+    return api<InviteResult>("/v1/workspace/invite", {
+      method: "POST", body: JSON.stringify({ email, display_name: displayName, role }),
+    });
+  }
+
+  async resetMemberPassword(userId: string): Promise<InviteResult> {
+    return api<InviteResult>(`/v1/workspace/members/${userId}/temporary-password`, { method: "POST" });
+  }
+
+  async logout(): Promise<void> {
+    await api("/v1/auth/logout", { method: "POST" });
+  }
+
+  async getWorkspace(): Promise<Workspace> {
+    return api<Workspace>("/v1/workspace");
+  }
+
+  async updateWorkspace(patch: { display_name: string; contact_email: string | null }): Promise<Workspace> {
+    return api<Workspace>("/v1/workspace", { method: "PATCH", body: JSON.stringify(patch) });
+  }
+
+  async listWorkspaceMembers(): Promise<WorkspaceMember[]> {
+    return api<WorkspaceMember[]>("/v1/workspace/members");
+  }
+
+  async listKnowledgeBases(): Promise<KnowledgeBase[]> {
+    return api<KnowledgeBase[]>("/v1/knowledge-bases");
+  }
+
+  async getKnowledgeOverview(baseId: string): Promise<KnowledgeWikiOverview> {
+    return api<KnowledgeWikiOverview>(`/v1/knowledge-bases/${baseId}/overview`);
+  }
+
+  async createKnowledgeBase(name: string, description?: string): Promise<KnowledgeBase> {
+    return api<KnowledgeBase>("/v1/knowledge-bases", {
+      method: "POST", body: JSON.stringify({ name, description: description || null }),
+    });
+  }
+
+  async updateKnowledgeBase(id: string, patch: { name?: string; description?: string | null; text_profile_id?: string | null }): Promise<KnowledgeBase> {
+    return api<KnowledgeBase>(`/v1/knowledge-bases/${id}`, {
+      method: "PATCH", body: JSON.stringify(patch),
+    });
+  }
+
+  async shareKnowledgeBase(id: string, visibility: "private" | "organization" | "specific", userIds: string[]): Promise<KnowledgeBase> {
+    return api<KnowledgeBase>(`/v1/knowledge-bases/${id}/sharing`, {
+      method: "PUT", body: JSON.stringify({ visibility, user_ids: userIds }),
+    });
+  }
+
+  async listKnowledgeConversations(baseId: string): Promise<KnowledgeConversation[]> {
+    return api<KnowledgeConversation[]>(`/v1/knowledge-bases/${baseId}/conversations`);
+  }
+
+  async getKnowledgeConversation(baseId: string, conversationId: string): Promise<KnowledgeConversation> {
+    return api<KnowledgeConversation>(`/v1/knowledge-bases/${baseId}/conversations/${conversationId}`);
+  }
+
+  async searchKnowledge(query: string, tags: string[], knowledgeBaseId?: string | null): Promise<KnowledgeSearchResponse> {
+    return api<KnowledgeSearchResponse>("/v1/knowledge/search", {
+      method: "POST", body: JSON.stringify({ query, tags, knowledge_base_id: knowledgeBaseId ?? null }),
+    });
+  }
+
+  async chatKnowledge(query: string, tags: string[], knowledgeBaseId?: string | null, conversationId?: string | null): Promise<KnowledgeChatResponse> {
+    return api<KnowledgeChatResponse>("/v1/knowledge/chat", {
+      method: "POST", body: JSON.stringify({ query, tags, limit: 8, knowledge_base_id: knowledgeBaseId ?? null, conversation_id: conversationId ?? null }),
+    });
+  }
+
   async listMeetings(): Promise<Meeting[]> {
     try {
       const response = await api<BackendMeeting[] | { items?: BackendMeeting[] }>("/v1/meetings");
@@ -220,6 +358,10 @@ class HttpMeetingsService implements MeetingsService {
         meeting_url: input.meetingUrl,
         ...(input.title ? { title: input.title } : {}),
         ...(input.botName ? { bot_name: input.botName } : {}),
+        ...(input.deliverySettings ? { delivery_settings: input.deliverySettings } : {}),
+        tags: input.tags ?? [],
+        knowledge_enabled: input.knowledgeEnabled ?? false,
+        knowledge_base_id: input.knowledgeBaseId ?? null,
       }),
     });
     return toMeetingDetail(meeting);
@@ -227,6 +369,16 @@ class HttpMeetingsService implements MeetingsService {
 
   async getMeeting(id: string): Promise<MeetingDetail> {
     return toMeetingDetail(await api<BackendMeeting>(`/v1/meetings/${id}`));
+  }
+
+  async updateMeetingKnowledge(id: string, tags: string[], knowledgeEnabled: boolean, knowledgeBaseId?: string | null): Promise<MeetingDetail> {
+    return toMeetingDetail(await api<BackendMeeting>(`/v1/meetings/${id}/knowledge`, {
+      method: "PATCH", body: JSON.stringify({ tags, knowledge_enabled: knowledgeEnabled, ...(knowledgeBaseId !== undefined ? { knowledge_base_id: knowledgeBaseId } : {}) }),
+    }));
+  }
+
+  async getTranscriptionRoute(id: string): Promise<TranscriptionRoute> {
+    return api<TranscriptionRoute>(`/v1/meetings/${id}/transcription-route`);
   }
 
   async joinMeeting(id: string): Promise<MeetingDetail> {
@@ -252,6 +404,33 @@ class HttpMeetingsService implements MeetingsService {
     const response = await api<BackendTranscriptSegment[] | { segments?: BackendTranscriptSegment[] }>(`/v1/meetings/${id}/transcript`);
     const segments = Array.isArray(response) ? response : response.segments ?? [];
     return segments.map(toTranscriptSegment);
+  }
+
+  async exportTranscript(id: string): Promise<string> {
+    const response = await api<unknown>(`/v1/meetings/${id}/transcript`);
+    return JSON.stringify(response, null, 2);
+  }
+
+  async getParticipants(id: string): Promise<MeetingParticipants> {
+    return api<MeetingParticipants>(`/v1/meetings/${id}/participants`);
+  }
+
+  async getSpeakerIdentities(id: string): Promise<SpeakerIdentity[]> {
+    return api<SpeakerIdentity[]>(`/v1/meetings/${id}/speaker-identities`);
+  }
+
+  async saveSpeakerIdentity(id: string, speaker: string, email: string | null): Promise<SpeakerIdentity[]> {
+    return api<SpeakerIdentity[]>(`/v1/meetings/${id}/speaker-identities`, {
+      method: "PUT", body: JSON.stringify({ speaker, email }),
+    });
+  }
+
+  async correctSpeaker(id: string, segmentId: string, displayName: string | null, applyToRawLabel: boolean): Promise<TranscriptSegment[]> {
+    const response = await api<{ segments: BackendTranscriptSegment[] }>(
+      `/v1/meetings/${id}/transcript/segments/${encodeURIComponent(segmentId)}/speaker`,
+      { method: "PUT", body: JSON.stringify({ display_name: displayName, apply_to_raw_label: applyToRawLabel }) },
+    );
+    return response.segments.map(toTranscriptSegment);
   }
 
   async getMinutes(id: string): Promise<MeetingMinutes | null> {
@@ -285,16 +464,38 @@ class HttpMeetingsService implements MeetingsService {
     });
   }
 
+  async getDeliverySettings(id: string): Promise<MeetingDeliverySettings> {
+    return api<MeetingDeliverySettings>(`/v1/meetings/${id}/delivery-settings`);
+  }
+
+  async getPostMeetingJob(id: string): Promise<PostMeetingJob> {
+    return api<PostMeetingJob>(`/v1/meetings/${id}/post-meeting-job`);
+  }
+
+  async retryPostMeetingJob(id: string): Promise<PostMeetingJob> {
+    return api<PostMeetingJob>(`/v1/meetings/${id}/post-meeting-job/retry`, { method: "POST" });
+  }
+
+  async saveDeliverySettings(id: string, settings: MeetingDeliverySettings): Promise<MeetingDeliverySettings> {
+    return api<MeetingDeliverySettings>(`/v1/meetings/${id}/delivery-settings`, {
+      method: "PUT", body: JSON.stringify(settings),
+    });
+  }
+
+  async sendConfiguredMinutes(id: string): Promise<EmailDelivery> {
+    return api<EmailDelivery>(`/v1/meetings/${id}/minutes/send-configured`, { method: "POST" });
+  }
+
+  async getResendStatus(): Promise<ResendStatus> {
+    return api<ResendStatus>("/v1/integrations/resend/status");
+  }
+
   async listProviderProfiles(): Promise<ProviderProfile[]> {
-    try {
-      const [profiles, defaults] = await Promise.all([
-        api<BackendProfile[]>("/v1/provider-profiles"),
-        api<BackendDefault[]>("/v1/provider-defaults"),
-      ]);
-      return profiles.length ? profiles.map((profile) => toFrontend(profile, defaults)) : structuredClone(initialProfiles);
-    } catch {
-      return structuredClone(initialProfiles);
-    }
+    const [profiles, defaults] = await Promise.all([
+      api<BackendProfile[]>("/v1/provider-profiles"),
+      api<BackendDefault[]>("/v1/provider-defaults"),
+    ]);
+    return profiles.map((profile) => toFrontend(profile, defaults));
   }
 
   async saveProviderProfile(profile: ProviderProfile, apiKey?: string): Promise<ProviderProfile> {
@@ -325,11 +526,16 @@ class HttpMeetingsService implements MeetingsService {
     return { ...toFrontend(saved, []), isDefault: profile.isDefault };
   }
 
-  async testProviderConnection(profile: ProviderProfile, apiKey?: string): Promise<ProviderProfile> {
-    const saved = await this.saveProviderProfile(profile, apiKey);
-    const result = await api<{ status: "configuration_valid" | "configuration_invalid" }>(`/v1/provider-profiles/${saved.id}/test`, { method: "POST" });
+  async deleteProviderProfile(id: string): Promise<void> {
+    if (id.startsWith("new-")) return;
+    await api<void>(`/v1/provider-profiles/${id}`, { method: "DELETE" });
+  }
+
+  async testProviderConnection(profile: ProviderProfile): Promise<ProviderProfile> {
+    if (profile.id.startsWith("new-")) throw new Error("Save the configuration before validating it.");
+    const result = await api<{ status: "configuration_valid" | "configuration_invalid" }>(`/v1/provider-profiles/${profile.id}/test`, { method: "POST" });
     const connectionState: ConnectionState = result.status === "configuration_valid" ? "configured" : "failed";
-    return { ...saved, connectionState };
+    return { ...profile, connectionState };
   }
 }
 

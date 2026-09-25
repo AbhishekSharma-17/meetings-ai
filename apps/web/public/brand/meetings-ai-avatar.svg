@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Meetings AI assistant">
+  <defs><linearGradient id="sea" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#176b66"/><stop offset="1" stop-color="#0d4444"/></linearGradient></defs>
+  <rect width="512" height="512" rx="118" fill="url(#sea)"/>
+  <path d="M112 169c0-31 25-56 56-56h176c31 0 56 25 56 56v139c0 31-25 56-56 56H240l-89 69v-69c-23-7-39-29-39-56V169Z" fill="none" stroke="#f7fbfa" stroke-width="27" stroke-linejoin="round"/>
+  <path d="M177 290V190l79 81 79-81v100" fill="none" stroke="#f7fbfa" stroke-width="29" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="382" cy="117" r="31" fill="#b9e6d7"/>
+</svg>

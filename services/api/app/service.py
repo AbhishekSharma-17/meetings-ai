@@ -53,6 +53,8 @@ class ProviderProfileService:
                 for capability, model in profile.models.items()
             ],
             credential_configured=bool(profile.api_key),
+            credential_hint=(f"••••{profile.api_key[-4:]}" if profile.api_key and len(profile.api_key) >= 8
+                             else "••••" if profile.api_key else None),
             created_at=profile.created_at,
             updated_at=profile.updated_at,
         )
@@ -110,13 +112,22 @@ class ProviderProfileService:
         profile.updated_at = datetime.now(UTC)
         return self.repository.save_profile(profile)
 
+    def delete(self, profile_id: UUID) -> None:
+        self.repository.delete_profile(profile_id)
+
     async def test(self, profile_id: UUID) -> AdapterTestResult:
         profile = self.repository.get_profile(profile_id)
         return await self.adapters[profile.provider_type].test_configuration(profile)
 
     async def generate_text(
-        self, request: TextGenerationRequest
+        self, request: TextGenerationRequest, *, profile_id: UUID | None = None,
     ) -> tuple[ProviderProfile, TextGenerationResult]:
+        if profile_id is not None:
+            profile = self.repository.get_profile(profile_id)
+            if not profile.supports(Capability.TEXT_GENERATION):
+                raise ProviderSelectionError("selected profile does not support text generation")
+            result = await self.adapters[profile.provider_type].generate_text(profile, request)
+            return profile, result
         selection = self.repository.get_default(Capability.TEXT_GENERATION)
         if selection is None or not selection.ordered_profile_ids():
             raise ProviderSelectionError("no default MOM text-generation provider is selected")
@@ -153,6 +164,24 @@ class ProviderProfileService:
         )
         self.repository.save_default(selection)
         return self.to_default_response(selection)
+
+    def resolve_transcription_profile(self) -> ProviderProfile | None:
+        """Choose one configured route before spawn; no mid-meeting fallback."""
+        selection = self.repository.get_default(Capability.TRANSCRIPTION)
+        if selection is None:
+            return None  # An operator may still use Vexa's deployment STT default.
+        failures: list[str] = []
+        for profile_id in selection.ordered_profile_ids():
+            profile = self.repository.get_profile(profile_id)
+            if not profile.supports(Capability.TRANSCRIPTION):
+                failures.append(f"{profile.name}: transcription model is missing")
+            elif profile.execution_location is ExecutionLocation.CLOUD and not profile.api_key:
+                failures.append(f"{profile.name}: API credential is missing")
+            else:
+                return profile
+        raise ProviderSelectionError(
+            "; ".join(failures) or "no usable default transcription profile is selected"
+        )
 
     def _validate_selected_profile(
         self,

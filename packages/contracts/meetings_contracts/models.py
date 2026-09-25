@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 
 from .schemas import (
     ActionItem,
+    AttributedQuestion,
     Capability,
     ExecutionLocation,
     FallbackPolicy,
@@ -17,6 +18,7 @@ from .schemas import (
     MeetingStatus,
     MinutesStatus,
     ProviderType,
+    SpeakerContribution,
 )
 
 
@@ -65,6 +67,9 @@ class Meeting:
     language: str | None = None
     transcribe_enabled: bool = True
     recording_enabled: bool = False
+    tags: list[str] = field(default_factory=list)
+    knowledge_enabled: bool = False
+    knowledge_base_id: UUID | None = None
     status: MeetingStatus = MeetingStatus.CREATED
     vexa_meeting_id: int | None = None
     last_error: str | None = None
@@ -85,6 +90,8 @@ class MeetingMinutes:
     decisions: list[str] = field(default_factory=list)
     action_items: list[ActionItem] = field(default_factory=list)
     open_questions: list[str] = field(default_factory=list)
+    speaker_contributions: list[SpeakerContribution] = field(default_factory=list)
+    questions_asked: list[AttributedQuestion] = field(default_factory=list)
     status: MinutesStatus = MinutesStatus.DRAFT
     provider_profile_id: UUID | None = None
     provider: str | None = None

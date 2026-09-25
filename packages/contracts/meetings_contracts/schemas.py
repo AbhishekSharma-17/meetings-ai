@@ -6,7 +6,7 @@ from enum import Enum
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, SecretStr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, SecretStr, field_validator, model_validator
 
 
 class ProviderType(str, Enum):
@@ -86,7 +86,7 @@ class ProfileUpdate(BaseModel):
 
 
 class ProfilePublic(BaseModel):
-    """Safe profile representation. It intentionally has no credential field."""
+    """Safe profile representation with only a short, non-reusable key hint."""
 
     id: UUID
     name: str
@@ -95,6 +95,7 @@ class ProfilePublic(BaseModel):
     base_url: str | None
     capabilities: list[CapabilityConfig]
     credential_configured: bool
+    credential_hint: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -214,6 +215,31 @@ class MeetingStatus(str, Enum):
     FAILED = "failed"
 
 
+class MeetingDeliverySettings(BaseModel):
+    """Explicit, per-meeting email audience. Participant delivery is opt-in."""
+
+    model_config = ConfigDict(extra="forbid")
+    internal_recipients: list[str] = Field(default_factory=list, max_length=50)
+    participant_recipients: list[str] = Field(default_factory=list, max_length=50)
+    send_to_participants: bool = False
+    include_transcript: bool = False
+
+    @model_validator(mode="after")
+    def validate_addresses(self) -> "MeetingDeliverySettings":
+        for field_name in ("internal_recipients", "participant_recipients"):
+            normalized: list[str] = []
+            for recipient in getattr(self, field_name):
+                value = recipient.strip().lower()
+                if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value):
+                    raise ValueError(f"invalid recipient email address: {recipient}")
+                if value not in normalized:
+                    normalized.append(value)
+            setattr(self, field_name, normalized)
+        if self.send_to_participants and not self.participant_recipients:
+            raise ValueError("participant recipients are required when sharing is enabled")
+        return self
+
+
 class MeetingCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -223,6 +249,35 @@ class MeetingCreate(BaseModel):
     language: Annotated[str | None, Field(default=None, min_length=2, max_length=35)]
     transcribe_enabled: bool = True
     recording_enabled: bool = False
+    tags: list[str] = Field(default_factory=list, max_length=12)
+    knowledge_enabled: bool = False
+    knowledge_base_id: UUID | None = None
+    delivery_settings: MeetingDeliverySettings = Field(default_factory=MeetingDeliverySettings)
+
+    @field_validator("tags")
+    @classmethod
+    def normalize_tags(cls, tags: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for tag in tags:
+            value = tag.strip().lower()
+            if not 2 <= len(value) <= 50 or not re.fullmatch(r"[\w][\w -]*[\w]", value):
+                raise ValueError("tags must contain 2–50 letters, numbers, spaces, underscores, or hyphens")
+            if value not in normalized:
+                normalized.append(value)
+        return normalized
+
+
+class MeetingKnowledgeUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tags: list[str] = Field(default_factory=list, max_length=12)
+    knowledge_enabled: bool = False
+    knowledge_base_id: UUID | None = None
+
+    @field_validator("tags")
+    @classmethod
+    def normalize_tags(cls, tags: list[str]) -> list[str]:
+        return MeetingCreate.normalize_tags(tags)
 
 
 class MeetingPublic(BaseModel):
@@ -233,6 +288,9 @@ class MeetingPublic(BaseModel):
     language: str | None
     transcribe_enabled: bool
     recording_enabled: bool
+    tags: list[str]
+    knowledge_enabled: bool
+    knowledge_base_id: UUID | None
     platform: MeetingPlatform
     native_meeting_id: str
     status: MeetingStatus
@@ -251,10 +309,15 @@ class MeetingListResponse(BaseModel):
 
 
 class MeetingTranscriptSegment(BaseModel):
+    segment_id: str | None = None
     start_seconds: float = Field(ge=0)
     end_seconds: float = Field(ge=0)
     text: str
     speaker: str | None = None
+    raw_speaker: str | None = None
+    speaker_key: str | None = None
+    attribution_source: str | None = None
+    speaker_reviewed: bool = False
     language: str | None = None
     completed: bool = True
 
@@ -267,10 +330,55 @@ class MeetingTranscriptSegment(BaseModel):
 
 class MeetingTranscriptResponse(BaseModel):
     meeting_id: UUID
-    vexa_meeting_id: int
+    vexa_meeting_id: int | None
     status: MeetingStatus
     segments: list[MeetingTranscriptSegment]
     segment_count: int
+
+
+class SpeakerCorrectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: Annotated[str | None, Field(default=None, min_length=1, max_length=200)]
+    apply_to_raw_label: bool = False
+
+
+class MeetingParticipant(BaseModel):
+    name: str
+    email: str | None = None
+    source: str
+    response_status: str | None = None
+
+
+class MeetingParticipantsResponse(BaseModel):
+    meeting_id: UUID
+    participants: list[MeetingParticipant]
+    observed_roster: str = "not_recorded"
+    upstream_available: bool = False
+
+
+class SpeakerIdentityRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    speaker: Annotated[str, Field(min_length=1, max_length=200)]
+    email: str | None = None
+
+    @model_validator(mode="after")
+    def validate_email(self) -> "SpeakerIdentityRequest":
+        self.speaker = self.speaker.strip()
+        if not self.speaker:
+            raise ValueError("speaker name is required")
+        if self.email is not None:
+            self.email = self.email.strip().lower()
+            if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", self.email):
+                raise ValueError("invalid speaker email address")
+        return self
+
+
+class SpeakerIdentityPublic(BaseModel):
+    speaker: str
+    email: str
+    confirmed_at: datetime
 
 
 class MinutesStatus(str, Enum):
@@ -285,6 +393,23 @@ class ActionItem(BaseModel):
     description: Annotated[str, Field(min_length=1, max_length=1000)]
     owner: Annotated[str | None, Field(default=None, max_length=200)]
     due_date: Annotated[str | None, Field(default=None, max_length=100)]
+    evidence_segment_ids: list[str] = Field(default_factory=list, max_length=20)
+
+
+class SpeakerContribution(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    speaker: Annotated[str, Field(min_length=1, max_length=200)]
+    summary: Annotated[str, Field(min_length=1, max_length=2000)]
+    evidence_segment_ids: Annotated[list[str], Field(min_length=1, max_length=20)]
+
+
+class AttributedQuestion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    speaker: Annotated[str | None, Field(default=None, max_length=200)]
+    question: Annotated[str, Field(min_length=1, max_length=2000)]
+    evidence_segment_ids: Annotated[list[str], Field(min_length=1, max_length=20)]
 
 
 class MeetingMinutesDraft(BaseModel):
@@ -302,6 +427,8 @@ class MeetingMinutesDraft(BaseModel):
     open_questions: list[Annotated[str, Field(min_length=1, max_length=2000)]] = Field(
         default_factory=list, max_length=100
     )
+    speaker_contributions: list[SpeakerContribution] = Field(default_factory=list, max_length=100)
+    questions_asked: list[AttributedQuestion] = Field(default_factory=list, max_length=100)
 
 
 class MeetingMinutesPublic(MeetingMinutesDraft):

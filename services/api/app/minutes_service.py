@@ -2,6 +2,7 @@
 
 import json
 import re
+from hashlib import sha256
 from datetime import UTC, datetime
 from html import escape
 from uuid import UUID
@@ -59,7 +60,18 @@ class MinutesService:
         self.repository.get_meeting(meeting_id)
         return self.repository.get_minutes(meeting_id)
 
+    def require_not_sent(self, meeting_id: UUID) -> None:
+        try:
+            existing = self.repository.get_minutes(meeting_id)
+        except MinutesNotFoundError:
+            return
+        if existing.status is MinutesStatus.SENT:
+            raise MinutesConflictError(
+                "sent MOM is locked; a versioned correction workflow is required"
+            )
+
     async def generate(self, meeting_id: UUID) -> MeetingMinutes:
+        self.require_not_sent(meeting_id)
         meeting = self.repository.get_meeting(meeting_id)
         if meeting.status in _CAPTURE_IN_PROGRESS:
             raise MinutesConflictError("stop the meeting capture before generating its MOM")
@@ -68,8 +80,10 @@ class MinutesService:
         if not finalized:
             raise MinutesConflictError("a finalized transcript is required before generating MOM")
 
+        source_revision = self.repository.get_transcript_revision(meeting_id)
         transcript = "\n".join(
-            f"[{segment.start_seconds:.1f}s] {segment.speaker or 'Unidentified speaker'}: "
+            f"[{segment.segment_id} @ {segment.start_seconds:.1f}s] "
+            f"{segment.speaker or 'Unidentified speaker'}: "
             f"{segment.text.strip()}"
             for segment in finalized
         )
@@ -78,12 +92,17 @@ class MinutesService:
             system_prompt=(
                 "You create factual meeting minutes from only the supplied transcript. "
                 "Do not invent names, owners, dates, commitments, decisions, or context. "
-                "Use null when an action owner or due date was not explicitly stated."
+                "Treat Unidentified speaker as unknown, never infer their name from context. "
+                "Use null when an action owner or due date was not explicitly stated. "
+                "Attach exact segment IDs as evidence for every attributed claim and action."
             ),
             prompt=(
                 f"Meeting title: {meeting.title or 'Untitled meeting'}\n\n"
                 "Return concise structured minutes for this transcript. Separate discussion "
-                "points, explicit decisions, action items, and unresolved questions.\n\n"
+                "points, explicit decisions, action items, unresolved questions, "
+                "who each identified speaker said, and who asked each question. "
+                "Every substantive named speaker needs a contribution entry. "
+                "For an unidentified questioner use null.\n\n"
                 f"Transcript:\n{transcript}"
             ),
             max_output_tokens=2500,
@@ -94,10 +113,14 @@ class MinutesService:
             profile, result = await self.providers.generate_text(request)
             payload = result.structured_output or _parse_json(result.text)
             draft = MeetingMinutesDraft.model_validate(payload)
+            _validate_generated_evidence(draft, finalized)
         except (ProviderExecutionError, ProviderSelectionError, ValidationError, ValueError) as exc:
             raise MinutesGenerationError(f"MOM generation failed: {exc}") from exc
 
         now = datetime.now(UTC)
+        if self.repository.get_transcript_revision(meeting_id) != source_revision:
+            raise MinutesConflictError("transcript changed while MOM was generating; try again")
+        self.require_not_sent(meeting_id)
         try:
             previous = self.repository.get_minutes(meeting_id)
             created_at = previous.created_at
@@ -111,6 +134,8 @@ class MinutesService:
             decisions=draft.decisions,
             action_items=draft.action_items,
             open_questions=draft.open_questions,
+            speaker_contributions=draft.speaker_contributions,
+            questions_asked=draft.questions_asked,
             status=MinutesStatus.DRAFT,
             provider_profile_id=profile.id,
             provider=result.provider,
@@ -118,7 +143,9 @@ class MinutesService:
             created_at=created_at,
             updated_at=now,
         )
-        return self.repository.save_minutes(minutes)
+        saved = self.repository.save_minutes(minutes)
+        self.repository.save_minutes_source_revision(meeting_id, source_revision)
+        return saved
 
     def update(self, meeting_id: UUID, draft: MeetingMinutesDraft) -> MeetingMinutes:
         minutes = self.get(meeting_id)
@@ -130,6 +157,9 @@ class MinutesService:
         minutes.decisions = draft.decisions
         minutes.action_items = draft.action_items
         minutes.open_questions = draft.open_questions
+        _validate_references(draft, self.repository.get_transcript(meeting_id))
+        minutes.speaker_contributions = draft.speaker_contributions
+        minutes.questions_asked = draft.questions_asked
         minutes.status = MinutesStatus.DRAFT
         minutes.approved_at = None
         minutes.last_error = None
@@ -140,6 +170,7 @@ class MinutesService:
         minutes = self.get(meeting_id)
         if minutes.status is MinutesStatus.SENT:
             return minutes
+        self._require_current_transcript(meeting_id)
         now = datetime.now(UTC)
         minutes.status = MinutesStatus.APPROVED
         minutes.approved_at = now
@@ -154,6 +185,7 @@ class MinutesService:
         minutes = self.get(meeting_id)
         if minutes.status is not MinutesStatus.APPROVED:
             raise MinutesConflictError("approve the MOM before sending it")
+        self._require_current_transcript(meeting_id)
         transcript = self.repository.get_transcript(meeting_id) if request.include_transcript else []
         html, plain_text = _email_content(minutes, transcript)
         delivery = EmailDelivery(
@@ -162,11 +194,17 @@ class MinutesService:
             status="failed",
         )
         try:
+            delivery_identity = json.dumps(
+                [str(meeting_id), minutes.approved_at.isoformat() if minutes.approved_at else "",
+                 request.recipients, request.include_transcript],
+                separators=(",", ":"),
+            )
             delivery.provider_message_id = await self.resend.send(
                 recipients=request.recipients,
                 subject=f"Meeting recap: {minutes.title or meeting.title or 'Untitled meeting'}",
                 html=html,
                 text=plain_text,
+                idempotency_key=f"minutes-{sha256(delivery_identity.encode()).hexdigest()}",
             )
         except EmailDeliveryError as exc:
             delivery.error = str(exc)
@@ -184,6 +222,12 @@ class MinutesService:
         minutes.last_error = None
         self.repository.save_minutes(minutes)
         return delivery
+
+    def _require_current_transcript(self, meeting_id: UUID) -> None:
+        source = self.repository.get_minutes_source_revision(meeting_id)
+        current = self.repository.get_transcript_revision(meeting_id)
+        if source is None or source != current:
+            raise MinutesConflictError("transcript or speaker attribution changed; regenerate MOM before approval or sending")
 
     @staticmethod
     def to_public(minutes: MeetingMinutes) -> MeetingMinutesPublic:
@@ -232,11 +276,29 @@ def _minutes_response_schema() -> dict[str, object]:
                         "description": {"type": "string"},
                         "owner": {"type": ["string", "null"]},
                         "due_date": {"type": ["string", "null"]},
+                        "evidence_segment_ids": string_list,
                     },
-                    "required": ["description", "owner", "due_date"],
+                    "required": ["description", "owner", "due_date", "evidence_segment_ids"],
                 },
             },
             "open_questions": string_list,
+            "speaker_contributions": {
+                "type": "array", "items": {
+                    "type": "object", "additionalProperties": False,
+                    "properties": {"speaker": {"type": "string"}, "summary": {"type": "string"},
+                                   "evidence_segment_ids": string_list},
+                    "required": ["speaker", "summary", "evidence_segment_ids"],
+                },
+            },
+            "questions_asked": {
+                "type": "array", "items": {
+                    "type": "object", "additionalProperties": False,
+                    "properties": {"speaker": {"type": ["string", "null"]},
+                                   "question": {"type": "string"},
+                                   "evidence_segment_ids": string_list},
+                    "required": ["speaker", "question", "evidence_segment_ids"],
+                },
+            },
         },
         "required": [
             "title",
@@ -245,8 +307,48 @@ def _minutes_response_schema() -> dict[str, object]:
             "decisions",
             "action_items",
             "open_questions",
+            "speaker_contributions",
+            "questions_asked",
         ],
     }
+
+
+def _validate_references(draft: MeetingMinutesDraft, segments: list[object]) -> None:
+    by_id = {segment.segment_id: segment for segment in segments if segment.segment_id}
+    claims = [*draft.speaker_contributions, *draft.questions_asked, *draft.action_items]
+    for claim in claims:
+        if not claim.evidence_segment_ids:
+            raise MinutesGenerationError("every attributed claim and action needs transcript evidence")
+        for segment_id in claim.evidence_segment_ids:
+            if segment_id not in by_id or not by_id[segment_id].completed:
+                raise MinutesGenerationError(f"MOM cites an unavailable transcript segment: {segment_id}")
+        speaker = getattr(claim, "speaker", None)
+        if speaker and not any(by_id[segment_id].speaker == speaker for segment_id in claim.evidence_segment_ids):
+            raise MinutesGenerationError(f"MOM attribution for {speaker} does not match its transcript evidence")
+    for action in draft.action_items:
+        if not action.owner:
+            continue
+        cited = [by_id[segment_id] for segment_id in action.evidence_segment_ids]
+        owner = action.owner.strip().casefold()
+        if not any(
+            (segment.speaker or "").casefold() == owner
+            or owner in segment.text.casefold()
+            for segment in cited
+        ):
+            raise MinutesGenerationError(
+                f"action owner {action.owner} is not supported by cited transcript evidence"
+            )
+
+
+def _validate_generated_evidence(draft: MeetingMinutesDraft, segments: list[object]) -> None:
+    _validate_references(draft, segments)
+    substantive = {
+        segment.speaker for segment in segments
+        if segment.speaker and len(segment.text.strip()) >= 20
+    }
+    covered = {item.speaker for item in draft.speaker_contributions}
+    if substantive - covered:
+        raise MinutesGenerationError("MOM omitted a substantive named speaker; regenerate or review the transcript")
 
 
 def _email_content(minutes: MeetingMinutes, transcript: list[object]) -> tuple[str, str]:
@@ -256,6 +358,8 @@ def _email_content(minutes: MeetingMinutes, transcript: list[object]) -> tuple[s
     ]
     sections = [
         ("Executive summary", [minutes.executive_summary]),
+        ("Who said what", [f"{item.speaker}: {item.summary}" for item in minutes.speaker_contributions]),
+        ("Questions asked", [f"{item.speaker or 'Unidentified speaker'}: {item.question}" for item in minutes.questions_asked]),
         ("Discussion points", minutes.discussion_points),
         ("Decisions", minutes.decisions),
         ("Action items", action_lines),
