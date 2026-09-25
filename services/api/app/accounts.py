@@ -261,6 +261,10 @@ class AccountService:
                     auth_subject=f"local:{user_id}", status="invited",
                     created_at=now, updated_at=now,
                 ))
+                # The credential and membership both reference users.id. With
+                # no ORM relationships SQLAlchemy may flush the membership
+                # first; PostgreSQL rejects that immediate foreign key.
+                session.flush()
                 session.add(UserCredentialRow(
                     user_id=user_id, password_hash=_hash_password(temporary),
                     must_change_password=True, session_version=1,
