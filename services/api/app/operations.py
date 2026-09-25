@@ -9,10 +9,13 @@ from hashlib import sha256
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, func, select, text
 
 from .accounts import Actor
-from .database import AuditEventRow, AuthRateLimitBucketRow, Database
+from .database import (
+    AuditEventRow, AuthRateLimitBucketRow, Database, EmailDeliveryRow,
+    KnowledgeIndexJobRow, MeetingRow, MeetingTenantRow, PostMeetingJobRow,
+)
 
 
 class LoginRateLimiter:
@@ -85,16 +88,57 @@ class AuditEventPublic(BaseModel):
     created_at: datetime
 
 
+class WorkspaceOperationsPublic(BaseModel):
+    active_captures: int
+    failed_captures: int
+    failed_mom_jobs: int
+    pending_index_jobs: int
+    failed_index_jobs: int
+    failed_email_deliveries: int
+    latest_audit_at: datetime | None
+
+
+def workspace_operations(database: Database, organization_id: UUID) -> WorkspaceOperationsPublic:
+    org = str(organization_id)
+    with database.session_factory() as session:
+        meetings = session.execute(select(MeetingRow.status).join(
+            MeetingTenantRow, MeetingTenantRow.meeting_id == MeetingRow.id,
+        ).where(MeetingTenantRow.organization_id == org)).scalars().all()
+        mom_failures = session.execute(select(func.count()).select_from(PostMeetingJobRow).join(
+            MeetingTenantRow, MeetingTenantRow.meeting_id == PostMeetingJobRow.meeting_id,
+        ).where(MeetingTenantRow.organization_id == org, PostMeetingJobRow.last_error.is_not(None),
+                PostMeetingJobRow.completed_at.is_(None))).scalar_one()
+        index_jobs = session.execute(select(KnowledgeIndexJobRow.status).where(
+            KnowledgeIndexJobRow.organization_id == org,
+        )).scalars().all()
+        email_failures = session.execute(select(func.count()).select_from(EmailDeliveryRow).join(
+            MeetingTenantRow, MeetingTenantRow.meeting_id == EmailDeliveryRow.meeting_id,
+        ).where(MeetingTenantRow.organization_id == org, EmailDeliveryRow.status == "failed")).scalar_one()
+        last_audit = session.execute(select(func.max(AuditEventRow.created_at)).where(
+            AuditEventRow.organization_id == org,
+        )).scalar_one_or_none()
+    return WorkspaceOperationsPublic(
+        active_captures=sum(status in {"requested", "joining", "awaiting_admission", "active", "needs_human_help", "stopping"} for status in meetings),
+        failed_captures=meetings.count("failed"),
+        failed_mom_jobs=mom_failures,
+        pending_index_jobs=sum(status in {"pending", "running"} for status in index_jobs),
+        failed_index_jobs=index_jobs.count("failed"),
+        failed_email_deliveries=email_failures,
+        latest_audit_at=last_audit,
+    )
+
+
 class AuditService:
     def __init__(self, database: Database) -> None:
         self.database = database
 
     def append(self, actor: Actor | None, action: str, resource_path: str,
-               status_code: int, resource_id: UUID | None = None) -> None:
+               status_code: int, resource_id: UUID | None = None,
+               *, organization_id: UUID | None = None) -> None:
         with self.database.session_factory.begin() as session:
             session.add(AuditEventRow(
                 id=str(uuid4()),
-                organization_id=str(actor.organization_id) if actor else None,
+                organization_id=str(actor.organization_id if actor else organization_id) if actor or organization_id else None,
                 actor_user_id=str(actor.user_id) if actor else None,
                 action=action, resource_path=resource_path,
                 resource_id=str(resource_id) if resource_id else None,

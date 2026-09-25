@@ -82,6 +82,14 @@ class MeetingService:
         items = [self.to_public(item) for item in self.repository.list_meetings()]
         return MeetingListResponse(items=items, count=len(items))
 
+    async def delete(self, meeting_id: UUID) -> None:
+        meeting = self.repository.get_meeting(meeting_id)
+        if meeting.status not in {MeetingStatus.CREATED, MeetingStatus.COMPLETED, MeetingStatus.FAILED}:
+            raise MeetingConflictError("stop the assistant and wait for capture to finish before deleting this meeting")
+        if meeting.vexa_meeting_id is not None:
+            await self.vexa.delete_meeting(meeting.vexa_meeting_id)
+        self.repository.delete_meeting(meeting_id)
+
     def update_knowledge(self, meeting_id: UUID, update: MeetingKnowledgeUpdate) -> Meeting:
         meeting = self.repository.get_meeting(meeting_id)
         if "knowledge_base_id" in update.model_fields_set and update.knowledge_base_id and self.knowledge_bases:

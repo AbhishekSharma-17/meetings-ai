@@ -1,22 +1,26 @@
 """Explicit knowledge indexing; live evidence remains the authority at query time."""
 
+import asyncio
 import hashlib
 import json
+import logging
 import math
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from meetings_contracts import Capability, EmbeddingRequest
 from pydantic import BaseModel
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 
 from .accounts import Actor
 from .adapters.base import ProviderExecutionError
-from .database import Database, KnowledgeEmbeddingRow
+from .database import Database, KnowledgeEmbeddingRow, KnowledgeIndexJobRow
 from .knowledge_service import KnowledgeQuery, KnowledgeSource
 from .repository import ProfileNotFoundError
 from .service import ProviderProfileService, ProviderSelectionError
-from .tenant import current_organization_id
+from .tenant import current_organization_id, tenant_scope
+
+logger = logging.getLogger(__name__)
 
 
 class KnowledgeIndexError(RuntimeError):
@@ -29,6 +33,10 @@ class KnowledgeIndexStatus(BaseModel):
     profile_id: UUID | None = None
     model: str | None = None
     last_indexed_at: datetime | None = None
+    job_status: str | None = None
+    requested_at: datetime | None = None
+    next_retry_at: datetime | None = None
+    last_error: str | None = None
 
 
 def _fingerprint(source: KnowledgeSource) -> str:
@@ -72,17 +80,25 @@ class KnowledgeIndexService:
                 KnowledgeEmbeddingRow.knowledge_base_id == str(base_id),
             ).order_by(KnowledgeEmbeddingRow.updated_at.desc())).scalars().all()
             first = rows[0] if rows else None
+            job = session.get(KnowledgeIndexJobRow, str(base_id))
             return KnowledgeIndexStatus(
                 knowledge_base_id=base_id, indexed_sources=len(rows),
                 profile_id=UUID(first.profile_id) if first else None,
                 model=first.model if first else None,
                 last_indexed_at=first.updated_at if first else None,
+                job_status=job.status if job else None,
+                requested_at=job.requested_at if job else None,
+                next_retry_at=job.next_retry_at if job else None,
+                last_error=job.last_error if job else None,
             )
 
     async def reindex(self, base_id: UUID, actor: Actor | None = None) -> KnowledgeIndexStatus:
         base = self.bases.get(base_id, actor)
         if actor is not None and not actor.is_admin and base.created_by != actor.user_id:
             raise KnowledgeIndexError("only the creator or an admin can index this knowledge base")
+        with self.database.session_factory() as session:
+            starting_job = session.get(KnowledgeIndexJobRow, str(base_id))
+            starting_request = starting_job.requested_at if starting_job else None
         sources, truncated = self.knowledge.candidate_sources(
             KnowledgeQuery(query="all", knowledge_base_id=base_id), actor,
         )
@@ -124,7 +140,63 @@ class KnowledgeIndexService:
                     profile_id=str(profile_id), model=model,
                     dimensions=dimensions, vector=vector, updated_at=now,
                 ))
+            job = session.get(KnowledgeIndexJobRow, str(base_id))
+            if job is None:
+                session.add(KnowledgeIndexJobRow(
+                    knowledge_base_id=str(base_id), organization_id=organization_id,
+                    status="succeeded", attempts=0, requested_at=now,
+                    started_at=now, completed_at=now, next_retry_at=None,
+                    last_error=None,
+                ))
+            elif job.requested_at == starting_request:
+                job.status = "succeeded"
+                job.completed_at = now
+                job.next_retry_at = None
+                job.last_error = None
         return self.status(base_id, actor)
+
+    def pending_scopes(self, limit: int = 1) -> list[tuple[UUID, UUID]]:
+        now = datetime.now(UTC)
+        stale = now - timedelta(minutes=15)
+        with self.database.session_factory() as session:
+            rows = session.execute(select(KnowledgeIndexJobRow).where(or_(
+                KnowledgeIndexJobRow.status == "pending",
+                (KnowledgeIndexJobRow.status == "failed") & (KnowledgeIndexJobRow.next_retry_at <= now),
+                (KnowledgeIndexJobRow.status == "running") & (KnowledgeIndexJobRow.started_at <= stale),
+            )).order_by(KnowledgeIndexJobRow.requested_at).limit(limit)).scalars().all()
+            return [(UUID(row.organization_id), UUID(row.knowledge_base_id)) for row in rows]
+
+    async def process_pending(self) -> None:
+        for organization_id, base_id in self.pending_scopes():
+            with tenant_scope(organization_id):
+                now = datetime.now(UTC)
+                with self.database.session_factory.begin() as session:
+                    job = session.get(KnowledgeIndexJobRow, str(base_id))
+                    if job is None:
+                        continue
+                    requested_at = job.requested_at
+                    job.status = "running"
+                    job.started_at = now
+                    job.attempts += 1
+                    attempts = job.attempts
+                try:
+                    await self.reindex(base_id)
+                except Exception as exc:
+                    with self.database.session_factory.begin() as session:
+                        job = session.get(KnowledgeIndexJobRow, str(base_id))
+                        if job is not None and job.requested_at == requested_at:
+                            job.status = "failed"
+                            job.last_error = str(exc)[:1000]
+                            job.next_retry_at = datetime.now(UTC) + timedelta(seconds=min(60 * 2 ** min(attempts, 8), 3600))
+                    logger.warning("knowledge indexing failed for %s: %s", base_id, exc)
+
+    async def run(self, interval_seconds: int = 20) -> None:
+        while True:
+            try:
+                await self.process_pending()
+            except Exception:
+                logger.exception("knowledge index reconciliation failed")
+            await asyncio.sleep(interval_seconds)
 
     async def rank(
         self, request: KnowledgeQuery, candidates: list[KnowledgeSource], actor: Actor | None = None,

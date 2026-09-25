@@ -160,6 +160,20 @@ class KnowledgeEmbeddingRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class KnowledgeIndexJobRow(Base):
+    __tablename__ = "knowledge_index_jobs"
+
+    knowledge_base_id: Mapped[str] = mapped_column(String(36), ForeignKey("knowledge_bases.id"), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+
+
 class MeetingKnowledgeBaseRow(Base):
     __tablename__ = "meeting_knowledge_bases"
 
@@ -329,6 +343,17 @@ class OrganizationRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class WorkspaceRetentionRow(Base):
+    __tablename__ = "workspace_retention"
+
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    meeting_days: Mapped[int | None] = mapped_column(Integer)
+    chat_days: Mapped[int | None] = mapped_column(Integer)
+    audit_days: Mapped[int | None] = mapped_column(Integer)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class UserRow(Base):
     __tablename__ = "users"
 
@@ -394,7 +419,7 @@ class SchemaMigrationError(RuntimeError):
 
 
 # Version 3 is the last schema in the original checked-in application. Versions
-# 4–14 add only tables, so they can be applied to an existing version-3 database
+# 4–16 add only tables, so they can be applied to an existing version-3 database
 # without rewriting its meeting or credential rows. Keep this manifest frozen:
 # adding a model column requires a new version and an explicit migration.
 SCHEMA_TABLES_BY_VERSION: dict[int, tuple[str, ...]] = {
@@ -416,6 +441,8 @@ SCHEMA_TABLES_BY_VERSION: dict[int, tuple[str, ...]] = {
     12: ("auth_rate_limit_buckets", "audit_events"),
     13: ("provider_tenants", "meeting_tenants", "organization_provider_defaults"),
     14: ("knowledge_embeddings",),
+    15: ("knowledge_index_jobs",),
+    16: ("workspace_retention",),
 }
 
 SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
@@ -439,6 +466,7 @@ SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
     "meeting_minutes_evidence": ("meeting_id", "speaker_contributions", "questions_asked"),
     "meeting_transcription_routes": ("meeting_id", "profile_id", "profile_name", "provider_type", "model", "endpoint_host", "selected_at"),
     "organizations": ("id", "slug", "display_name", "contact_email", "status", "created_at", "updated_at"),
+    "workspace_retention": ("organization_id", "enabled", "meeting_days", "chat_days", "audit_days", "updated_at"),
     "users": ("id", "email", "display_name", "auth_subject", "status", "created_at", "updated_at"),
     "user_credentials": ("user_id", "password_hash", "must_change_password", "session_version", "created_at", "updated_at"),
     "organization_memberships": ("organization_id", "user_id", "role", "created_at"),
@@ -446,6 +474,7 @@ SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
     "knowledge_bases": ("id", "organization_id", "name", "description", "created_by", "visibility", "text_profile_id", "created_at", "updated_at"),
     "knowledge_base_access": ("knowledge_base_id", "user_id", "access"),
     "knowledge_embeddings": ("id", "organization_id", "knowledge_base_id", "meeting_id", "source_id", "fingerprint", "profile_id", "model", "dimensions", "vector", "updated_at"),
+    "knowledge_index_jobs": ("knowledge_base_id", "organization_id", "status", "attempts", "requested_at", "started_at", "completed_at", "next_retry_at", "last_error"),
     "meeting_knowledge_bases": ("meeting_id", "knowledge_base_id"),
     "knowledge_conversations": ("id", "knowledge_base_id", "user_id", "title", "created_at", "updated_at"),
     "knowledge_messages": ("id", "conversation_id", "position", "role", "content", "citations", "provider", "model", "created_at"),
@@ -493,7 +522,7 @@ def _validate_database_schema(connection, version: int) -> None:
 class Database:
     """Upgrades known schemas and rejects unknown or incomplete ones."""
 
-    SCHEMA_VERSION = 14
+    SCHEMA_VERSION = 16
 
     def __init__(self, url: str) -> None:
         engine_options: dict[str, object] = {"pool_pre_ping": True}
@@ -572,6 +601,20 @@ class Database:
                                ProviderDefaultRow.policy, ProviderDefaultRow.local_profile_id,
                                ProviderDefaultRow.cloud_profile_id),
                     ))
+                if version == 15:
+                    now = datetime.now(UTC)
+                    bases = connection.execute(select(
+                        MeetingKnowledgeBaseRow.knowledge_base_id, KnowledgeBaseRow.organization_id,
+                    ).join(KnowledgeBaseRow, KnowledgeBaseRow.id == MeetingKnowledgeBaseRow.knowledge_base_id)
+                     .join(MeetingRow, MeetingRow.id == MeetingKnowledgeBaseRow.meeting_id)
+                     .where(MeetingRow.status == "completed").distinct()).all()
+                    for base_id, organization_id in bases:
+                        connection.execute(insert(KnowledgeIndexJobRow).values(
+                            knowledge_base_id=base_id, organization_id=organization_id,
+                            status="pending", attempts=0, requested_at=now,
+                            started_at=None, completed_at=None, next_retry_at=None,
+                            last_error=None,
+                        ))
                 _validate_database_schema(connection, version)
                 connection.execute(insert(SchemaVersionRow).values(
                     version=version, applied_at=datetime.now(UTC),

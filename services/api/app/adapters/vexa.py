@@ -105,6 +105,30 @@ class VexaCaptureAdapter:
             "GET", f"/meetings/{vexa_meeting_id}", operation="refresh meeting"
         )
 
+    async def delete_meeting(self, vexa_meeting_id: int) -> None:
+        """Delete terminal capture artifacts before removing the product record.
+
+        Vexa may return 204 with no body. A 404 is *not* assumed safe: Vexa
+        also hides unowned meetings as 404, so deleting our only local record
+        could leave upstream artifacts behind under a misconfigured API key.
+        """
+        try:
+            response = await self._client.delete(f"/meetings/{vexa_meeting_id}")
+        except httpx.RequestError as exc:
+            raise VexaAPIError("delete meeting", 503, "Vexa is unavailable") from exc
+        if response.status_code == 404:
+            raise VexaAPIError(
+                "delete meeting", 409,
+                "Vexa cannot confirm ownership or removal of this capture; product data was preserved",
+            )
+        if response.is_error:
+            try:
+                body = response.json()
+                detail = body.get("detail", body) if isinstance(body, dict) else body
+            except ValueError:
+                detail = response.text[:500]
+            raise VexaAPIError("delete meeting", response.status_code, str(detail))
+
     async def stop(self, platform: str, native_meeting_id: str) -> dict[str, Any]:
         platform_path = quote(platform, safe="")
         native_path = quote(native_meeting_id, safe="")

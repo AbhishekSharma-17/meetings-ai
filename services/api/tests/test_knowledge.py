@@ -234,3 +234,66 @@ def test_evidence_map_does_not_merge_unverified_names_across_meetings(tmp_path) 
         assert len(merged) == 1
         assert merged[0]["verified_identity"] is True
         assert merged[0]["meeting_count"] == 2
+        overview = client.get(f"/v1/knowledge-bases/{base_id}/overview").json()
+        link = overview["meetings"][0]["related_meetings"][0]
+        assert {overview["meetings"][0]["id"], link["meeting_id"]} == {first_id, second_id}
+        assert "Confirmed speaker in both meetings" in link["reasons"]
+
+
+def test_complex_ask_plans_multiple_permission_scoped_searches(tmp_path) -> None:
+    app = create_app(
+        database_url=f"sqlite+pysqlite:///{tmp_path / 'planned-chat.db'}",
+        credential_key="test-credential-key",
+    )
+    with TestClient(app) as client:
+        base_id = client.post("/v1/knowledge-bases", json={"name": "Planning wiki"}).json()["id"]
+        first_id = _create_completed_meeting(client, app.state.repository,
+                                             opted_in=True, title="Roadmap meeting", base_id=base_id)
+        second_id = _create_completed_meeting(client, app.state.repository,
+                                              opted_in=True, title="Budget meeting", base_id=base_id)
+        app.state.repository.replace_transcript(second_id, [MeetingTranscriptSegment(
+            segment_id="budget-turn", start_seconds=2, end_seconds=4,
+            text="The budget was approved for next quarter.", speaker="Bob", completed=True,
+        )])
+        purposes = []
+
+        async def generated(request, *, profile_id=None):
+            purposes.append(request.metadata["purpose"])
+            if request.metadata["purpose"] == "knowledge_query_plan":
+                return object(), TextGenerationResult(
+                    text='{"search_queries":["roadmap","budget"]}',
+                    provider="test", model="economy-test",
+                )
+            return object(), TextGenerationResult(
+                text='{"answer":"Two topics were discussed [K1] [K2].","citation_ids":["K1","K2"]}',
+                provider="test", model="economy-test",
+            )
+
+        app.state.profile_service.generate_text = generated
+        response = client.post("/v1/knowledge/chat", json={
+            "query": "Compare the roadmap and budget across meetings",
+            "knowledge_base_id": base_id,
+        })
+        assert response.status_code == 200
+        assert purposes == ["knowledge_query_plan", "knowledge_answer"]
+        assert {source["meeting_id"] for source in response.json()["citations"]} == {first_id, second_id}
+
+
+def test_knowledge_opt_out_erases_saved_answers_citing_meeting(tmp_path) -> None:
+    app = create_app(
+        database_url=f"sqlite+pysqlite:///{tmp_path / 'opt-out.db'}",
+        credential_key="test-credential-key",
+    )
+    with TestClient(app) as client:
+        base_id = client.post("/v1/knowledge-bases", json={"name": "Private wiki"}).json()["id"]
+        meeting_id = _create_completed_meeting(client, app.state.repository,
+                                                opted_in=True, title="Client planning", base_id=base_id)
+        conversation_id = app.state.knowledge_bases.save_exchange(
+            base_id, None, "Who owns it?", "Alice owns it.",
+            [{"meeting_id": meeting_id, "text": "Alice owns it."}], None, None,
+        )
+        assert client.get(f"/v1/knowledge-bases/{base_id}/conversations/{conversation_id}").status_code == 200
+        assert client.patch(f"/v1/meetings/{meeting_id}/knowledge", json={
+            "knowledge_enabled": False, "tags": [],
+        }).status_code == 200
+        assert client.get(f"/v1/knowledge-bases/{base_id}/conversations/{conversation_id}").status_code == 404

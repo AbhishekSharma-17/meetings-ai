@@ -35,7 +35,10 @@ from .database import (
     MeetingKnowledgeSettingsRow,
     MeetingKnowledgeBaseRow,
     KnowledgeEmbeddingRow,
+    KnowledgeIndexJobRow,
     KnowledgeBaseRow,
+    KnowledgeConversationRow,
+    KnowledgeMessageRow,
     MeetingDeliverySettingsRow,
     MeetingMinutesRow,
     MeetingMinutesEvidenceRow,
@@ -68,6 +71,10 @@ class SpeakerIdentityConflictError(RuntimeError):
     pass
 
 
+class MinutesDeletionConflictError(RuntimeError):
+    pass
+
+
 def _utc(value: datetime | None) -> datetime | None:
     if value is None or value.tzinfo is not None:
         return value
@@ -95,6 +102,51 @@ class SQLAlchemyRepository:
             KnowledgeEmbeddingRow.meeting_id == str(meeting_id),
             KnowledgeEmbeddingRow.organization_id == str(current_organization_id()),
         ))
+        SQLAlchemyRepository._queue_knowledge_index(session, meeting_id)
+
+    @staticmethod
+    def _queue_knowledge_index(session: object, meeting_id: UUID) -> None:
+        meeting = session.get(MeetingRow, str(meeting_id))
+        association = session.get(MeetingKnowledgeBaseRow, str(meeting_id))
+        if meeting is None or meeting.status != MeetingStatus.COMPLETED.value or association is None:
+            return
+        base = session.get(KnowledgeBaseRow, association.knowledge_base_id)
+        if base is None or base.organization_id != str(current_organization_id()):
+            return
+        now = datetime.now(UTC)
+        job = session.get(KnowledgeIndexJobRow, association.knowledge_base_id)
+        if job is None:
+            session.add(KnowledgeIndexJobRow(
+                knowledge_base_id=association.knowledge_base_id,
+                organization_id=base.organization_id, status="pending", attempts=0,
+                requested_at=now, started_at=None, completed_at=None,
+                next_retry_at=None, last_error=None,
+            ))
+        else:
+            job.status = "pending"
+            job.attempts = 0
+            job.requested_at = now
+            job.next_retry_at = None
+            job.last_error = None
+
+    @staticmethod
+    def _delete_cited_conversations(session: object, meeting_id: UUID) -> None:
+        key = str(meeting_id)
+        messages = session.execute(select(KnowledgeMessageRow).join(
+            KnowledgeConversationRow, KnowledgeMessageRow.conversation_id == KnowledgeConversationRow.id,
+        ).join(KnowledgeBaseRow, KnowledgeConversationRow.knowledge_base_id == KnowledgeBaseRow.id).where(
+            KnowledgeBaseRow.organization_id == str(current_organization_id()),
+        )).scalars().all()
+        cited_conversations = {
+            message.conversation_id for message in messages
+            if any(isinstance(citation, dict) and citation.get("meeting_id") == key
+                   for citation in (message.citations or []))
+        }
+        if cited_conversations:
+            session.execute(delete(KnowledgeMessageRow).where(
+                KnowledgeMessageRow.conversation_id.in_(cited_conversations)))
+            session.execute(delete(KnowledgeConversationRow).where(
+                KnowledgeConversationRow.id.in_(cited_conversations)))
 
     def list_profiles(self) -> list[ProviderProfile]:
         with self.database.session_factory() as session:
@@ -245,6 +297,33 @@ class SQLAlchemyRepository:
             base = session.get(MeetingKnowledgeBaseRow, str(meeting_id))
             return self._meeting_from_row(row, knowledge, base)
 
+    def delete_meeting(self, meeting_id: UUID) -> None:
+        """Erase one tenant-owned meeting and all product-side derived copies.
+
+        A saved answer can contain verbatim meeting evidence. Delete its whole
+        conversation when any citation points at this meeting, rather than
+        leaving an orphaned answer with missing source attribution.
+        """
+        key = str(meeting_id)
+        org = str(current_organization_id())
+        with self.database.session_factory.begin() as session:
+            row = session.get(MeetingRow, key)
+            owner = session.get(MeetingTenantRow, key)
+            if row is None or owner is None or owner.organization_id != org:
+                raise MeetingNotFoundError(meeting_id)
+            self._queue_knowledge_index(session, meeting_id)
+            self._delete_cited_conversations(session, meeting_id)
+            for model in (
+                KnowledgeEmbeddingRow, MeetingKnowledgeBaseRow, MeetingKnowledgeSettingsRow,
+                MeetingDeliverySettingsRow, PostMeetingJobRow, TranscriptSegmentRow,
+                TranscriptSegmentMetadataRow, TranscriptSpeakerCorrectionRow,
+                MeetingSpeakerIdentityRow, TranscriptReviewStateRow, MinutesSourceRow,
+                MeetingMinutesEvidenceRow, MeetingMinutesRow, EmailDeliveryRow,
+                MeetingTranscriptionRouteRow, MeetingTenantRow,
+            ):
+                session.execute(delete(model).where(model.meeting_id == key))
+            session.delete(row)
+
     def list_worker_scopes(self) -> list[tuple[UUID, UUID]]:
         """Enumerate jobs for the worker; processing still runs in tenant scope."""
         with self.database.session_factory() as session:
@@ -331,7 +410,11 @@ class SQLAlchemyRepository:
             for item in normalized
         ], ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
         with self.database.session_factory.begin() as session:
+            state = session.get(TranscriptReviewStateRow, str(meeting_id))
+            if state is not None and state.fingerprint == fingerprint:
+                return
             self._purge_knowledge_embeddings(session, meeting_id)
+            self._delete_cited_conversations(session, meeting_id)
             session.query(TranscriptSegmentRow).filter_by(
                 meeting_id=str(meeting_id)
             ).delete()
@@ -359,7 +442,6 @@ class SQLAlchemyRepository:
                 )
                 for position, segment in enumerate(normalized)
             )
-            state = session.get(TranscriptReviewStateRow, str(meeting_id))
             if state is None:
                 session.add(TranscriptReviewStateRow(
                     meeting_id=str(meeting_id), revision=1, fingerprint=fingerprint,
@@ -448,6 +530,7 @@ class SQLAlchemyRepository:
                     changed = True
             if changed:
                 self._purge_knowledge_embeddings(session, meeting_id)
+                self._delete_cited_conversations(session, meeting_id)
                 state = session.get(TranscriptReviewStateRow, str(meeting_id))
                 if state is None:
                     state = TranscriptReviewStateRow(meeting_id=str(meeting_id), revision=0, fingerprint="")
@@ -535,10 +618,32 @@ class SQLAlchemyRepository:
                 ]
             return minutes
 
+    def delete_minutes(self, meeting_id: UUID) -> None:
+        self.get_meeting(meeting_id)
+        with self.database.session_factory.begin() as session:
+            row = session.get(MeetingMinutesRow, str(meeting_id))
+            if row is None:
+                raise MinutesNotFoundError(meeting_id)
+            if row.status == MinutesStatus.SENT.value:
+                raise MinutesDeletionConflictError(
+                    "a sent MOM cannot be removed alone; delete the entire meeting record after confirming email recipients"
+                )
+            self._purge_knowledge_embeddings(session, meeting_id)
+            self._delete_cited_conversations(session, meeting_id)
+            for model in (MeetingMinutesEvidenceRow, MinutesSourceRow):
+                session.execute(delete(model).where(model.meeting_id == str(meeting_id)))
+            session.delete(row)
+            job = session.get(PostMeetingJobRow, str(meeting_id))
+            if job is not None:
+                job.completed_at = datetime.now(UTC)
+                job.next_retry_at = None
+                job.last_error = None
+
     def save_minutes(self, minutes: MeetingMinutes) -> MeetingMinutes:
         self.get_meeting(minutes.meeting_id)
         with self.database.session_factory.begin() as session:
             self._purge_knowledge_embeddings(session, minutes.meeting_id)
+            self._delete_cited_conversations(session, minutes.meeting_id)
             row = session.get(MeetingMinutesRow, str(minutes.meeting_id))
             if row is None:
                 row = MeetingMinutesRow(meeting_id=str(minutes.meeting_id))
@@ -604,6 +709,7 @@ class SQLAlchemyRepository:
             row.recording_enabled = meeting.recording_enabled
             row.platform = meeting.platform.value
             row.native_meeting_id = meeting.native_meeting_id
+            was_completed = row.status == MeetingStatus.COMPLETED.value if row.status else False
             row.status = meeting.status.value
             row.vexa_meeting_id = meeting.vexa_meeting_id
             row.last_error = meeting.last_error
@@ -620,6 +726,8 @@ class SQLAlchemyRepository:
                     updated_at=datetime.now(UTC),
                 )
                 session.add(knowledge)
+            if meeting.status is MeetingStatus.COMPLETED and not was_completed:
+                self._queue_knowledge_index(session, meeting.id)
         return meeting
 
     def save_knowledge_settings(
@@ -628,6 +736,8 @@ class SQLAlchemyRepository:
         self.get_meeting(meeting_id)
         with self.database.session_factory.begin() as session:
             self._purge_knowledge_embeddings(session, meeting_id)
+            if not knowledge_enabled:
+                self._delete_cited_conversations(session, meeting_id)
             row = session.get(MeetingKnowledgeSettingsRow, str(meeting_id))
             if row is None:
                 row = MeetingKnowledgeSettingsRow(

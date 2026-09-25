@@ -69,6 +69,23 @@ export type AuditEvent = {
   created_at: string;
 };
 
+export type WorkspaceOperations = {
+  active_captures: number;
+  failed_captures: number;
+  failed_mom_jobs: number;
+  pending_index_jobs: number;
+  failed_index_jobs: number;
+  failed_email_deliveries: number;
+  latest_audit_at: string | null;
+};
+
+export type RetentionPolicy = {
+  enabled: boolean;
+  meeting_days: number | null;
+  chat_days: number | null;
+  audit_days: number | null;
+};
+
 export type CurrentAccount = {
   user_id: string;
   organization_id: string;
@@ -114,6 +131,10 @@ export type KnowledgeIndexStatus = {
   profile_id: string | null;
   model: string | null;
   last_indexed_at: string | null;
+  job_status: "pending" | "running" | "succeeded" | "failed" | null;
+  requested_at: string | null;
+  next_retry_at: string | null;
+  last_error: string | null;
 };
 
 export type KnowledgeMapEntry = {
@@ -169,6 +190,7 @@ export type KnowledgeWikiOverview = {
     decisions: string[];
     action_items: string[];
     related_meeting_ids: string[];
+    related_meetings: Array<{ meeting_id: string; title: string; reasons: string[] }>;
   }>;
 };
 

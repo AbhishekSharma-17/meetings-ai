@@ -242,9 +242,26 @@ class KnowledgeService:
             history = self.bases.get_conversation(request.knowledge_base_id, request.conversation_id, actor).messages[-6:]
         previous_question = next((item.content for item in reversed(history) if item.role == "user"), "")
         retrieval_query = f"{previous_question} {request.query}" if previous_question else request.query
-        search = await self.hybrid_search(request.model_copy(update={
-            "query": retrieval_query[:500], "limit": min(request.limit, 8),
-        }), actor)
+        searches = [retrieval_query[:500]]
+        if self._needs_query_plan(request.query):
+            searches += await self._plan_queries(request, previous_question, actor)
+        results = [await self.hybrid_search(request.model_copy(update={
+            "query": query, "limit": min(request.limit, 8),
+        }), actor) for query in dict.fromkeys(searches)]
+        scores: dict[str, float] = {}
+        sources: dict[str, KnowledgeSource] = {}
+        for result in results:
+            for rank, source in enumerate(result.sources):
+                scores[source.source_id] = scores.get(source.source_id, 0) + 1 / (60 + rank)
+                sources[source.source_id] = source
+        ranked = sorted(sources.values(), key=lambda item: (
+            scores[item.source_id], item.meeting_created_at,
+        ), reverse=True)[:min(request.limit, 8)]
+        search = KnowledgeSearchResponse(
+            sources=ranked, count=len(ranked),
+            retrieval_mode="hybrid" if any(item.retrieval_mode == "hybrid" for item in results) else "lexical",
+            truncated_meeting_scope=any(item.truncated_meeting_scope for item in results),
+        )
         if not search.sources:
             answer = "I couldn't find matching evidence in the opted-in, completed meetings."
             conversation_id = request.conversation_id
@@ -321,6 +338,44 @@ class KnowledgeService:
             provider=result.provider, model=result.model,
             retrieval_mode=search.retrieval_mode,
         )
+
+    @staticmethod
+    def _needs_query_plan(question: str) -> bool:
+        return bool(re.search(r"\b(compare|across|between|timeline|changed|evolv(?:e|ed)|follow.up|over time)\b", question, re.IGNORECASE))
+
+    async def _plan_queries(self, request: KnowledgeQuery, previous_question: str, actor: Actor | None) -> list[str]:
+        """Use the selected Ask AI model only for complex, multi-hop retrieval.
+
+        A planner failure falls back to the literal user query; generated search
+        strings never grant access or become answer evidence by themselves.
+        """
+        prompt = TextGenerationRequest(
+            system_prompt=(
+                "Plan evidence retrieval for a meeting wiki. Return JSON containing search_queries, "
+                "an array of one to three short search strings. Preserve exact people, dates, "
+                "project names, and commitments from the user's question. Split comparisons "
+                "into separate searches. Do not answer or invent facts."
+            ),
+            prompt=f"Previous question: {previous_question[:300]}\nCurrent question: {request.query}",
+            max_output_tokens=160,
+            response_schema={
+                "type": "object", "additionalProperties": False,
+                "properties": {"search_queries": {"type": "array", "items": {"type": "string"}}},
+                "required": ["search_queries"],
+            },
+            metadata={"capability": "text_generation", "purpose": "knowledge_query_plan"},
+        )
+        try:
+            base = self.bases.get(request.knowledge_base_id, actor) if request.knowledge_base_id and self.bases else None
+            _, result = await self.providers.generate_text(prompt, profile_id=base.text_profile_id if base else None)
+            payload = result.structured_output or json.loads(result.text)
+            queries = payload.get("search_queries", [])
+            if not isinstance(queries, list):
+                return []
+            return [value.strip()[:500] for value in queries[:3]
+                    if isinstance(value, str) and len(value.strip()) >= 3]
+        except (ProviderExecutionError, ProviderSelectionError, ProfileNotFoundError, ValueError, KeyError, TypeError):
+            return []
 
     @staticmethod
     def _source(meeting, segment, kind: str, text: str, evidence_ids: list[str]) -> KnowledgeSource:

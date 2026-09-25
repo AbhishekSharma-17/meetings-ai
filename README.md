@@ -18,7 +18,8 @@ The current local capture slice establishes:
 - per-meeting internal recipients, optional participant opt-in, and recap delivery through Resend;
 - local owner and teammate email/password accounts, admin-generated one-time
   temporary passwords, first-login rotation, workspace creation/switching,
-  role changes, immediate workspace removal, and knowledge-specific access;
+  self-service display names and passwords, role changes, immediate workspace
+  removal, and knowledge-specific access;
 - application-level organization isolation for meetings, providers, knowledge,
   workspace settings, and background MOM processing; hosted database RLS and
   production identity lifecycle are not yet complete;
@@ -33,6 +34,15 @@ The current local capture slice establishes:
 - Vexa-native, OpenAI and OpenAI-compatible provider boundaries;
 - write-only credential handling and capability validation;
 - a pinned local Vexa `v0.12.27` checkout for the ARM64 Lite witness path.
+- terminal-meeting deletion that requests Vexa artifact erasure before removing
+  the product transcript, MOM, indexed copies, and chats citing the meeting;
+- independent deletion of an unsent MOM draft or approval while retaining its
+  transcript; sent recaps require deleting the full meeting record;
+- durable, retryable background knowledge indexing, linked wiki meetings by
+  explicit tags or confirmed speakers, and bounded query planning for complex
+  Ask AI questions;
+- workspace-scoped operations counts and opt-in retention policies for old
+  meetings, saved chats, and audit events (off by default).
 
 The Vexa capture and OpenAI MOM paths are active locally. Resend delivery is wired
 to the approved-MOM workflow. The API exposes `GET /v1/integrations/resend/status`
@@ -151,7 +161,7 @@ identity information.
 The report measures turn-level speaker attribution—not audio diarization error
 rate—and should be reviewed alongside the audio and MOM evidence links.
 
-Database startup applies additive schema steps 3 → 13 and preserves existing
+Database startup applies additive schema steps 3 → 16 and preserves existing
 rows. It refuses an unversioned, future, or incomplete schema instead of
 silently stamping it current. `/health` is process liveness; `/ready` verifies
 the database and current schema and is used by Compose. Back up PostgreSQL

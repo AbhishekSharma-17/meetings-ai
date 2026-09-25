@@ -1,8 +1,9 @@
-import type { AuditEvent, Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, PostMeetingJob, ProfileKind, ProviderProfile, ResendStatus, SpeakerIdentity, TranscriptSegment, TranscriptionRoute, Workspace, WorkspaceMember, WorkspaceOption } from "./types";
+import type { AuditEvent, Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, PostMeetingJob, ProfileKind, ProviderProfile, ResendStatus, RetentionPolicy, SpeakerIdentity, TranscriptSegment, TranscriptionRoute, Workspace, WorkspaceMember, WorkspaceOperations, WorkspaceOption } from "./types";
 
 export interface MeetingsService {
   getSession(): Promise<boolean>;
   getCurrentAccount(): Promise<CurrentAccount>;
+  updateProfile(displayName: string): Promise<CurrentAccount>;
   login(email: string, password: string): Promise<void>;
   changePassword(currentPassword: string, newPassword: string): Promise<void>;
   inviteMember(email: string, displayName: string, role: "admin" | "member" | "viewer"): Promise<InviteResult>;
@@ -17,6 +18,9 @@ export interface MeetingsService {
   updateWorkspace(patch: { display_name: string; contact_email: string | null }): Promise<Workspace>;
   listWorkspaceMembers(): Promise<WorkspaceMember[]>;
   listWorkspaceAudit(): Promise<AuditEvent[]>;
+  getWorkspaceOperations(): Promise<WorkspaceOperations>;
+  getRetentionPolicy(): Promise<RetentionPolicy>;
+  saveRetentionPolicy(policy: RetentionPolicy): Promise<RetentionPolicy>;
   listKnowledgeBases(): Promise<KnowledgeBase[]>;
   getKnowledgeOverview(baseId: string): Promise<KnowledgeWikiOverview>;
   getKnowledgeMap(baseId: string): Promise<KnowledgeMap>;
@@ -34,6 +38,7 @@ export interface MeetingsService {
   listMeetings(): Promise<Meeting[]>;
   createMeeting(input: CreateMeetingInput): Promise<MeetingDetail>;
   getMeeting(id: string): Promise<MeetingDetail>;
+  deleteMeeting(id: string): Promise<void>;
   updateMeetingKnowledge(id: string, tags: string[], knowledgeEnabled: boolean, knowledgeBaseId?: string | null): Promise<MeetingDetail>;
   getTranscriptionRoute(id: string): Promise<TranscriptionRoute>;
   joinMeeting(id: string): Promise<MeetingDetail>;
@@ -46,6 +51,7 @@ export interface MeetingsService {
   saveSpeakerIdentity(id: string, speaker: string, email: string | null): Promise<SpeakerIdentity[]>;
   correctSpeaker(id: string, segmentId: string, displayName: string | null, applyToRawLabel: boolean): Promise<TranscriptSegment[]>;
   getMinutes(id: string): Promise<MeetingMinutes | null>;
+  deleteMinutes(id: string): Promise<void>;
   generateMinutes(id: string): Promise<MeetingMinutes>;
   saveMinutes(id: string, draft: MinutesDraft): Promise<MeetingMinutes>;
   approveMinutes(id: string): Promise<MeetingMinutes>;
@@ -270,6 +276,12 @@ class HttpMeetingsService implements MeetingsService {
     return api<CurrentAccount>("/v1/auth/me");
   }
 
+  async updateProfile(displayName: string): Promise<CurrentAccount> {
+    return api<CurrentAccount>("/v1/auth/me", {
+      method: "PATCH", body: JSON.stringify({ display_name: displayName }),
+    });
+  }
+
   async login(email: string, password: string): Promise<void> {
     await api("/v1/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
   }
@@ -330,6 +342,18 @@ class HttpMeetingsService implements MeetingsService {
 
   async listWorkspaceAudit(): Promise<AuditEvent[]> {
     return api<AuditEvent[]>("/v1/workspace/audit?limit=30");
+  }
+
+  async getWorkspaceOperations(): Promise<WorkspaceOperations> {
+    return api<WorkspaceOperations>("/v1/workspace/operations");
+  }
+
+  async getRetentionPolicy(): Promise<RetentionPolicy> {
+    return api<RetentionPolicy>("/v1/workspace/retention");
+  }
+
+  async saveRetentionPolicy(policy: RetentionPolicy): Promise<RetentionPolicy> {
+    return api<RetentionPolicy>("/v1/workspace/retention", { method: "PUT", body: JSON.stringify(policy) });
   }
 
   async listKnowledgeBases(): Promise<KnowledgeBase[]> {
@@ -428,6 +452,10 @@ class HttpMeetingsService implements MeetingsService {
     return toMeetingDetail(await api<BackendMeeting>(`/v1/meetings/${id}`));
   }
 
+  async deleteMeeting(id: string): Promise<void> {
+    return api<void>(`/v1/meetings/${id}`, { method: "DELETE" });
+  }
+
   async updateMeetingKnowledge(id: string, tags: string[], knowledgeEnabled: boolean, knowledgeBaseId?: string | null): Promise<MeetingDetail> {
     return toMeetingDetail(await api<BackendMeeting>(`/v1/meetings/${id}/knowledge`, {
       method: "PATCH", body: JSON.stringify({ tags, knowledge_enabled: knowledgeEnabled, ...(knowledgeBaseId !== undefined ? { knowledge_base_id: knowledgeBaseId } : {}) }),
@@ -497,6 +525,10 @@ class HttpMeetingsService implements MeetingsService {
       if (error instanceof ApiError && error.status === 404) return null;
       throw error;
     }
+  }
+
+  async deleteMinutes(id: string): Promise<void> {
+    return api<void>(`/v1/meetings/${id}/minutes`, { method: "DELETE" });
   }
 
   async generateMinutes(id: string): Promise<MeetingMinutes> {

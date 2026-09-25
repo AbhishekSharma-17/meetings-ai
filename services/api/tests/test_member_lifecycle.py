@@ -36,6 +36,9 @@ def test_role_changes_and_removal_apply_to_active_sessions(tmp_path, monkeypatch
             "current_password": temporary, "new_password": "teammate-new-password-for-test",
         }).status_code == 200
         assert teammate.get("/v1/auth/me").json()["role"] == "member"
+        assert teammate.patch("/v1/auth/me", json={"display_name": "Updated Teammate"}).json()["display_name"] == "Updated Teammate"
+        assert teammate.get("/v1/auth/me").json()["display_name"] == "Updated Teammate"
+        assert any(item["display_name"] == "Updated Teammate" for item in owner.get("/v1/workspace/members").json())
         assert teammate.get("/v1/provider-profiles").status_code == 403
 
         assert owner.patch(f"/v1/workspace/members/{member_id}/role", json={"role": "admin"}).status_code == 200

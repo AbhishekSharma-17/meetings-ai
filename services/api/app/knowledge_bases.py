@@ -10,9 +10,9 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, func, select, update
 
 from .database import (
-    Database, KnowledgeBaseAccessRow, KnowledgeBaseRow, KnowledgeConversationRow, KnowledgeMessageRow, KnowledgeEmbeddingRow,
+    Database, KnowledgeBaseAccessRow, KnowledgeBaseRow, KnowledgeConversationRow, KnowledgeMessageRow, KnowledgeEmbeddingRow, KnowledgeIndexJobRow,
     LEGACY_ADMIN_USER_ID, MeetingKnowledgeBaseRow, MeetingTenantRow,
-    MeetingKnowledgeSettingsRow, MeetingMinutesRow, MeetingRow,
+    MeetingKnowledgeSettingsRow, MeetingMinutesRow, MeetingRow, MeetingSpeakerIdentityRow,
     OrganizationMembershipRow,
 )
 from .accounts import Actor
@@ -95,6 +95,13 @@ class KnowledgeWikiMeeting(BaseModel):
     decisions: list[str]
     action_items: list[str]
     related_meeting_ids: list[UUID] = Field(default_factory=list)
+    related_meetings: list["KnowledgeWikiLink"] = Field(default_factory=list)
+
+
+class KnowledgeWikiLink(BaseModel):
+    meeting_id: UUID
+    title: str
+    reasons: list[str]
 
 
 class KnowledgeWikiOverview(BaseModel):
@@ -163,9 +170,24 @@ class KnowledgeBaseService:
                     action_items=[str(item.get("description", "")) for item in minutes.action_items or []
                                   if isinstance(item, dict) and item.get("description")] if approved else [],
                 ))
+            confirmed = session.execute(select(
+                MeetingSpeakerIdentityRow.meeting_id, MeetingSpeakerIdentityRow.email,
+            ).where(MeetingSpeakerIdentityRow.meeting_id.in_([str(item.id) for item in meetings]))).all() if meetings else []
+            identities: dict[UUID, set[str]] = {item.id: set() for item in meetings}
+            for meeting_id, email in confirmed:
+                identities[UUID(meeting_id)].add(email.lower())
             for meeting in meetings:
-                meeting.related_meeting_ids = [other.id for other in meetings if other.id != meeting.id
-                                               and set(meeting.tags) & set(other.tags)][:5]
+                links: list[KnowledgeWikiLink] = []
+                for other in meetings:
+                    if other.id == meeting.id:
+                        continue
+                    reasons = [f"Shared tag: {tag}" for tag in sorted(set(meeting.tags) & set(other.tags))[:2]]
+                    if identities[meeting.id] & identities[other.id]:
+                        reasons.append("Confirmed speaker in both meetings")
+                    if reasons:
+                        links.append(KnowledgeWikiLink(meeting_id=other.id, title=other.title, reasons=reasons))
+                meeting.related_meetings = links[:5]
+                meeting.related_meeting_ids = [link.meeting_id for link in meeting.related_meetings]
             return KnowledgeWikiOverview(knowledge_base_id=base_id, name=base.name, meetings=meetings)
 
     def create(self, data: KnowledgeBaseCreate, actor: Actor | None = None) -> KnowledgeBasePublic:
@@ -253,6 +275,7 @@ class KnowledgeBaseService:
                 KnowledgeEmbeddingRow.knowledge_base_id == row.id,
                 KnowledgeEmbeddingRow.organization_id == row.organization_id,
             ))
+            session.execute(delete(KnowledgeIndexJobRow).where(KnowledgeIndexJobRow.knowledge_base_id == row.id))
             session.execute(delete(KnowledgeBaseAccessRow).where(KnowledgeBaseAccessRow.knowledge_base_id == row.id))
             session.execute(delete(MeetingKnowledgeBaseRow).where(MeetingKnowledgeBaseRow.knowledge_base_id == row.id))
             session.delete(row)
@@ -262,6 +285,8 @@ class KnowledgeBaseService:
         with self.database.session_factory.begin() as session:
             association = session.get(MeetingKnowledgeBaseRow, str(meeting_id))
             if association is not None and association.knowledge_base_id != (str(base_id) if base_id else None):
+                self.repository._queue_knowledge_index(session, meeting_id)
+                self.repository._delete_cited_conversations(session, meeting_id)
                 session.execute(delete(KnowledgeEmbeddingRow).where(
                     KnowledgeEmbeddingRow.meeting_id == str(meeting_id),
                     KnowledgeEmbeddingRow.organization_id == str(current_organization_id()),
@@ -275,6 +300,8 @@ class KnowledgeBaseService:
                 association = MeetingKnowledgeBaseRow(meeting_id=str(meeting_id))
                 session.add(association)
             association.knowledge_base_id = str(base_id)
+            session.flush()
+            self.repository._queue_knowledge_index(session, meeting_id)
 
     def meeting_base_id(self, meeting_id: UUID) -> UUID | None:
         self.repository.get_meeting(meeting_id)

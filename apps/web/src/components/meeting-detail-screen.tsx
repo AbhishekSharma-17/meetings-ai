@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import { meetingsService } from "@/lib/meetings-service";
 import type { KnowledgeBase, MeetingDetail, MeetingParticipants, SpeakerIdentity, TranscriptSegment, TranscriptionRoute } from "@/lib/types";
 import { MinutesPanel } from "./minutes-panel";
@@ -19,7 +20,7 @@ const lifecycleCopy: Record<MeetingDetail["status"], { label: string; detail: st
   failed: { label: "Needs attention", detail: "The assistant could not complete the requested action." },
 };
 
-export function MeetingDetailScreen({ meetingId, focusSegmentId, onBack, onMeetingChange }: { meetingId: string; focusSegmentId?: string | null; onBack(): void; onMeetingChange(meeting: MeetingDetail): void }) {
+export function MeetingDetailScreen({ meetingId, focusSegmentId, onBack, onMeetingChange, onDeleted }: { meetingId: string; focusSegmentId?: string | null; onBack(): void; onMeetingChange(meeting: MeetingDetail): void; onDeleted(id: string): void }) {
   const [meeting, setMeeting] = useState<MeetingDetail | null>(null);
   const [segments, setSegments] = useState<TranscriptSegment[]>([]);
   const [participants, setParticipants] = useState<MeetingParticipants | null>(null);
@@ -29,6 +30,9 @@ export function MeetingDetailScreen({ meetingId, focusSegmentId, onBack, onMeeti
   const [identityEmail, setIdentityEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [action, setAction] = useState<"join" | "stop" | "refresh" | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteText, setDeleteText] = useState("");
+  const [deleting, setDeleting] = useState(false);
   const [editingSpeakerId, setEditingSpeakerId] = useState<string | null>(null);
   const [speakerName, setSpeakerName] = useState("");
   const [applyToSameLabel, setApplyToSameLabel] = useState(false);
@@ -152,6 +156,18 @@ export function MeetingDetailScreen({ meetingId, focusSegmentId, onBack, onMeeti
     }
   }
 
+  async function deleteMeeting() {
+    if (deleteText !== "DELETE") return;
+    setDeleting(true); setError(null);
+    try {
+      await meetingsService.deleteMeeting(meetingId);
+      onDeleted(meetingId);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not delete the meeting.");
+      setDeleting(false);
+    }
+  }
+
   if (!meeting) return <section className="page detail-page"><button className="back-button" onClick={onBack}>← All meetings</button><div className="detail-loading" role="status">Loading meeting lifecycle…</div>{error ? <p className="form-error" role="alert">{error}</p> : null}</section>;
 
   const lifecycle = lifecycleCopy[meeting.status];
@@ -168,11 +184,14 @@ export function MeetingDetailScreen({ meetingId, focusSegmentId, onBack, onMeeti
       <div><p className="eyebrow">MEETING LIFECYCLE</p><h1>{meeting.title}</h1><a className="meeting-url" href={meeting.meetingUrl} target="_blank" rel="noreferrer">{meeting.meetingUrl || "No meeting link recorded"}<span aria-hidden="true">↗</span></a></div>
       <div className="detail-actions"><button className="button secondary" onClick={() => void runAction("refresh")} disabled={action !== null}>{action === "refresh" ? "Refreshing…" : "Refresh"}</button>{canJoin ? <button className="button primary" onClick={() => void runAction("join")} disabled={action !== null}>{action === "join" ? "Joining…" : meeting.status === "failed" ? "Retry join" : "Join meeting"}</button> : null}{canStop ? <button className="button danger" onClick={() => void runAction("stop")} disabled={action !== null}>{action === "stop" ? "Stopping…" : "Stop assistant"}</button> : null}</div>
     </div>
+    {meeting.status === "created" || meeting.status === "ready" || meeting.status === "failed" ? <div className="meeting-delete-control">{confirmDelete ? <div className="meeting-delete-confirm" role="group" aria-label="Confirm meeting deletion"><div><b>Delete this meeting and its data?</b><p>Vexa capture artifacts, the transcript, MOM, indexed knowledge, and saved AI chats citing this meeting will be removed. Emails already sent cannot be recalled. This cannot be undone.</p></div><label>Type DELETE to confirm<input value={deleteText} onChange={(event) => setDeleteText(event.target.value)} autoComplete="off" /></label><div className="dialog-actions"><button className="button secondary" disabled={deleting} onClick={() => { setConfirmDelete(false); setDeleteText(""); }}>Cancel</button><button className="button danger" disabled={deleting || deleteText !== "DELETE"} onClick={() => void deleteMeeting()}>{deleting ? "Deleting…" : "Permanently delete"}</button></div></div> : <button className="text-button destructive" type="button" onClick={() => setConfirmDelete(true)}>Delete meeting and data</button>}</div> : null}
     <div className="meeting-knowledge-summary"><b>AI knowledge</b><span>{meeting.knowledgeEnabled ? "Included after completion" : "Not included"}</span>{meeting.tags.length ? <span>{meeting.tags.map((tag) => `#${tag}`).join(" · ")}</span> : null}</div>
     <MeetingKnowledgeControls key={meeting.id} meeting={meeting} onSaved={acceptMeeting} />
     {error ? <p className="form-error detail-error" role="alert">{error}</p> : null}
 
     <div className="lifecycle-banner" role="status"><span className={`status ${meeting.status}`}>{lifecycle.label}</span><div><b>{lifecycle.detail}</b><p>Controls operate on this product meeting record; the persisted capture identifier is resolved by the API.</p></div></div>
+
+    {["joining", "waiting_room", "live", "needs_attention", "stopping"].includes(meeting.status) ? <section className="assistant-call-panel" aria-label="Assistant call status"><Image src="/brand/meetings-ai-avatar-1024.png" alt="Meetings AI assistant artwork" width={72} height={72} /><div><span className="eyebrow">ASSISTANT IN CALL</span><h2>{meeting.botName}</h2><p>{meeting.status === "waiting_room" ? `Ask the host to admit “${meeting.botName}” from the waiting room.` : meeting.status === "live" ? `${finalizedCount} finalized transcript turn${finalizedCount === 1 ? "" : "s"} · ${namedSpeakers.length} named speaker${namedSpeakers.length === 1 ? "" : "s"}` : lifecycle.detail}</p><small>Host disclosure: “Meetings AI has joined and will record and transcribe this conversation.” This artwork is shown here in the product; its camera appearance inside Meet, Zoom or Teams is not yet verified.</small></div></section> : null}
 
     <div className="detail-grid">
       <section className="detail-card" aria-labelledby="meeting-details-title"><h2 id="meeting-details-title">Meeting details</h2><dl className="metadata-list"><Metadata label="Platform" value={meeting.platform} /><Metadata label="Assistant" value={meeting.botName} /><Metadata label="Created" value={formatTimestamp(meeting.createdAt)} /><Metadata label="Last update" value={formatTimestamp(meeting.updatedAt)} /><Metadata label="Joined" value={formatTimestamp(meeting.joinedAt)} /><Metadata label="Stopped" value={formatTimestamp(meeting.stoppedAt)} /></dl></section>

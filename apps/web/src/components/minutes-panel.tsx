@@ -22,7 +22,9 @@ const captureInProgress = new Set<MeetingDetail["status"]>([
 export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: MeetingDetail; transcriptCount: number; segments: TranscriptSegment[] }) {
   const [minutes, setMinutes] = useState<MeetingMinutes | null>(null);
   const [draft, setDraft] = useState<EditableDraft | null>(null);
-  const [busy, setBusy] = useState<"generate" | "retry" | "save" | "approve" | "send" | null>(null);
+  const [busy, setBusy] = useState<"generate" | "retry" | "save" | "approve" | "send" | "delete" | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [momDeleted, setMomDeleted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [recipients, setRecipients] = useState("");
@@ -126,6 +128,18 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
   function accept(next: MeetingMinutes) {
     setMinutes(next);
     setDraft(toEditable(next));
+    setMomDeleted(false);
+  }
+
+  async function deleteDraft() {
+    setBusy("delete"); setError(null); setNotice(null);
+    try {
+      await meetingsService.deleteMinutes(meeting.id);
+      setMinutes(null); setDraft(null); setMomDeleted(true); setConfirmDelete(false);
+      setPostMeetingJob(await meetingsService.getPostMeetingJob(meeting.id));
+      setNotice("MOM deleted. Its indexed facts and saved AI answers citing this meeting were cleared; the transcript remains.");
+    } catch (cause) { setError(messageFor(cause)); }
+    finally { setBusy(null); }
   }
 
   async function generate() {
@@ -199,7 +213,7 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
     {notice ? <p className="mom-notice" role="status">{notice}</p> : null}
 
     {!minutes || !draft ? <div className="mom-empty">
-      <div><b>No MOM draft yet.</b><p>{postMeetingJob?.last_error ? `Automatic drafting ${postMeetingJob.exhausted ? "stopped after repeated failures" : "will retry"}: ${postMeetingJob.last_error}. You can try Generate MOM manually.` : postMeetingJob?.enabled === false ? "This meeting predates automatic drafting. Generate its MOM manually." : canGenerate ? `Automatic drafting is in progress. ${transcriptCount} transcript segment${transcriptCount === 1 ? " is" : "s are"} available; you can also generate manually.` : captureInProgress.has(meeting.status) ? "The MOM will be drafted after capture completes." : "A finalized transcript is required."}</p></div>
+      <div><b>No MOM draft yet.</b><p>{momDeleted ? "The MOM was deleted. Generate a new draft manually if needed." : postMeetingJob?.last_error ? `Automatic drafting ${postMeetingJob.exhausted ? "stopped after repeated failures" : "will retry"}: ${postMeetingJob.last_error}. You can try Generate MOM manually.` : postMeetingJob?.enabled === false ? "This meeting predates automatic drafting. Generate its MOM manually." : canGenerate ? `Automatic drafting is in progress. ${transcriptCount} transcript segment${transcriptCount === 1 ? " is" : "s are"} available; you can also generate manually.` : captureInProgress.has(meeting.status) ? "The MOM will be drafted after capture completes." : "A finalized transcript is required."}</p></div>
       <div className="mom-review-actions">
         <button className="button primary" disabled={!canGenerate || busy !== null} onClick={() => void generate()}>{busy === "generate" ? "Generating…" : "Generate MOM"}</button>
         {postMeetingJob?.enabled && postMeetingJob.last_error && meeting.status === "ready" ? <button className="button secondary" disabled={busy !== null} onClick={() => void retryAutomaticDraft()}>{busy === "retry" ? "Retrying…" : "Retry automatic draft"}</button> : null}
@@ -217,6 +231,7 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
       <div className="attribution-review"><h3>Who said what</h3><p>Each claim links to transcript evidence. Correct a speaker in the transcript and regenerate if attribution is wrong.</p>{draft.contributions.length ? draft.contributions.map((item, index) => <div className="attribution-item" key={`${item.speaker}-${index}`}><b>{item.speaker}</b><textarea aria-label={`Contribution by ${item.speaker}`} rows={2} value={item.summary} disabled={minutes.status === "sent"} onChange={(event) => setDraft({ ...draft, contributions: draft.contributions.map((entry, position) => position === index ? { ...entry, summary: event.target.value } : entry) })} /><EvidenceLinks ids={item.evidence_segment_ids} segments={segments} />{minutes.status !== "sent" ? <button className="text-button" onClick={() => setDraft({ ...draft, contributions: draft.contributions.filter((_, position) => position !== index) })}>Remove claim</button> : null}</div>) : <p>No named-speaker contributions were extracted.</p>}</div>
       <div className="attribution-review"><h3>Questions asked</h3>{draft.questionsAsked.length ? draft.questionsAsked.map((item, index) => <div className="attribution-item" key={`${item.speaker ?? "unknown"}-${index}`}><b>{item.speaker ?? "Unidentified speaker"}</b><textarea aria-label={`Question asked by ${item.speaker ?? "unidentified speaker"}`} rows={2} value={item.question} disabled={minutes.status === "sent"} onChange={(event) => setDraft({ ...draft, questionsAsked: draft.questionsAsked.map((entry, position) => position === index ? { ...entry, question: event.target.value } : entry) })} /><EvidenceLinks ids={item.evidence_segment_ids} segments={segments} />{minutes.status !== "sent" ? <button className="text-button" onClick={() => setDraft({ ...draft, questionsAsked: draft.questionsAsked.filter((_, position) => position !== index) })}>Remove question</button> : null}</div>) : <p>No direct questions were extracted.</p>}</div>
       <div className="mom-meta"><span>Generated with {minutes.provider ?? "configured provider"} · {minutes.model ?? "selected model"}</span>{minutes.status !== "sent" ? <button className="text-button" disabled={!canGenerate || busy !== null} onClick={() => void generate()}>Regenerate draft</button> : null}</div>
+      {minutes.status !== "sent" ? <div className="mom-delete-control">{confirmDelete ? <div className="mom-delete-confirm"><b>Delete this MOM?</b><p>The transcript stays, but the draft, approval, indexed facts, and saved AI answers citing this meeting will be removed.</p><button className="button secondary" disabled={busy !== null} onClick={() => setConfirmDelete(false)}>Cancel</button><button className="button danger" disabled={busy !== null} onClick={() => void deleteDraft()}>{busy === "delete" ? "Deleting…" : "Confirm delete MOM"}</button></div> : <button className="text-button destructive" disabled={busy !== null} onClick={() => setConfirmDelete(true)}>Delete MOM draft</button>}</div> : null}
 
       {minutes.status !== "sent" ? <div className="mom-review-actions">
         <button className="button secondary" disabled={busy !== null} onClick={() => void save()}>{busy === "save" ? "Saving…" : "Save draft"}</button>

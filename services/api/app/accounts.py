@@ -87,6 +87,15 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = Field(min_length=12, max_length=200)
 
 
+class ProfilePatch(BaseModel):
+    display_name: str = Field(min_length=2, max_length=120)
+
+    @field_validator("display_name")
+    @classmethod
+    def clean_display_name(cls, value: str) -> str:
+        return InviteRequest.clean_name(value)
+
+
 class MemberRolePatch(BaseModel):
     role: str
 
@@ -309,6 +318,16 @@ class AccountService:
             credential.updated_at = datetime.now(UTC)
             user.status = "active"
             user.updated_at = credential.updated_at
+            return self._actor(session, user, credential, actor.organization_id)
+
+    def update_profile(self, actor: Actor, patch: ProfilePatch) -> Actor:
+        with self.database.session_factory.begin() as session:
+            user = session.get(UserRow, str(actor.user_id))
+            credential = session.get(UserCredentialRow, str(actor.user_id))
+            if user is None or credential is None:
+                raise AccountError("account not found")
+            user.display_name = patch.display_name
+            user.updated_at = datetime.now(UTC)
             return self._actor(session, user, credential, actor.organization_id)
 
     def change_member_role(self, requester: Actor, user_id: UUID, data: MemberRolePatch) -> AccountPublic:

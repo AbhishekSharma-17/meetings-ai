@@ -43,7 +43,7 @@ from .adapters.vexa import VexaAPIError, VexaCaptureAdapter
 from .adapters.resend import EmailDeliveryError, ResendAdapter
 from .adapters.base import ProviderExecutionError
 from .database import Database, SchemaVersionRow, LEGACY_ADMIN_USER_ID, LEGACY_ORGANIZATION_ID
-from .accounts import AccountError, AccountPublic, AccountService, Actor, ChangePasswordRequest, InviteRequest, InviteResult, MemberRolePatch, OrganizationCreateRequest, OrganizationOption
+from .accounts import AccountError, AccountPublic, AccountService, Actor, ChangePasswordRequest, InviteRequest, InviteResult, MemberRolePatch, OrganizationCreateRequest, OrganizationOption, ProfilePatch
 from .meeting_service import MeetingConflictError, MeetingService, MeetingValidationError
 from .knowledge_service import KnowledgeAccessError, KnowledgeAnswerError, KnowledgeChatResponse, KnowledgeMapResponse, KnowledgeQuery, KnowledgeSearchResponse, KnowledgeService
 from .knowledge_index import KnowledgeIndexError, KnowledgeIndexService, KnowledgeIndexStatus
@@ -51,15 +51,16 @@ from .knowledge_bases import KnowledgeBaseConflictError, KnowledgeBaseCreate, Kn
 from .minutes_service import MinutesConflictError, MinutesGenerationError, MinutesService
 from .post_meeting_worker import PostMeetingJobConflictError, PostMeetingWorker
 from .auth import AdminSession
-from .operations import AuditEventPublic, AuditService, LoginRateLimiter
+from .operations import AuditEventPublic, AuditService, LoginRateLimiter, WorkspaceOperationsPublic, workspace_operations
 from .repository import MeetingNotFoundError, MinutesNotFoundError, ProfileNotFoundError
 from .runtime_config import validate_runtime_config
+from .retention import RetentionPolicy, RetentionService
 from .security import CredentialCipher
 from .service import ProfileValidationError, ProviderProfileService, ProviderSelectionError
 from .stt_route import STTRouteError
 from .tenant import tenant_scope
 from .workspace_service import WorkspacePatch, WorkspacePublic, WorkspaceMemberPublic, WorkspaceService
-from .sqlalchemy_repository import SQLAlchemyRepository, TranscriptSegmentNotFoundError, TranscriptReviewConflictError, SpeakerIdentityConflictError
+from .sqlalchemy_repository import SQLAlchemyRepository, TranscriptSegmentNotFoundError, TranscriptReviewConflictError, SpeakerIdentityConflictError, MinutesDeletionConflictError
 
 
 def _redact(value: Any) -> Any:
@@ -130,6 +131,7 @@ def create_app(
     )
     minutes_service = MinutesService(repository, service, resend)
     worker = PostMeetingWorker(repository, meeting_service, minutes_service)
+    retention = RetentionService(database, meeting_service, audit)
     if bool(admin_password) != bool(session_secret):
         raise RuntimeError("admin password and session secret must both be configured")
     admin = AdminSession(session_secret) if admin_password else None
@@ -137,15 +139,18 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         task = asyncio.create_task(worker.run()) if os.getenv("AUTO_MOM_ENABLED") == "1" else None
+        index_task = asyncio.create_task(knowledge_index.run()) if os.getenv("AUTO_KNOWLEDGE_INDEX_ENABLED") == "1" else None
+        retention_task = asyncio.create_task(retention.run()) if os.getenv("AUTO_RETENTION_ENABLED") == "1" else None
         try:
             yield
         finally:
-            if task:
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+            for running in (task, index_task, retention_task):
+                if running:
+                    running.cancel()
+                    try:
+                        await running
+                    except asyncio.CancelledError:
+                        pass
             await vexa.close()
             database.engine.dispose()
 
@@ -169,6 +174,7 @@ def create_app(
     app.state.knowledge_bases = knowledge_bases
     app.state.minutes_service = minutes_service
     app.state.post_meeting_worker = worker
+    app.state.retention = retention
 
     @app.middleware("http")
     async def require_admin(request: Request, call_next):
@@ -282,6 +288,13 @@ def create_app(
     def auth_me(request: Request) -> dict[str, object]:
         return accounts.public(request.state.actor).model_dump(mode="json")
 
+    @app.patch("/v1/auth/me", response_model=AccountPublic)
+    def update_auth_profile(payload: ProfilePatch, request: Request) -> AccountPublic:
+        try:
+            return accounts.public(accounts.update_profile(request.state.actor, payload))
+        except AccountError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     @app.post("/v1/auth/change-password")
     def change_password(payload: ChangePasswordRequest, request: Request, response: Response) -> dict[str, bool]:
         if not admin:
@@ -378,6 +391,18 @@ def create_app(
     @app.get("/v1/workspace/audit", response_model=list[AuditEventPublic])
     def list_workspace_audit(request: Request, limit: int = 50) -> list[AuditEventPublic]:
         return audit.list(request.state.actor.organization_id, max(1, min(limit, 200)))
+
+    @app.get("/v1/workspace/operations", response_model=WorkspaceOperationsPublic)
+    def get_workspace_operations(request: Request) -> WorkspaceOperationsPublic:
+        return workspace_operations(database, request.state.actor.organization_id)
+
+    @app.get("/v1/workspace/retention", response_model=RetentionPolicy)
+    def get_workspace_retention(request: Request) -> RetentionPolicy:
+        return retention.get(request.state.actor.organization_id)
+
+    @app.put("/v1/workspace/retention", response_model=RetentionPolicy)
+    def save_workspace_retention(payload: RetentionPolicy, request: Request) -> RetentionPolicy:
+        return retention.save(request.state.actor.organization_id, payload)
 
     @app.get("/v1/knowledge-bases", response_model=list[KnowledgeBasePublic])
     def list_knowledge_bases(request: Request) -> list[KnowledgeBasePublic]:
@@ -530,6 +555,8 @@ def create_app(
         if isinstance(exc, TranscriptReviewConflictError):
             return HTTPException(status_code=409, detail=str(exc))
         if isinstance(exc, SpeakerIdentityConflictError):
+            return HTTPException(status_code=409, detail=str(exc))
+        if isinstance(exc, MinutesDeletionConflictError):
             return HTTPException(status_code=409, detail=str(exc))
         if isinstance(exc, (MeetingConflictError, MinutesConflictError, PostMeetingJobConflictError, STTRouteError, ProviderSelectionError)):
             return HTTPException(status_code=409, detail=str(exc))
@@ -715,6 +742,14 @@ def create_app(
         except MEETING_EXCEPTIONS as exc:
             raise api_error(exc) from exc
 
+    @app.delete("/v1/meetings/{meeting_id}", status_code=204)
+    async def delete_meeting(meeting_id: UUID) -> Response:
+        try:
+            await meeting_service.delete(meeting_id)
+        except MEETING_EXCEPTIONS as exc:
+            raise api_error(exc) from exc
+        return Response(status_code=204)
+
     @app.post("/v1/meetings/{meeting_id}/join", response_model=MeetingPublic)
     async def join_meeting(meeting_id: UUID) -> MeetingPublic:
         try:
@@ -812,6 +847,14 @@ def create_app(
             return minutes_service.to_public(minutes_service.get(meeting_id))
         except MINUTES_EXCEPTIONS as exc:
             raise api_error(exc) from exc
+
+    @app.delete("/v1/meetings/{meeting_id}/minutes", status_code=204)
+    def delete_meeting_minutes(meeting_id: UUID) -> Response:
+        try:
+            repository.delete_minutes(meeting_id)
+        except (MeetingNotFoundError, MinutesNotFoundError, MinutesDeletionConflictError) as exc:
+            raise api_error(exc) from exc
+        return Response(status_code=204)
 
     @app.post(
         "/v1/meetings/{meeting_id}/minutes/generate",

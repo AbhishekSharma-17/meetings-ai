@@ -1,5 +1,7 @@
 """Semantic retrieval uses indexed vectors only while canonical evidence agrees."""
 
+import asyncio
+
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from meetings_contracts import (
@@ -156,3 +158,39 @@ def test_delete_base_purges_knowledge_copies_and_preserves_meeting(tmp_path) -> 
         with app.state.database.session_factory() as session:
             for table in (KnowledgeEmbeddingRow, KnowledgeConversationRow, KnowledgeMessageRow):
                 assert session.execute(select(func.count()).select_from(table)).scalar_one() == 0
+
+
+def test_completed_meeting_changes_queue_durable_background_index(tmp_path) -> None:
+    app = create_app(
+        database_url=f"sqlite+pysqlite:///{tmp_path / 'background.db'}",
+        credential_key="test-credential-key",
+    )
+    fake = FakeEmbeddingAdapter()
+    app.state.profile_service.adapters[ProviderType.OPENAI] = fake
+    with TestClient(app) as client:
+        profile = client.post("/v1/provider-profiles", json={
+            "name": "Semantic model", "provider_type": "openai",
+            "execution_location": "cloud", "api_key": "test-key",
+            "capabilities": [{"capability": "embeddings", "model": "fake-embed"}],
+        }).json()
+        assert client.put("/v1/provider-defaults/embeddings", json={
+            "policy": "cloud_only", "cloud_profile_id": profile["id"],
+        }).status_code == 200
+        base_id = client.post("/v1/knowledge-bases", json={"name": "Background wiki"}).json()["id"]
+        meeting_id = _meeting(client, app, base_id, "Ship the new client portal.")
+        assert client.get(f"/v1/knowledge-bases/{base_id}/index").json()["job_status"] == "pending"
+        asyncio.run(app.state.knowledge_index.process_pending())
+        indexed = client.get(f"/v1/knowledge-bases/{base_id}/index").json()
+        assert indexed["job_status"] == "succeeded"
+        assert indexed["indexed_sources"] == 1
+        app.state.repository.replace_transcript(meeting_id, [MeetingTranscriptSegment(
+            segment_id="turn-1", start_seconds=7, end_seconds=11,
+            speaker="Alice", text="Budget review is complete.", completed=True,
+        )])
+        assert client.get(f"/v1/knowledge-bases/{base_id}/index").json()["job_status"] == "pending"
+        fake.fail = True
+        asyncio.run(app.state.knowledge_index.process_pending())
+        failed = client.get(f"/v1/knowledge-bases/{base_id}/index").json()
+        assert failed["job_status"] == "failed"
+        assert failed["last_error"]
+        assert failed["next_retry_at"]

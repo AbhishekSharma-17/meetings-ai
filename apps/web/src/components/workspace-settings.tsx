@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { meetingsService } from "@/lib/meetings-service";
-import type { AuditEvent, CurrentAccount, InviteResult, Workspace, WorkspaceMember } from "@/lib/types";
+import type { AuditEvent, CurrentAccount, InviteResult, RetentionPolicy, Workspace, WorkspaceMember, WorkspaceOperations } from "@/lib/types";
 import { UiSelect } from "./ui-select";
 
 export function WorkspaceSettings({ workspace, account, onWorkspaceChange }: {
@@ -15,6 +15,11 @@ export function WorkspaceSettings({ workspace, account, onWorkspaceChange }: {
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [auditError, setAuditError] = useState<string | null>(null);
+  const [operations, setOperations] = useState<WorkspaceOperations | null>(null);
+  const [operationsError, setOperationsError] = useState<string | null>(null);
+  const [retention, setRetention] = useState<RetentionPolicy | null>(null);
+  const [retentionBusy, setRetentionBusy] = useState(false);
+  const [retentionError, setRetentionError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -39,7 +44,30 @@ export function WorkspaceSettings({ workspace, account, onWorkspaceChange }: {
     void meetingsService.listWorkspaceAudit().then(setAuditEvents).catch(() => {
       setAuditError("Could not load recent activity.");
     });
+    void meetingsService.getWorkspaceOperations().then(setOperations).catch(() => {
+      setOperationsError("Could not load operations status.");
+    });
+    void meetingsService.getRetentionPolicy().then(setRetention).catch(() => {
+      setRetentionError("Could not load data retention policy.");
+    });
   }, [canManage]);
+
+  async function saveRetention() {
+    if (!retention) return;
+    setRetentionBusy(true); setRetentionError(null);
+    try {
+      setRetention(await meetingsService.saveRetentionPolicy(retention));
+      setMessage(retention.enabled ? "Automatic retention policy saved. Eligible older data can be deleted by the background worker." : "Automatic retention is off. Records remain until manually deleted.");
+    } catch (cause) {
+      setRetentionError(cause instanceof Error ? cause.message : "Could not save retention policy.");
+    } finally { setRetentionBusy(false); }
+  }
+
+  async function refreshOperations() {
+    setOperationsError(null);
+    try { setOperations(await meetingsService.getWorkspaceOperations()); }
+    catch { setOperationsError("Could not load operations status."); }
+  }
 
   async function refreshAudit() {
     setAuditError(null);
@@ -136,6 +164,18 @@ export function WorkspaceSettings({ workspace, account, onWorkspaceChange }: {
         })}</ul>
         {canManage ? <><form className="workspace-invite" onSubmit={(event) => void invite(event)}><h3>Add a teammate</h3><label htmlFor="invite-name">Name</label><input id="invite-name" value={inviteName} onChange={(event) => setInviteName(event.target.value)} minLength={2} maxLength={120} required /><label htmlFor="invite-email">Work email</label><input id="invite-email" type="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} required /><UiSelect id="invite-role" label="Role" value={inviteRole} onChange={(role) => setInviteRole(role as "admin" | "member" | "viewer")} options={account?.role === "owner" ? [{ value: "member", label: "Member · shared knowledge" }, { value: "admin", label: "Admin · workspace management" }, { value: "viewer", label: "Viewer · shared knowledge" }] : [{ value: "member", label: "Member · shared knowledge" }, { value: "viewer", label: "Viewer · shared knowledge" }]} /><button className="button primary" disabled={inviting}>{inviting ? "Adding…" : "Add teammate"}</button></form>{inviteResult ? <div className="workspace-invite-secret" role="status"><b>{inviteResult.account.display_name} can sign in</b><p>{inviteResult.note}</p><code>{inviteResult.account.email}</code>{inviteResult.temporary_password ? <><code>{inviteResult.temporary_password}</code><button type="button" className="text-button" onClick={() => void navigator.clipboard.writeText(inviteResult.temporary_password ?? "")}>Copy temporary password</button></> : null}</div> : null}</> : null}
       </section>
+      {canManage ? <section className="workspace-card workspace-audit workspace-retention" aria-labelledby="workspace-retention-title">
+        <h2 id="workspace-retention-title">Data retention</h2>
+        <p>Automatic deletion is off by default. Choose how long to keep each category, then explicitly enable the policy. Meeting deletion also requests Vexa to erase its transcript and recordings; previously sent emails and external backups cannot be recalled.</p>
+        {retentionError ? <p className="form-error" role="alert">{retentionError}</p> : null}
+        {retention ? <><div className="retention-fields"><UiSelect id="retention-meetings" label="Meeting records, transcripts & MOMs" value={String(retention.meeting_days ?? "forever")} onChange={(value) => setRetention({ ...retention, meeting_days: value === "forever" ? null : Number(value) })} options={retentionOptions} /><UiSelect id="retention-chats" label="Saved AI chats" value={String(retention.chat_days ?? "forever")} onChange={(value) => setRetention({ ...retention, chat_days: value === "forever" ? null : Number(value) })} options={retentionOptions} /><UiSelect id="retention-audit" label="Workspace audit events" value={String(retention.audit_days ?? "forever")} onChange={(value) => setRetention({ ...retention, audit_days: value === "forever" ? null : Number(value) })} options={retentionOptions} /></div><label className="retention-enable"><input type="checkbox" checked={retention.enabled} onChange={(event) => setRetention({ ...retention, enabled: event.target.checked })} /> Enable scheduled deletion for the selected periods</label><button type="button" className="button secondary" disabled={retentionBusy || (retention.enabled && !retention.meeting_days && !retention.chat_days && !retention.audit_days)} onClick={() => void saveRetention()}>{retentionBusy ? "Saving…" : "Save retention policy"}</button></> : !retentionError ? <p>Loading retention policy…</p> : null}
+      </section> : null}
+      {canManage ? <section className="workspace-card workspace-audit" aria-labelledby="workspace-operations-title">
+        <div className="workspace-audit-heading"><div><h2 id="workspace-operations-title">Operations</h2><p>Live workload and jobs needing review in this organization.</p></div><button type="button" className="button secondary" onClick={() => void refreshOperations()}>Refresh</button></div>
+        {operationsError ? <p className="form-error" role="alert">{operationsError}</p> : null}
+        {operations ? <dl className="workspace-operations-grid"><div><dt>Active captures</dt><dd>{operations.active_captures}</dd></div><div><dt>Capture failures</dt><dd>{operations.failed_captures}</dd></div><div><dt>MOM jobs with errors</dt><dd>{operations.failed_mom_jobs}</dd></div><div><dt>Knowledge jobs pending</dt><dd>{operations.pending_index_jobs}</dd></div><div><dt>Knowledge jobs failed</dt><dd>{operations.failed_index_jobs}</dd></div><div><dt>Email delivery failures</dt><dd>{operations.failed_email_deliveries}</dd></div></dl> : !operationsError ? <p>Loading operations status…</p> : null}
+        <p className="field-hint">Counts are workspace-scoped. This does not replace infrastructure logs or alerts.</p>
+      </section> : null}
       {canManage ? <section className="workspace-card workspace-audit" aria-labelledby="workspace-audit-title">
         <div className="workspace-audit-heading"><div><h2 id="workspace-audit-title">Recent activity</h2><p>Workspace changes and sign-ins. Request bodies and credentials are never shown.</p></div><button type="button" className="button secondary" onClick={() => void refreshAudit()}>Refresh</button></div>
         {auditError ? <p className="form-error" role="alert">{auditError}</p> : null}
@@ -144,3 +184,11 @@ export function WorkspaceSettings({ workspace, account, onWorkspaceChange }: {
     </div>
   </section>;
 }
+
+const retentionOptions = [
+  { value: "forever", label: "Keep until manually deleted" },
+  { value: "30", label: "30 days" },
+  { value: "90", label: "90 days" },
+  { value: "365", label: "1 year" },
+  { value: "730", label: "2 years" },
+];
