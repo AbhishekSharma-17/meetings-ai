@@ -52,6 +52,16 @@ export type WorkspaceMember = {
   status: string;
 };
 
+export type AuditEvent = {
+  id: string;
+  actor_user_id: string | null;
+  action: string;
+  resource_path: string;
+  resource_id: string | null;
+  status_code: number;
+  created_at: string;
+};
+
 export type CurrentAccount = {
   user_id: string;
   organization_id: string;

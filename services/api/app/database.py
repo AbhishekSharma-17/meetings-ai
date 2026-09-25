@@ -320,6 +320,27 @@ class OrganizationMembershipRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class AuthRateLimitBucketRow(Base):
+    __tablename__ = "auth_rate_limit_buckets"
+
+    bucket_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    expires_at_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+class AuditEventRow(Base):
+    __tablename__ = "audit_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    actor_user_id: Mapped[str | None] = mapped_column(String(36))
+    action: Mapped[str] = mapped_column(String(100), nullable=False)
+    resource_path: Mapped[str] = mapped_column(String(255), nullable=False)
+    resource_id: Mapped[str | None] = mapped_column(String(36))
+    status_code: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class SchemaVersionRow(Base):
     __tablename__ = "schema_version"
 
@@ -332,7 +353,7 @@ class SchemaMigrationError(RuntimeError):
 
 
 # Version 3 is the last schema in the original checked-in application. Versions
-# 4–11 add only tables, so they can be applied to an existing version-3 database
+# 4–12 add only tables, so they can be applied to an existing version-3 database
 # without rewriting its meeting or credential rows. Keep this manifest frozen:
 # adding a model column requires a new version and an explicit migration.
 SCHEMA_TABLES_BY_VERSION: dict[int, tuple[str, ...]] = {
@@ -351,6 +372,7 @@ SCHEMA_TABLES_BY_VERSION: dict[int, tuple[str, ...]] = {
     9: ("meeting_knowledge_settings",),
     10: ("knowledge_bases", "knowledge_base_access", "meeting_knowledge_bases", "knowledge_conversations", "knowledge_messages"),
     11: ("user_credentials",),
+    12: ("auth_rate_limit_buckets", "audit_events"),
 }
 
 SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
@@ -380,6 +402,8 @@ SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
     "meeting_knowledge_bases": ("meeting_id", "knowledge_base_id"),
     "knowledge_conversations": ("id", "knowledge_base_id", "user_id", "title", "created_at", "updated_at"),
     "knowledge_messages": ("id", "conversation_id", "position", "role", "content", "citations", "provider", "model", "created_at"),
+    "auth_rate_limit_buckets": ("bucket_key", "attempts", "expires_at_epoch"),
+    "audit_events": ("id", "organization_id", "actor_user_id", "action", "resource_path", "resource_id", "status_code", "created_at"),
 }
 
 
@@ -422,7 +446,7 @@ def _validate_database_schema(connection, version: int) -> None:
 class Database:
     """Upgrades known schemas and rejects unknown or incomplete ones."""
 
-    SCHEMA_VERSION = 11
+    SCHEMA_VERSION = 12
 
     def __init__(self, url: str) -> None:
         engine_options: dict[str, object] = {"pool_pre_ping": True}

@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { meetingsService } from "@/lib/meetings-service";
-import type { CurrentAccount, InviteResult, Workspace, WorkspaceMember } from "@/lib/types";
+import type { AuditEvent, CurrentAccount, InviteResult, Workspace, WorkspaceMember } from "@/lib/types";
 
 export function WorkspaceSettings({ workspace, account, onWorkspaceChange }: {
   workspace: Workspace;
@@ -12,6 +12,8 @@ export function WorkspaceSettings({ workspace, account, onWorkspaceChange }: {
   const [name, setName] = useState(workspace.display_name);
   const [contactEmail, setContactEmail] = useState(workspace.contact_email ?? "");
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
+  const [auditError, setAuditError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -27,6 +29,19 @@ export function WorkspaceSettings({ workspace, account, onWorkspaceChange }: {
       setError("Could not load workspace members.");
     });
   }, []);
+
+  useEffect(() => {
+    if (!canManage) return;
+    void meetingsService.listWorkspaceAudit().then(setAuditEvents).catch(() => {
+      setAuditError("Could not load recent activity.");
+    });
+  }, [canManage]);
+
+  async function refreshAudit() {
+    setAuditError(null);
+    try { setAuditEvents(await meetingsService.listWorkspaceAudit()); }
+    catch { setAuditError("Could not load recent activity."); }
+  }
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -90,6 +105,11 @@ export function WorkspaceSettings({ workspace, account, onWorkspaceChange }: {
         <ul className="workspace-members">{members.map((member) => <li key={member.user_id}><span className="workspace-member-avatar" aria-hidden="true">{member.display_name[0]}</span><span><b>{member.display_name}</b><small>{member.email ?? "Local password sign-in"} · {workspace.display_name}</small></span><em>{member.role} · {member.status}</em>{canManage && member.role !== "owner" ? <button className="text-button" type="button" onClick={() => void resetMember(member.user_id)}>Reset access</button> : null}</li>)}</ul>
         {canManage ? <><form className="workspace-invite" onSubmit={(event) => void invite(event)}><h3>Add a teammate</h3><label htmlFor="invite-name">Name</label><input id="invite-name" value={inviteName} onChange={(event) => setInviteName(event.target.value)} minLength={2} maxLength={120} required /><label htmlFor="invite-email">Work email</label><input id="invite-email" type="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} required /><label htmlFor="invite-role">Role</label><select id="invite-role" value={inviteRole} onChange={(event) => setInviteRole(event.target.value as "admin" | "member" | "viewer")}><option value="member">Member · shared knowledge</option><option value="admin">Admin · workspace management</option><option value="viewer">Viewer · shared knowledge</option></select><button className="button primary" disabled={inviting}>{inviting ? "Creating…" : "Generate temporary password"}</button></form>{inviteResult ? <div className="workspace-invite-secret" role="status"><b>{inviteResult.account.display_name} can sign in</b><p>Share these privately. This password is shown only now; it is not emailed automatically.</p><code>{inviteResult.account.email}</code><code>{inviteResult.temporary_password}</code><button type="button" className="text-button" onClick={() => void navigator.clipboard.writeText(inviteResult.temporary_password)}>Copy temporary password</button></div> : null}</> : null}
       </section>
+      {canManage ? <section className="workspace-card workspace-audit" aria-labelledby="workspace-audit-title">
+        <div className="workspace-audit-heading"><div><h2 id="workspace-audit-title">Recent activity</h2><p>Workspace changes and sign-ins. Request bodies and credentials are never shown.</p></div><button type="button" className="button secondary" onClick={() => void refreshAudit()}>Refresh</button></div>
+        {auditError ? <p className="form-error" role="alert">{auditError}</p> : null}
+        {auditEvents.length ? <ul className="workspace-audit-list">{auditEvents.map((event) => <li key={event.id}><span><b>{event.action === "auth.login.succeeded" ? "Signed in" : event.action}</b><small>{members.find((member) => member.user_id === event.actor_user_id)?.display_name ?? "Workspace account"}{event.resource_id ? ` · ${event.resource_id.slice(0, 8)}…` : ""}</small></span><time dateTime={event.created_at}>{new Date(event.created_at).toLocaleString()}</time></li>)}</ul> : <p>No workspace activity recorded yet.</p>}
+      </section> : null}
     </div>
   </section>;
 }

@@ -64,6 +64,12 @@ test("workspace profile can be edited", async ({ page }) => {
   };
   await page.route("**/v1/workspace**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
+    if (pathname === "/v1/workspace/audit") return route.fulfill({ json: [{
+      id: "00000000-0000-4000-8000-000000000099",
+      actor_user_id: "00000000-0000-4000-8000-000000000002",
+      action: "auth.login.succeeded", resource_path: "/v1/auth/login",
+      resource_id: null, status_code: 200, created_at: "2026-09-24T00:00:00Z",
+    }] });
     if (pathname === "/v1/workspace/members") return route.fulfill({ json: [{
       user_id: "00000000-0000-4000-8000-000000000002",
       display_name: "Local administrator", email: null, role: "owner", status: "active",
@@ -78,7 +84,8 @@ test("workspace profile can be edited", async ({ page }) => {
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Workspace settings" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Organization profile" })).toBeVisible();
-  await expect(page.getByText("Local administrator")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Recent activity" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "People & access" }).getByText("Local administrator")).toBeVisible();
   await page.getByLabel("Workspace name").fill("Research Team");
   await page.getByLabel("Contact email optional").fill("team@example.com");
   await page.getByRole("button", { name: "Save workspace" }).click();

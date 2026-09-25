@@ -3,6 +3,7 @@ import type { NextConfig } from "next";
 const apiBaseUrl = process.env.API_INTERNAL_BASE_URL ?? "http://localhost:8320";
 
 const nextConfig: NextConfig = {
+  turbopack: { root: process.cwd() },
   async rewrites() {
     return [
       {

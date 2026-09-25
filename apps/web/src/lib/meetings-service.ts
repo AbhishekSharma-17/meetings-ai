@@ -1,4 +1,4 @@
-import type { Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeSearchResponse, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, PostMeetingJob, ProfileKind, ProviderProfile, ResendStatus, SpeakerIdentity, TranscriptSegment, TranscriptionRoute, Workspace, WorkspaceMember } from "./types";
+import type { AuditEvent, Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeSearchResponse, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, PostMeetingJob, ProfileKind, ProviderProfile, ResendStatus, SpeakerIdentity, TranscriptSegment, TranscriptionRoute, Workspace, WorkspaceMember } from "./types";
 
 export interface MeetingsService {
   getSession(): Promise<boolean>;
@@ -11,6 +11,7 @@ export interface MeetingsService {
   getWorkspace(): Promise<Workspace>;
   updateWorkspace(patch: { display_name: string; contact_email: string | null }): Promise<Workspace>;
   listWorkspaceMembers(): Promise<WorkspaceMember[]>;
+  listWorkspaceAudit(): Promise<AuditEvent[]>;
   listKnowledgeBases(): Promise<KnowledgeBase[]>;
   getKnowledgeOverview(baseId: string): Promise<KnowledgeWikiOverview>;
   createKnowledgeBase(name: string, description?: string): Promise<KnowledgeBase>;
@@ -293,6 +294,10 @@ class HttpMeetingsService implements MeetingsService {
 
   async listWorkspaceMembers(): Promise<WorkspaceMember[]> {
     return api<WorkspaceMember[]>("/v1/workspace/members");
+  }
+
+  async listWorkspaceAudit(): Promise<AuditEvent[]> {
+    return api<AuditEvent[]>("/v1/workspace/audit?limit=30");
   }
 
   async listKnowledgeBases(): Promise<KnowledgeBase[]> {

@@ -1,5 +1,6 @@
 import os
 import asyncio
+import logging
 import re
 from contextlib import asynccontextmanager
 from typing import Any
@@ -49,6 +50,7 @@ from .knowledge_bases import KnowledgeBaseConflictError, KnowledgeBaseCreate, Kn
 from .minutes_service import MinutesConflictError, MinutesGenerationError, MinutesService
 from .post_meeting_worker import PostMeetingJobConflictError, PostMeetingWorker
 from .auth import AdminSession
+from .operations import AuditEventPublic, AuditService, LoginRateLimiter
 from .repository import MeetingNotFoundError, MinutesNotFoundError, ProfileNotFoundError
 from .runtime_config import validate_runtime_config
 from .security import CredentialCipher
@@ -98,6 +100,8 @@ def create_app(
     database.migrate()
     accounts = AccountService(database)
     accounts.bootstrap_owner(os.getenv("MEETINGS_AI_ADMIN_EMAIL", "developer@genaiprotos.com"), admin_password)
+    audit = AuditService(database)
+    login_limiter = LoginRateLimiter(database, session_secret or resolved_credential_key)
     cipher = CredentialCipher(resolved_credential_key)
     repository = SQLAlchemyRepository(database, cipher)
     workspace_service = WorkspaceService(database)
@@ -153,6 +157,7 @@ def create_app(
     app.state.repository = repository
     app.state.workspace_service = workspace_service
     app.state.accounts = accounts
+    app.state.audit = audit
     app.state.profile_service = service
     app.state.meeting_service = meeting_service
     app.state.knowledge_service = knowledge_service
@@ -205,20 +210,41 @@ def create_app(
                         knowledge_bases.get(meeting.knowledge_base_id, actor)
                     except (ValueError, MeetingNotFoundError, KnowledgeBaseNotFoundError):
                         return JSONResponse(status_code=404, content={"detail": "meeting not found"})
-        return await call_next(request)
+        response = await call_next(request)
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"} and path.startswith("/v1/") \
+                and path not in {"/v1/auth/login", "/v1/auth/logout"} and response.status_code < 400:
+            route = request.scope.get("route")
+            template = getattr(route, "path", path)
+            match = re.search(r"/([0-9a-f]{8}-[0-9a-f-]{27,})", path)
+            resource_id = UUID(match.group(1)) if match else None
+            try:
+                audit.append(actor, f"{request.method} {template}", template, response.status_code, resource_id)
+            except SQLAlchemyError:
+                logging.getLogger(__name__).exception("could not record workspace audit event")
+        return response
 
     class LoginPayload(BaseModel):
         password: str
         email: str | None = None
 
     @app.post("/v1/auth/login")
-    def login(payload: LoginPayload, response: Response) -> dict[str, bool]:
+    def login(payload: LoginPayload, request: Request, response: Response) -> dict[str, bool]:
         if not admin:
             return {"authenticated": True}
+        ip = request.client.host if request.client else "unknown"
+        retry_after = login_limiter.retry_after(payload.email, ip)
+        if retry_after:
+            audit.append(None, "auth.login.throttled", "/v1/auth/login", 429)
+            raise HTTPException(status_code=429, detail="too many sign-in attempts; try again later",
+                                headers={"Retry-After": str(retry_after)})
         try:
             actor = accounts.login(payload.email, payload.password)
         except AccountError as exc:
+            login_limiter.failed(payload.email, ip)
+            audit.append(None, "auth.login.denied", "/v1/auth/login", 401)
             raise HTTPException(status_code=401, detail=str(exc)) from exc
+        login_limiter.succeeded(payload.email)
+        audit.append(actor, "auth.login.succeeded", "/v1/auth/login", 200)
         response.set_cookie(
             "meetings_ai_session", admin.issue(actor.user_id, actor.session_version), httponly=True,
             secure=os.getenv("APP_ENV") == "production", samesite="strict",
@@ -284,6 +310,10 @@ def create_app(
     @app.get("/v1/workspace/members", response_model=list[WorkspaceMemberPublic])
     def list_workspace_members() -> list[WorkspaceMemberPublic]:
         return workspace_service.list_members()
+
+    @app.get("/v1/workspace/audit", response_model=list[AuditEventPublic])
+    def list_workspace_audit(request: Request, limit: int = 50) -> list[AuditEventPublic]:
+        return audit.list(request.state.actor.organization_id, max(1, min(limit, 200)))
 
     @app.get("/v1/knowledge-bases", response_model=list[KnowledgeBasePublic])
     def list_knowledge_bases(request: Request) -> list[KnowledgeBasePublic]:
