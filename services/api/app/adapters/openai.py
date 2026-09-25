@@ -1,4 +1,5 @@
 import json
+from collections.abc import Awaitable, Callable
 
 import httpx
 
@@ -16,6 +17,7 @@ from meetings_contracts import (
 
 from .base import ProviderExecutionError, RuntimeAdapterNotImplementedError
 from .embeddings import create_embeddings
+from .streaming import json_events
 
 
 class OpenAIAdapter:
@@ -97,6 +99,58 @@ class OpenAIAdapter:
             structured_output=_json_object(text),
             provider="openai",
             model=model,
+            input_tokens=_optional_int(usage.get("input_tokens")),
+            output_tokens=_optional_int(usage.get("output_tokens")),
+        )
+
+    async def generate_text_stream(
+        self, profile: ProviderProfile, request: TextGenerationRequest,
+        on_delta: Callable[[str], Awaitable[None]],
+    ) -> TextGenerationResult:
+        if not profile.api_key:
+            raise ProviderExecutionError("OpenAI API key is not configured")
+        model = profile.models.get(Capability.TEXT_GENERATION)
+        if not model:
+            raise ProviderExecutionError("OpenAI text-generation model is not configured")
+        input_items = []
+        if request.system_prompt:
+            input_items.append({"role": "system", "content": request.system_prompt})
+        input_items.append({"role": "user", "content": request.prompt})
+        payload: dict[str, object] = {"model": model, "input": input_items, "store": False, "stream": True}
+        if request.temperature is not None:
+            payload["temperature"] = request.temperature
+        if request.max_output_tokens is not None:
+            payload["max_output_tokens"] = request.max_output_tokens
+        if request.response_schema:
+            payload["text"] = {"format": {"type": "json_schema", "name": "meeting_minutes", "schema": request.response_schema, "strict": True}}
+        chunks: list[str] = []
+        completed: dict | None = None
+        try:
+            async with httpx.AsyncClient(timeout=90, transport=self.transport) as client:
+                async with client.stream("POST", "https://api.openai.com/v1/responses", headers={
+                    "Authorization": f"Bearer {profile.api_key}", "Content-Type": "application/json",
+                }, json=payload) as response:
+                    if response.is_error:
+                        raise ProviderExecutionError(f"OpenAI request failed ({response.status_code}): {(await response.aread()).decode(errors='replace')[:500]}")
+                    async for event in json_events(response, "OpenAI"):
+                        kind = event.get("type")
+                        if kind == "response.output_text.delta" and isinstance(event.get("delta"), str):
+                            chunks.append(event["delta"])
+                            await on_delta(event["delta"])
+                        elif kind == "response.completed":
+                            completed = event.get("response") if isinstance(event.get("response"), dict) else {}
+                        elif kind in {"response.failed", "response.incomplete", "error"}:
+                            raise ProviderExecutionError(f"OpenAI response ended with {kind}")
+        except httpx.RequestError as exc:
+            raise ProviderExecutionError("OpenAI is unavailable") from exc
+        if completed is None:
+            raise ProviderExecutionError("OpenAI stream ended before completion")
+        text = "".join(chunks)
+        if not text:
+            raise ProviderExecutionError("OpenAI returned no generated text")
+        usage = completed.get("usage") if isinstance(completed.get("usage"), dict) else {}
+        return TextGenerationResult(
+            text=text, structured_output=_json_object(text), provider="openai", model=model,
             input_tokens=_optional_int(usage.get("input_tokens")),
             output_tokens=_optional_int(usage.get("output_tokens")),
         )

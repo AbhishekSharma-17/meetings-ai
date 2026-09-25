@@ -36,6 +36,7 @@ export interface MeetingsService {
   deleteKnowledgeConversation(baseId: string, conversationId: string): Promise<void>;
   searchKnowledge(query: string, tags: string[], knowledgeBaseId?: string | null): Promise<KnowledgeSearchResponse>;
   chatKnowledge(query: string, tags: string[], knowledgeBaseId?: string | null, conversationId?: string | null, profileId?: string | null, modelId?: string | null): Promise<KnowledgeChatResponse>;
+  streamKnowledgeChat(query: string, tags: string[], knowledgeBaseId: string, conversationId: string | null, profileId: string | null, modelId: string | null, onDelta: (delta: string) => void): Promise<KnowledgeChatResponse>;
   listKnowledgeTextProfiles(): Promise<KnowledgeTextProfile[]>;
   listKnowledgeModels(profileId: string): Promise<TextModelCatalog>;
   listMeetings(): Promise<Meeting[]>;
@@ -469,6 +470,53 @@ class HttpMeetingsService implements MeetingsService {
     return api<KnowledgeChatResponse>("/v1/knowledge/chat", {
       method: "POST", body: JSON.stringify({ query, tags, limit: 8, knowledge_base_id: knowledgeBaseId ?? null, conversation_id: conversationId ?? null, text_profile_id: profileId ?? null, model_id: modelId ?? null }),
     });
+  }
+
+  async streamKnowledgeChat(query: string, tags: string[], knowledgeBaseId: string, conversationId: string | null, profileId: string | null, modelId: string | null, onDelta: (delta: string) => void): Promise<KnowledgeChatResponse> {
+    const path = "/v1/knowledge/chat/stream";
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ query, tags, limit: 8, knowledge_base_id: knowledgeBaseId, conversation_id: conversationId, text_profile_id: profileId, model_id: modelId }),
+    });
+    if (!response.ok) {
+      if (response.status === 401) window.dispatchEvent(new Event("meetings-ai-session-expired"));
+      const payload = await response.json().catch(() => null) as unknown;
+      throw new ApiError(apiErrorMessage(payload) ?? `API request failed (${response.status})`, response.status);
+    }
+    if (!response.body) throw new Error("The browser could not open the answer stream.");
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let final: KnowledgeChatResponse | null = null;
+    const receive = (frame: string) => {
+      const lines = frame.split("\n");
+      const event = lines.find((line) => line.startsWith("event:"))?.slice(6).trim();
+      const data = lines.filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
+      if (!event || !data) return;
+      const value: unknown = JSON.parse(data);
+      if (event === "delta" && typeof value === "string") onDelta(value);
+      if (event === "final") final = value as KnowledgeChatResponse;
+      if (event === "error") throw new Error(typeof value === "string" ? value : "The answer could not be completed.");
+    };
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+        buffer = buffer.replace(/\r\n/g, "\n");
+        let boundary = buffer.indexOf("\n\n");
+        while (boundary !== -1) {
+          receive(buffer.slice(0, boundary));
+          buffer = buffer.slice(boundary + 2);
+          boundary = buffer.indexOf("\n\n");
+        }
+        if (done) break;
+      }
+      if (buffer.trim()) receive(buffer);
+    } finally {
+      reader.releaseLock();
+    }
+    if (!final) throw new Error("The answer stream ended before it was verified. Please try again.");
+    return final;
   }
 
   async listKnowledgeTextProfiles(): Promise<KnowledgeTextProfile[]> {

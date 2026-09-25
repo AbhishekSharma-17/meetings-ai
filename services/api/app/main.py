@@ -1,5 +1,6 @@
 import os
 import asyncio
+import json
 import logging
 import re
 from dataclasses import replace
@@ -14,7 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from meetings_contracts import (
@@ -225,7 +226,7 @@ def create_app(
                         or (method == "DELETE" and re.fullmatch(r"/v1/knowledge-bases/[0-9a-f-]+", path))
                         or (method == "DELETE" and re.fullmatch(r"/v1/knowledge-bases/[0-9a-f-]+/conversations/[0-9a-f-]+", path))
                         or (method == "PUT" and re.fullmatch(r"/v1/knowledge-bases/[0-9a-f-]+/sharing", path))
-                        or (path in {"/v1/knowledge/search", "/v1/knowledge/chat"} and method == "POST")
+                        or (path in {"/v1/knowledge/search", "/v1/knowledge/chat", "/v1/knowledge/chat/stream"} and method == "POST")
                         or (method == "GET" and path == "/v1/knowledge/text-profiles")
                         or (method == "GET" and re.fullmatch(r"/v1/knowledge/text-profiles/[0-9a-f-]+/models", path))
                         or path == "/v1/auth/me"
@@ -580,15 +581,7 @@ def create_app(
     @app.post("/v1/knowledge/chat", response_model=KnowledgeChatResponse)
     async def chat_knowledge(payload: KnowledgeQuery, request: Request) -> KnowledgeChatResponse:
         try:
-            if payload.model_id:
-                profile_id = payload.text_profile_id
-                if not profile_id and payload.knowledge_base_id:
-                    profile_id = knowledge_bases.get(payload.knowledge_base_id, request.state.actor).text_profile_id
-                if not profile_id:
-                    raise HTTPException(status_code=422, detail="select a text provider before selecting a model")
-                catalog = await model_catalog.list_for(repository.get_profile(profile_id))
-                if payload.model_id not in {option.id for option in catalog.models}:
-                    raise HTTPException(status_code=422, detail="choose a model from the provider catalog")
+            await validate_chat_model(payload, request.state.actor)
             return await knowledge_service.chat(payload, request.state.actor)
         except KnowledgeBaseNotFoundError as exc:
             raise HTTPException(status_code=404, detail="knowledge base not found") from exc
@@ -600,6 +593,69 @@ def create_app(
             raise HTTPException(status_code=404, detail="text provider not found") from exc
         except ModelCatalogError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    async def validate_chat_model(payload: KnowledgeQuery, actor: Actor) -> None:
+        if not payload.model_id:
+            return
+        profile_id = payload.text_profile_id
+        if not profile_id and payload.knowledge_base_id:
+            profile_id = knowledge_bases.get(payload.knowledge_base_id, actor).text_profile_id
+        if not profile_id:
+            raise HTTPException(status_code=422, detail="select a text provider before selecting a model")
+        catalog = await model_catalog.list_for(repository.get_profile(profile_id))
+        if payload.model_id not in {option.id for option in catalog.models}:
+            raise HTTPException(status_code=422, detail="choose a model from the provider catalog")
+
+    @app.post("/v1/knowledge/chat/stream")
+    async def stream_knowledge_chat(payload: KnowledgeQuery, request: Request) -> StreamingResponse:
+        actor = request.state.actor
+        try:
+            await validate_chat_model(payload, actor)
+            if payload.knowledge_base_id:
+                knowledge_bases.get(payload.knowledge_base_id, actor)
+        except KnowledgeBaseNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="knowledge base not found") from exc
+        except KnowledgeAccessError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except ProfileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="text provider not found") from exc
+        except ModelCatalogError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+        async def events():
+            queue: asyncio.Queue[tuple[str, object]] = asyncio.Queue()
+
+            async def emit(delta: str) -> None:
+                await queue.put(("delta", delta))
+
+            async def run_chat() -> None:
+                try:
+                    with tenant_scope(actor.organization_id):
+                        result = await knowledge_service.chat(payload, actor, emit)
+                    await queue.put(("final", result.model_dump(mode="json")))
+                except (KnowledgeAnswerError, KnowledgeBaseNotFoundError, KnowledgeAccessError, ProfileNotFoundError) as exc:
+                    await queue.put(("error", str(exc)))
+                except Exception:
+                    logging.exception("Knowledge chat stream failed")
+                    await queue.put(("error", "The answer could not be completed. Please try again."))
+                finally:
+                    await queue.put(("done", None))
+
+            task = asyncio.create_task(run_chat())
+            try:
+                while True:
+                    kind, value = await queue.get()
+                    if kind == "done":
+                        break
+                    yield f"event: {kind}\ndata: {json.dumps(value, ensure_ascii=False)}\n\n"
+            finally:
+                if not task.done():
+                    task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+        return StreamingResponse(events(), media_type="text/event-stream", headers={
+            "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no",
+        })
 
     @app.patch("/v1/meetings/{meeting_id}/knowledge", response_model=MeetingPublic)
     def update_meeting_knowledge(

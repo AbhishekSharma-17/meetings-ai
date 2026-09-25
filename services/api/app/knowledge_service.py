@@ -2,6 +2,7 @@
 
 import json
 import re
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
@@ -236,7 +237,10 @@ class KnowledgeService:
             truncated_meeting_scope=truncated,
         )
 
-    async def chat(self, request: KnowledgeQuery, actor: Actor | None = None) -> KnowledgeChatResponse:
+    async def chat(
+        self, request: KnowledgeQuery, actor: Actor | None = None,
+        on_delta: Callable[[str], Awaitable[None]] | None = None,
+    ) -> KnowledgeChatResponse:
         history = []
         if request.conversation_id:
             if request.knowledge_base_id is None or self.bases is None:
@@ -310,15 +314,15 @@ class KnowledgeService:
         )
         try:
             if request.text_profile_id:
-                profile, result = await self.providers.generate_text(prompt, profile_id=request.text_profile_id, **({"model_override": request.model_id} if request.model_id else {}))
+                profile, result = await self.providers.generate_text(prompt, profile_id=request.text_profile_id, **({"model_override": request.model_id} if request.model_id else {}), **({"on_delta": on_delta} if on_delta else {}))
             elif request.knowledge_base_id and self.bases:
                 base = self.bases.get(request.knowledge_base_id, actor)
                 if base.text_profile_id:
-                    profile, result = await self.providers.generate_text(prompt, profile_id=base.text_profile_id, **({"model_override": request.model_id} if request.model_id else {}))
+                    profile, result = await self.providers.generate_text(prompt, profile_id=base.text_profile_id, **({"model_override": request.model_id} if request.model_id else {}), **({"on_delta": on_delta} if on_delta else {}))
                 else:
-                    profile, result = await self.providers.generate_text(prompt)
+                    profile, result = await self.providers.generate_text(prompt, **({"on_delta": on_delta} if on_delta else {}))
             else:
-                profile, result = await self.providers.generate_text(prompt)
+                profile, result = await self.providers.generate_text(prompt, **({"on_delta": on_delta} if on_delta else {}))
             payload = result.structured_output or json.loads(result.text)
             answer = payload["answer"]
             citation_ids = payload["citation_ids"]

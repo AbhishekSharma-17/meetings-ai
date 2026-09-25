@@ -1,4 +1,5 @@
 import json
+from collections.abc import Awaitable, Callable
 
 import httpx
 
@@ -15,6 +16,7 @@ from meetings_contracts import (
 
 from .base import ProviderExecutionError, RuntimeAdapterNotImplementedError
 from .embeddings import create_embeddings
+from .streaming import json_events
 
 
 class OpenAICompatibleAdapter:
@@ -112,6 +114,81 @@ class OpenAICompatibleAdapter:
             structured_output=structured if isinstance(structured, dict) else None,
             provider=profile.provider_type.value,
             model=model,
+            input_tokens=_integer(usage.get("prompt_tokens")),
+            output_tokens=_integer(usage.get("completion_tokens")),
+        )
+
+    async def generate_text_stream(
+        self, profile: ProviderProfile, request: TextGenerationRequest,
+        on_delta: Callable[[str], Awaitable[None]],
+    ) -> TextGenerationResult:
+        from meetings_contracts import Capability
+
+        if not profile.base_url:
+            raise ProviderExecutionError("Compatible provider base URL is not configured")
+        model = profile.models.get(Capability.TEXT_GENERATION)
+        if not model:
+            raise ProviderExecutionError("Compatible text-generation model is not configured")
+        messages = []
+        if request.system_prompt:
+            messages.append({"role": "system", "content": request.system_prompt})
+        messages.append({"role": "user", "content": request.prompt})
+        payload: dict[str, object] = {"model": model, "messages": messages, "stream": True}
+        if request.temperature is not None:
+            payload["temperature"] = request.temperature
+        if request.max_output_tokens is not None:
+            payload["max_tokens"] = request.max_output_tokens
+        if request.response_schema:
+            payload["response_format"] = {"type": "json_schema", "json_schema": {
+                "name": "meeting_minutes", "strict": True, "schema": request.response_schema,
+            }}
+        headers = {"Content-Type": "application/json"}
+        if profile.api_key:
+            headers["Authorization"] = f"Bearer {profile.api_key}"
+        # OpenRouter emits token usage in the terminal stream chunk when requested.
+        if "openrouter.ai" in profile.base_url.lower():
+            payload["stream_options"] = {"include_usage": True}
+        chunks: list[str] = []
+        usage: dict = {}
+        finished = False
+        try:
+            async with httpx.AsyncClient(timeout=90, transport=self.transport) as client:
+                async with client.stream("POST", f"{profile.base_url.rstrip('/')}/chat/completions", headers=headers, json=payload) as response:
+                    if response.is_error:
+                        raise ProviderExecutionError(f"Compatible provider request failed ({response.status_code}): {(await response.aread()).decode(errors='replace')[:500]}")
+                    async for event in json_events(response, "Compatible provider"):
+                        if isinstance(event.get("error"), dict):
+                            raise ProviderExecutionError(f"Compatible provider stream failed: {str(event['error'])[:500]}")
+                        if isinstance(event.get("usage"), dict):
+                            usage = event["usage"]
+                        choices = event.get("choices")
+                        if not isinstance(choices, list) or not choices:
+                            continue
+                        choice = choices[0]
+                        if not isinstance(choice, dict):
+                            continue
+                        delta = choice.get("delta")
+                        content = delta.get("content") if isinstance(delta, dict) else None
+                        if isinstance(content, str) and content:
+                            chunks.append(content)
+                            await on_delta(content)
+                        reason = choice.get("finish_reason")
+                        if reason == "length":
+                            raise ProviderExecutionError("Compatible provider answer exceeded the output token limit")
+                        if reason:
+                            finished = True
+        except httpx.RequestError as exc:
+            raise ProviderExecutionError("Compatible provider is unavailable") from exc
+        text = "".join(chunks)
+        if not finished or not text:
+            raise ProviderExecutionError("Compatible provider stream ended before completion")
+        try:
+            structured = json.loads(text)
+        except ValueError:
+            structured = None
+        return TextGenerationResult(
+            text=text, structured_output=structured if isinstance(structured, dict) else None,
+            provider=profile.provider_type.value, model=model,
             input_tokens=_integer(usage.get("prompt_tokens")),
             output_tokens=_integer(usage.get("completion_tokens")),
         )

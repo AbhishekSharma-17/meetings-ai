@@ -290,6 +290,10 @@ input:disabled,textarea:disabled,.provider-editor select:disabled { background:v
 .knowledge-chat-user { max-width:min(80%,620px); padding:11px 15px; border:0; border-radius:13px 13px 3px 13px; }
 .knowledge-chat-assistant { padding:18px 20px; border-radius:4px 13px 13px 13px; box-shadow:none; }
 .knowledge-chat-assistant > small { display:block; margin-bottom:9px; color:var(--brand); font-weight:600; }
+.knowledge-streaming { order:1; width:100%; padding:0 22px 24px; }
+.knowledge-chat-panel:has(+ .knowledge-streaming) .knowledge-chat-empty { display:none; }
+.knowledge-stream-cursor { display:inline-block; width:2px; height:1em; margin-left:3px; vertical-align:-2px; background:var(--brand); animation:knowledge-cursor-blink 1s steps(1) infinite; }
+@keyframes knowledge-cursor-blink { 50% { opacity:0; } }
 .knowledge-answer { font-size:14px; line-height:1.7; }
 .knowledge-chat-empty { max-width:430px; margin:auto; padding:20px; }
 .knowledge-chat-empty > .lucide { width:30px; height:30px; }

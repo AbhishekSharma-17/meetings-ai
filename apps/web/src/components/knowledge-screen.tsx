@@ -9,6 +9,20 @@ import { ArrowUpRight, BookOpenText, GitBranch, Plus, Search, Sparkles, MessageC
 
 type Exchange = { question: string; response: KnowledgeChatResponse };
 
+function streamedAnswer(raw: string): string {
+  const match = /"answer"\s*:\s*"/.exec(raw);
+  if (!match) return "";
+  let literal = "";
+  let escaped = false;
+  for (const character of raw.slice(match.index + match[0].length)) {
+    if (character === '"' && !escaped) break;
+    literal += character;
+    escaped = character === "\\" && !escaped;
+    if (character !== "\\") escaped = false;
+  }
+  try { return JSON.parse(`"${literal}"`) as string; } catch { return ""; }
+}
+
 export function KnowledgeScreen({ onOpenSource, account }: {
   account: CurrentAccount | null;
   onOpenSource(meetingId: string, segmentId: string): void;
@@ -40,6 +54,7 @@ export function KnowledgeScreen({ onOpenSource, account }: {
   const [indexStatus, setIndexStatus] = useState<KnowledgeIndexStatus | null>(null);
   const [indexing, setIndexing] = useState(false);
   const [exchanges, setExchanges] = useState<Exchange[]>([]);
+  const [pending, setPending] = useState<{ question: string; raw: string; answer: string } | null>(null);
   const [confirmDeleteConversation, setConfirmDeleteConversation] = useState(false);
   const [confirmDeleteBase, setConfirmDeleteBase] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -238,7 +253,14 @@ export function KnowledgeScreen({ onOpenSource, account }: {
         setSearch(await meetingsService.searchKnowledge(question, tags, selectedBaseId || null));
       } else {
         if (!selectedBaseId) throw new Error("Select a knowledge base before starting a saved chat.");
-        const response = await meetingsService.chatKnowledge(question, tags, selectedBaseId, conversationId, effectiveProfileId || null, selectedModelId || null);
+        setPending({ question, raw: "", answer: "" });
+        setQuery("");
+        let raw = "";
+        const response = await meetingsService.streamKnowledgeChat(question, tags, selectedBaseId, conversationId, effectiveProfileId || null, selectedModelId || null, (delta) => {
+          raw += delta;
+          const answer = streamedAnswer(raw);
+          setPending({ question, raw, answer });
+        });
         setExchanges((current) => [...current, { question, response }]);
         setConversationId(response.conversation_id);
         void meetingsService.listKnowledgeConversations(selectedBaseId).then(setConversations).catch(() => undefined);
@@ -247,6 +269,7 @@ export function KnowledgeScreen({ onOpenSource, account }: {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The knowledge request failed.");
     } finally {
+      setPending(null);
       setBusy(false);
     }
   }
@@ -272,6 +295,7 @@ export function KnowledgeScreen({ onOpenSource, account }: {
     {notice ? <p className="field-hint" role="status">{notice}</p> : null}
     {mode === "search" && search ? <div className="knowledge-results"><div className="section-heading"><div><h2>Matching sources</h2><p>{search.count} result{search.count === 1 ? "" : "s"} · {search.retrieval_mode === "hybrid" ? "hybrid lexical + semantic" : "lexical"} retrieval{search.truncated_meeting_scope ? " · newest 200 meetings searched" : ""}</p></div></div>{search.sources.length ? <div className="knowledge-source-list">{search.sources.map((source) => <SourceCard key={source.source_id} source={source} onOpenSource={onOpenSource} />)}</div> : <div className="empty-state"><b>No matching source found.</b><p>Try a different phrase or tag. Only opted-in completed meetings are searchable.</p></div>}</div> : null}
     {mode === "ask" ? <div className="knowledge-results knowledge-chat-panel"><div className="section-heading"><div><h2>{selectedBase ? `Ask ${selectedBase.name}` : "Choose a knowledge base"}</h2><p>Searches the selected base on every turn. Saved conversation history helps resolve follow-up questions.</p></div></div>{exchanges.length ? <div className="knowledge-chat-thread" aria-live="polite">{exchanges.map((exchange, index) => <div className="knowledge-chat-turn" key={`${index}:${exchange.question}`}><div className="knowledge-chat-user"><small>You</small><p>{exchange.question}</p></div><article className="knowledge-chat-assistant"><small>Meetings AI · {exchange.response.model ? `${exchange.response.provider} / ${exchange.response.model}` : "No matching sources"}</small><p className="knowledge-answer">{exchange.response.answer}</p>{exchange.response.citations.length ? <details className="knowledge-citations"><summary>{exchange.response.citations.length} cited source{exchange.response.citations.length === 1 ? "" : "s"} · open transcript</summary>{exchange.response.citations.map((source) => <SourceCard key={source.source_id} source={source} onOpenSource={onOpenSource} />)}</details> : null}</article></div>)}</div> : <div className="knowledge-chat-empty"><Sparkles /><h3>Start a conversation</h3><p>Ask what was decided, who committed to an action, or how a topic evolved across meetings. Each answer links back to a timestamped source.</p></div>}</div> : null}
+    {mode === "ask" && pending ? <div className="knowledge-chat-thread knowledge-streaming" aria-live="polite" aria-busy="true"><div className="knowledge-chat-turn"><div className="knowledge-chat-user"><small>You</small><p>{pending.question}</p></div><article className="knowledge-chat-assistant"><small>Meetings AI · answering live</small><p className="knowledge-answer">{pending.answer || "Finding relevant meeting evidence…"}<span className="knowledge-stream-cursor" aria-hidden="true" /></p><small>Citations will appear after the answer is verified.</small></article></div></div> : null}
     {mode === "wiki" ? <div className="knowledge-results"><div className="section-heading"><div><h2>{selectedBase ? `${selectedBase.name} wiki` : "Choose a knowledge base"}</h2><p>Meetings, decisions, and conversations stay connected to their originals.</p></div></div>{overview ? <><WikiOverview overview={overview} onOpenMeeting={(id) => onOpenSource(id, "")} />{evidenceMap ? <EvidenceMap map={evidenceMap} onOpenSource={onOpenSource} /> : null}</> : <div className="empty-state"><b>No wiki to show yet.</b><p>Select a knowledge base with completed meetings.</p></div>}</div> : null}
   </div></div></section><Dialog.Root open={sharingOpen} onOpenChange={setSharingOpen}><Dialog.Portal><Dialog.Backdrop className="dialog-backdrop" /><Dialog.Popup className="dialog knowledge-sharing-dialog"><Dialog.Close className="close-button" aria-label="Close sharing"><X /></Dialog.Close><Dialog.Title>Share {selectedBase?.name}</Dialog.Title><Dialog.Description className="dialog-intro">Choose who can browse and ask questions about this knowledge base.</Dialog.Description><fieldset><legend>Access</legend><label><input type="radio" name="sharing" checked={shareVisibility === "private"} onChange={() => setShareVisibility("private")} /> Private to creator and admins</label><label><input type="radio" name="sharing" checked={shareVisibility === "organization"} onChange={() => setShareVisibility("organization")} /> Everyone in this organization</label><label><input type="radio" name="sharing" checked={shareVisibility === "specific"} onChange={() => setShareVisibility("specific")} /> Specific teammates</label></fieldset>{shareVisibility === "specific" ? <div className="knowledge-share-members">{members.filter((member) => member.user_id !== account?.user_id).map((member) => <label key={member.user_id}><input type="checkbox" checked={shareUserIds.includes(member.user_id)} onChange={(event) => setShareUserIds((current) => event.target.checked ? [...current, member.user_id] : current.filter((id) => id !== member.user_id))} /> <span>{member.display_name}<small>{member.email}</small></span></label>)}</div> : null}{error ? <p className="form-error" role="alert">{error}</p> : null}<div className="knowledge-sharing-actions"><button type="button" className="button secondary" onClick={() => setSharingOpen(false)}>Cancel</button><button type="button" className="button primary" disabled={busy} onClick={() => void saveSharing()}>Save sharing</button></div></Dialog.Popup></Dialog.Portal></Dialog.Root></>;
 }

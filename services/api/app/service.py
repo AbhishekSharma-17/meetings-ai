@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 from dataclasses import replace
+from collections.abc import Awaitable, Callable
 from uuid import UUID
 
 from meetings_contracts import (
@@ -126,6 +127,7 @@ class ProviderProfileService:
     async def generate_text(
         self, request: TextGenerationRequest, *, profile_id: UUID | None = None,
         model_override: str | None = None,
+        on_delta: Callable[[str], Awaitable[None]] | None = None,
     ) -> tuple[ProviderProfile, TextGenerationResult]:
         if model_override and (not profile_id or len(model_override) > 200 or any(char.isspace() for char in model_override)):
             raise ProviderSelectionError("a valid model override requires a selected provider")
@@ -134,7 +136,11 @@ class ProviderProfileService:
             if not profile.supports(Capability.TEXT_GENERATION):
                 raise ProviderSelectionError("selected profile does not support text generation")
             runtime_profile = replace(profile, models={**profile.models, Capability.TEXT_GENERATION: model_override}) if model_override else profile
-            result = await self.adapters[profile.provider_type].generate_text(runtime_profile, request)
+            adapter = self.adapters[profile.provider_type]
+            stream = getattr(adapter, "generate_text_stream", None) if on_delta else None
+            result = await stream(runtime_profile, request, on_delta) if stream else await adapter.generate_text(runtime_profile, request)
+            if on_delta and not stream:
+                await on_delta(result.text)
             if self.usage:
                 self.usage.record(profile, request, result)
             return profile, result
@@ -149,13 +155,25 @@ class ProviderProfileService:
                 failures.append(f"{profile.name}: text generation is not configured")
                 continue
             try:
-                result = await self.adapters[profile.provider_type].generate_text(
-                    profile, request
-                )
+                adapter = self.adapters[profile.provider_type]
+                stream = getattr(adapter, "generate_text_stream", None) if on_delta else None
+                emitted = False
+
+                async def emit(value: str) -> None:
+                    nonlocal emitted
+                    emitted = True
+                    if on_delta:
+                        await on_delta(value)
+
+                result = await stream(profile, request, emit) if stream else await adapter.generate_text(profile, request)
+                if on_delta and not stream:
+                    await on_delta(result.text)
                 if self.usage:
                     self.usage.record(profile, request, result)
                 return profile, result
             except (ProviderExecutionError, RuntimeError) as exc:
+                if on_delta and emitted:
+                    raise
                 failures.append(f"{profile.name}: {exc}")
         raise ProviderExecutionError("; ".join(failures) or "all selected providers failed")
 

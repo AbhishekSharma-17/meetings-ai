@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 
-const screenshotDirectory = path.resolve(
+const screenshotDirectory = process.env.PLAYWRIGHT_CAPTURE_DIR ?? path.resolve(
   __dirname,
   "../../../../docs/status/ui-walkthrough",
 );
@@ -500,12 +500,13 @@ test("AI knowledge links tagged evidence to the exact transcript turn", async ({
       searchPayload = route.request().postDataJSON();
       return route.fulfill({ json: { sources: [source], count: 1, retrieval_mode: "lexical", truncated_meeting_scope: false } });
     }
-    if (pathname === "/v1/knowledge/chat") {
-      return route.fulfill({ json: {
+    if (pathname === "/v1/knowledge/chat/stream") {
+      const final = {
         answer: "Alice committed to the roadmap on Friday [K1].", citations: [source],
         provider: "test-provider", model: "economy-test", retrieval_mode: "lexical", conversation_id: "00000000-0000-4000-8000-000000000077",
         note: "Verify the transcript.",
-      } });
+      };
+      return route.fulfill({ contentType: "text/event-stream", body: `event: delta\ndata: ${JSON.stringify('{"answer":"Alice committed to the roadmap on Friday [K1].","citation_ids":["K1"]}')}\n\nevent: final\ndata: ${JSON.stringify(final)}\n\n` });
     }
     return route.fallback();
   });
