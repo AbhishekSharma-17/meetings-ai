@@ -42,6 +42,8 @@ from meetings_contracts import (
 from .adapters.vexa import VexaAPIError, VexaCaptureAdapter
 from .adapters.resend import EmailDeliveryError, ResendAdapter
 from .adapters.base import ProviderExecutionError
+from .composio_calendar import CalendarConnection, CalendarConnectResponse, CalendarEventsResponse, CalendarError, CalendarProvider, CalendarRange, ComposioCalendar
+from .calendar_schedule import CalendarScheduleError, CalendarSchedulePublic, CalendarScheduleService, ScheduleCreate
 from .database import Database, SchemaVersionRow, LEGACY_ADMIN_USER_ID, LEGACY_ORGANIZATION_ID
 from .accounts import AccountError, AccountPublic, AccountService, Actor, ChangePasswordRequest, InviteRequest, InviteResult, MemberRolePatch, OrganizationCreateRequest, OrganizationOption, ProfilePatch
 from .meeting_service import MeetingConflictError, MeetingService, MeetingValidationError
@@ -80,6 +82,7 @@ def create_app(
     credential_key: str | None = None,
     vexa_adapter: VexaCaptureAdapter | None = None,
     resend_adapter: ResendAdapter | None = None,
+    calendar_adapter: ComposioCalendar | None = None,
 ) -> FastAPI:
     resolved_database_url = database_url or os.getenv(
         "DATABASE_URL", "sqlite+pysqlite:///:memory:"
@@ -132,6 +135,8 @@ def create_app(
     minutes_service = MinutesService(repository, service, resend)
     worker = PostMeetingWorker(repository, meeting_service, minutes_service)
     retention = RetentionService(database, meeting_service, audit)
+    calendar = calendar_adapter or ComposioCalendar()
+    calendar_schedule = CalendarScheduleService(database, calendar, meeting_service)
     if bool(admin_password) != bool(session_secret):
         raise RuntimeError("admin password and session secret must both be configured")
     admin = AdminSession(session_secret) if admin_password else None
@@ -141,10 +146,11 @@ def create_app(
         task = asyncio.create_task(worker.run()) if os.getenv("AUTO_MOM_ENABLED") == "1" else None
         index_task = asyncio.create_task(knowledge_index.run()) if os.getenv("AUTO_KNOWLEDGE_INDEX_ENABLED") == "1" else None
         retention_task = asyncio.create_task(retention.run()) if os.getenv("AUTO_RETENTION_ENABLED") == "1" else None
+        schedule_task = asyncio.create_task(calendar_schedule.run()) if os.getenv("AUTO_CALENDAR_SCHEDULE_ENABLED") == "1" else None
         try:
             yield
         finally:
-            for running in (task, index_task, retention_task):
+            for running in (task, index_task, retention_task, schedule_task):
                 if running:
                     running.cancel()
                     try:
@@ -175,6 +181,8 @@ def create_app(
     app.state.minutes_service = minutes_service
     app.state.post_meeting_worker = worker
     app.state.retention = retention
+    app.state.calendar = calendar
+    app.state.calendar_schedule = calendar_schedule
 
     @app.middleware("http")
     async def require_admin(request: Request, call_next):
@@ -210,6 +218,9 @@ def create_app(
                         or (method == "PUT" and re.fullmatch(r"/v1/knowledge-bases/[0-9a-f-]+/sharing", path))
                         or (path in {"/v1/knowledge/search", "/v1/knowledge/chat"} and method == "POST")
                         or path == "/v1/auth/me"
+                        or (path == "/v1/calendar/connections" and method == "GET")
+                        or (re.fullmatch(r"/v1/calendar/connect/(googlecalendar|outlook)", path) and method == "POST")
+                        or (path == "/v1/calendar/events" and method == "GET")
                         or (method == "GET" and re.fullmatch(r"/v1/meetings/[0-9a-f-]+(?:/transcript)?", path))
                     )
                     if not allowed:
@@ -668,6 +679,54 @@ def create_app(
         STTRouteError,
     )
 
+    @app.get("/v1/calendar/connections", response_model=list[CalendarConnection])
+    async def calendar_connections(request: Request) -> list[CalendarConnection]:
+        try:
+            return await calendar.connections(request.state.actor)
+        except CalendarError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.post("/v1/calendar/connect/{provider}", response_model=CalendarConnectResponse)
+    async def calendar_connect(provider: CalendarProvider, request: Request) -> CalendarConnectResponse:
+        callback_url = os.getenv("APP_BASE_URL", "http://localhost:3020").rstrip("/") + "/?calendar=connected"
+        try:
+            return await calendar.connect(request.state.actor, provider, callback_url)
+        except CalendarError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.get("/v1/calendar/events", response_model=CalendarEventsResponse)
+    async def calendar_events(request: Request, connection_id: str, period: CalendarRange = "today", timezone: str = "UTC") -> CalendarEventsResponse:
+        try:
+            return await calendar.events(request.state.actor, connection_id, period, timezone)
+        except CalendarError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/v1/calendar/schedules", response_model=list[CalendarSchedulePublic])
+    def calendar_schedules(request: Request) -> list[CalendarSchedulePublic]:
+        return calendar_schedule.list(request.state.actor)
+
+    @app.get("/v1/calendar/schedules/{meeting_id}", response_model=CalendarSchedulePublic)
+    def calendar_schedule_get(meeting_id: UUID, request: Request) -> CalendarSchedulePublic:
+        scheduled = calendar_schedule.get(request.state.actor, meeting_id)
+        if scheduled is None:
+            raise HTTPException(status_code=404, detail="scheduled meeting not found")
+        return scheduled
+
+    @app.post("/v1/calendar/schedules", status_code=201)
+    async def calendar_schedule_create(payload: ScheduleCreate, request: Request) -> dict[str, object]:
+        try:
+            scheduled, meeting = await calendar_schedule.create(request.state.actor, payload)
+            return {"schedule": scheduled.model_dump(mode="json"), "meeting": meeting.model_dump(mode="json")}
+        except (CalendarScheduleError, CalendarError, MeetingValidationError, KnowledgeBaseNotFoundError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/v1/calendar/schedules/{meeting_id}/cancel", response_model=CalendarSchedulePublic)
+    def calendar_schedule_cancel(meeting_id: UUID, request: Request) -> CalendarSchedulePublic:
+        try:
+            return calendar_schedule.cancel(request.state.actor, meeting_id)
+        except CalendarScheduleError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     @app.post(
         "/v1/meetings", response_model=MeetingPublic, status_code=status.HTTP_201_CREATED
     )
@@ -751,8 +810,11 @@ def create_app(
         return Response(status_code=204)
 
     @app.post("/v1/meetings/{meeting_id}/join", response_model=MeetingPublic)
-    async def join_meeting(meeting_id: UUID) -> MeetingPublic:
+    async def join_meeting(meeting_id: UUID, request: Request) -> MeetingPublic:
         try:
+            scheduled = calendar_schedule.get(request.state.actor, meeting_id)
+            if scheduled and scheduled.status in {"pending", "joining"}:
+                raise HTTPException(status_code=409, detail="this event is scheduled; cancel its automatic join before joining manually")
             return meeting_service.to_public(await meeting_service.join(meeting_id))
         except MEETING_EXCEPTIONS as exc:
             raise api_error(exc) from exc

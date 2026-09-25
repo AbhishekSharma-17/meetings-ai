@@ -5,8 +5,9 @@ import { Dialog } from "@base-ui/react/dialog";
 import { X } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
 import type { KnowledgeBase, MeetingDetail } from "@/lib/types";
+import type { CalendarSelection } from "./calendar-import-dialog";
 
-export function NewMeetingDialog({ open, onClose, onMeetingJoined }: { open: boolean; onClose(): void; onMeetingJoined(meeting: MeetingDetail): void }) {
+export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelection }: { open: boolean; onClose(): void; onMeetingJoined(meeting: MeetingDetail): void; calendarSelection?: CalendarSelection | null }) {
   const titleId = useId();
   const [error, setError] = useState<string | null>(null);
   const [joining, setJoining] = useState(false);
@@ -30,7 +31,7 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined }: { open: boo
       const knowledgeBaseId = newBaseName
         ? (await meetingsService.createKnowledgeBase(newBaseName)).id
         : knowledgeEnabled ? String(form.get("knowledge-base") ?? "") || null : null;
-      const meeting = await meetingsService.createMeeting({
+      const input = {
         meetingUrl: String(form.get("meeting-link") ?? ""),
         title: String(form.get("meeting-title") ?? "") || undefined,
         botName: String(form.get("bot-name") ?? "") || undefined,
@@ -43,7 +44,14 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined }: { open: boo
           send_to_participants: form.get("share-participants") === "on",
           include_transcript: form.get("include-transcript") === "on",
         },
-      });
+      };
+      const shouldSchedule = calendarSelection && new Date(calendarSelection.event.starts_at).getTime() > Date.now() + 60_000;
+      if (shouldSchedule) {
+        const scheduled = await meetingsService.scheduleCalendarEvent(calendarSelection.event, calendarSelection.period, calendarSelection.timezone, input);
+        onMeetingJoined(scheduled);
+        return;
+      }
+      const meeting = await meetingsService.createMeeting(input);
       try {
         const joined = await meetingsService.joinMeeting(meeting.id);
         onMeetingJoined(joined);
@@ -68,12 +76,12 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined }: { open: boo
     <Dialog.Backdrop className="dialog-backdrop" />
     <Dialog.Popup className="dialog" aria-labelledby={titleId}>
       <Dialog.Close className="close-button" aria-label="Close" disabled={joining}><X /></Dialog.Close>
-      <p className="eyebrow">NEW CAPTURE</p><Dialog.Title id={titleId}>Send your assistant</Dialog.Title><Dialog.Description className="dialog-intro">Paste a meeting link to start a capture. You’ll review the transcript and minutes here before anything is emailed.</Dialog.Description>
+      <p className="eyebrow">NEW CAPTURE</p><Dialog.Title id={titleId}>{calendarSelection ? "Review calendar meeting" : "Send your assistant"}</Dialog.Title><Dialog.Description className="dialog-intro">{calendarSelection ? `From your ${calendarSelection.event.provider === "googlecalendar" ? "Google" : "Outlook"} calendar · ${new Date(calendarSelection.event.starts_at).toLocaleString()}. Future meetings are scheduled automatically; meetings starting now join immediately.` : "Paste a meeting link to start a capture. You’ll review the transcript and minutes here before anything is emailed."}</Dialog.Description>
       <form onSubmit={(event) => void submit(event)}>
         <label htmlFor="meeting-link">Meeting link</label>
-        <input id="meeting-link" name="meeting-link" type="url" required placeholder="https://meet.google.com/..." autoFocus disabled={joining} />
+        <input id="meeting-link" name="meeting-link" type="url" required placeholder="https://meet.google.com/..." autoFocus defaultValue={calendarSelection?.event.meeting_url ?? ""} readOnly={Boolean(calendarSelection)} disabled={joining} />
         <label htmlFor="meeting-title">Meeting name <span className="optional">optional</span></label>
-        <input id="meeting-title" name="meeting-title" placeholder="e.g. Product discovery" disabled={joining} />
+        <input id="meeting-title" name="meeting-title" placeholder="e.g. Product discovery" defaultValue={calendarSelection?.event.title ?? ""} disabled={joining} />
         <label htmlFor="bot-name">Assistant name</label>
         <input id="bot-name" name="bot-name" defaultValue="Meetings AI" disabled={joining} />
         <div className={knowledgeEnabled ? "meeting-knowledge-options enabled" : "meeting-knowledge-options"}>
@@ -99,7 +107,7 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined }: { open: boo
         </details>
         <div className="disclosure"><span aria-hidden="true">ⓘ</span><p><b>Disclosure is required.</b> Before sending, confirm the host will announce: “Meetings AI has joined and will record and transcribe this conversation.”</p></div>
         {error ? <p className="form-error" role="alert">{error}</p> : null}
-        <div className="dialog-actions"><button className="button secondary" type="button" onClick={close} disabled={joining}>Cancel</button><button className="button primary" type="submit" disabled={joining}>{joining ? "Creating and joining…" : "Send assistant"}</button></div>
+        <div className="dialog-actions"><button className="button secondary" type="button" onClick={close} disabled={joining}>Cancel</button><button className="button primary" type="submit" disabled={joining}>{joining ? "Saving…" : calendarSelection?.willSchedule ? "Schedule assistant" : "Send assistant"}</button></div>
       </form>
     </Dialog.Popup>
     </Dialog.Portal>

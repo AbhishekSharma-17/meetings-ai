@@ -28,6 +28,7 @@ from meetings_contracts import (
 )
 
 from .database import (
+    CalendarScheduleRow,
     Database,
     EmailDeliveryRow,
     MeetingRow,
@@ -314,7 +315,7 @@ class SQLAlchemyRepository:
             self._queue_knowledge_index(session, meeting_id)
             self._delete_cited_conversations(session, meeting_id)
             for model in (
-                KnowledgeEmbeddingRow, MeetingKnowledgeBaseRow, MeetingKnowledgeSettingsRow,
+                CalendarScheduleRow, KnowledgeEmbeddingRow, MeetingKnowledgeBaseRow, MeetingKnowledgeSettingsRow,
                 MeetingDeliverySettingsRow, PostMeetingJobRow, TranscriptSegmentRow,
                 TranscriptSegmentMetadataRow, TranscriptSpeakerCorrectionRow,
                 MeetingSpeakerIdentityRow, TranscriptReviewStateRow, MinutesSourceRow,

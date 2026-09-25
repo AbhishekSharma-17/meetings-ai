@@ -318,6 +318,17 @@ export type CreateMeetingInput = {
   knowledgeBaseId?: string | null;
 };
 
+export type CalendarConnection = { id: string; provider: "googlecalendar" | "outlook"; status: string; label: string };
+export type CalendarPeriod = "today" | "tomorrow" | "this_week" | "next_week";
+export type CalendarEvent = {
+  connection_id: string; provider: CalendarConnection["provider"]; event_id: string;
+  title: string; starts_at: string; ends_at: string; meeting_url: string; platform: string;
+};
+export type CalendarSchedule = {
+  meeting_id: string; connection_id: string; event_id: string; starts_at: string; ends_at: string;
+  status: "pending" | "joining" | "joined" | "failed" | "cancelled" | "missed"; last_error: string | null;
+};
+
 export type MeetingDeliverySettings = {
   internal_recipients: string[];
   participant_recipients: string[];

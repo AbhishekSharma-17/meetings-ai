@@ -43,6 +43,12 @@ The current local capture slice establishes:
   Ask AI questions;
 - workspace-scoped operations counts and opt-in retention policies for old
   meetings, saved chats, and audit events (off by default).
+- per-user, read-only Google Calendar and Outlook Calendar connections through
+  Composio; review supported meeting links from today, tomorrow, this week,
+  or next week before creating a capture;
+- scheduled assistant joins for selected future calendar events, with durable
+  status and cancellation. The local scheduler runs in one API process; it
+  does not auto-send a recap or enroll everyone on a calendar invitation.
 
 The Vexa capture and OpenAI MOM paths are active locally. Resend delivery is wired
 to the approved-MOM workflow. The API exposes `GET /v1/integrations/resend/status`
@@ -161,7 +167,7 @@ identity information.
 The report measures turn-level speaker attribution—not audio diarization error
 rate—and should be reviewed alongside the audio and MOM evidence links.
 
-Database startup applies additive schema steps 3 → 16 and preserves existing
+Database startup applies additive schema steps 3 → 17 and preserves existing
 rows. It refuses an unversioned, future, or incomplete schema instead of
 silently stamping it current. `/health` is process liveness; `/ready` verifies
 the database and current schema and is used by Compose. Back up PostgreSQL
@@ -191,6 +197,26 @@ and measured retrieval quality remain to build. See the
 [knowledge flow and limits](docs/knowledge/architecture.md).
 Do not expose this as a public multi-customer SaaS before hosted database
 policies, account lifecycle, and security hardening are complete.
+
+## Calendar discovery
+
+Set `COMPOSIO_API_KEY`, `COMPOSIO_GOOGLE_CALENDAR_AUTH_CONFIG_ID`, and
+`COMPOSIO_OUTLOOK_AUTH_CONFIG_ID` in the ignored `.env.local`; Compose passes
+them only to the API. Auth configurations should request calendar read-only
+scopes and restrict tools to event listing. Set `APP_BASE_URL` to the exact
+browser-reachable app origin for the OAuth callback (locally,
+`http://localhost:3020`). Run `make compose-up`, sign in, and click **Find in
+calendar** on Meetings. Each user connects their own calendar and explicitly
+chooses an event. The app skips cancelled, ended, and unsupported-link events.
+Future events create a scheduled record; the single-process worker joins about
+one minute before the start, unless the join is cancelled. It marks meetings
+missed instead of joining after a long outage. Meetings starting immediately
+use the existing manual join flow. A real Google/Outlook consent and event scan
+still need a human account to validate the live provider response.
+
+The calendar integration has no mailbox access, Gmail inbox scanning, or
+automatic attendee-email delivery. The selected calendar event is re-read by
+the server before scheduling, so the browser cannot substitute its own link.
 
 ## Source layout
 

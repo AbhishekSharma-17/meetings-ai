@@ -6,6 +6,7 @@ import { meetingsService } from "@/lib/meetings-service";
 import type { CurrentAccount, Meeting, ProviderProfile, Workspace, WorkspaceOption } from "@/lib/types";
 import { Dashboard } from "./dashboard";
 import { NewMeetingDialog } from "./new-meeting-dialog";
+import { CalendarImportDialog, type CalendarSelection } from "./calendar-import-dialog";
 import { MeetingDetailScreen } from "./meeting-detail-screen";
 import { ProviderSettings } from "./provider-settings";
 import { WorkspaceSettings } from "./workspace-settings";
@@ -28,6 +29,8 @@ export function AppShell() {
   const [workspaces, setWorkspaces] = useState<WorkspaceOption[]>([]);
   const [workspaceLoading, setWorkspaceLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [calendarSelection, setCalendarSelection] = useState<CalendarSelection | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [activeMeetingId, setActiveMeetingId] = useState<string | null>(null);
   const [focusSegmentId, setFocusSegmentId] = useState<string | null>(null);
@@ -41,6 +44,10 @@ export function AppShell() {
   const [loggingIn, setLoggingIn] = useState(false);
 
   useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("calendar") === "connected") {
+      queueMicrotask(() => setCalendarOpen(true));
+      window.history.replaceState(null, "", window.location.pathname);
+    }
     void meetingsService.getSession().then(async (active) => {
       if (active) {
         const current = await meetingsService.getCurrentAccount();
@@ -129,7 +136,7 @@ export function AppShell() {
         <span className="topbar-environment"><span aria-hidden="true" /> Local environment</span>
       </header>
       <main id="main-content">
-        {view === "dashboard" ? <Dashboard meetings={meetings} onNewMeeting={() => setDialogOpen(true)} onOpenProviders={() => setView("providers")} onOpenMeeting={openMeeting} /> : null}
+        {view === "dashboard" ? <Dashboard meetings={meetings} onNewMeeting={() => { setCalendarSelection(null); setDialogOpen(true); }} onOpenCalendar={() => setCalendarOpen(true)} onOpenProviders={() => setView("providers")} onOpenMeeting={openMeeting} /> : null}
         {view === "providers" ? providersLoadError ? <section className="page" role="alert"><h1>AI providers are unavailable</h1><p className="intro">{providersLoadError}</p><button className="button secondary" onClick={() => void meetingsService.listProviderProfiles().then((nextProfiles) => { setProfiles(nextProfiles); setProvidersLoadError(null); }).catch(() => undefined)}>Retry</button></section> : <ProviderSettings profiles={profiles} onProfilesChange={setProfiles} /> : null}
         {view === "knowledge" ? <KnowledgeScreen account={account} onOpenSource={openMeeting} /> : null}
         {view === "workspace" ? workspace
@@ -152,8 +159,10 @@ export function AppShell() {
           </Dialog.Popup>
         </Dialog.Portal>
       </Dialog.Root>
-      <NewMeetingDialog open={dialogOpen && (account?.role === "owner" || account?.role === "admin")} onClose={() => setDialogOpen(false)} onMeetingJoined={(meeting) => {
+      <CalendarImportDialog open={calendarOpen && (account?.role === "owner" || account?.role === "admin")} onClose={() => setCalendarOpen(false)} onChoose={(selection) => { setCalendarSelection({ ...selection, willSchedule: new Date(selection.event.starts_at).getTime() > Date.now() + 60_000 }); setCalendarOpen(false); setDialogOpen(true); }} />
+      <NewMeetingDialog open={dialogOpen && (account?.role === "owner" || account?.role === "admin")} calendarSelection={calendarSelection} onClose={() => { setDialogOpen(false); setCalendarSelection(null); }} onMeetingJoined={(meeting) => {
         setDialogOpen(false);
+        setCalendarSelection(null);
         updateMeeting(meeting);
         openMeeting(meeting.id);
       }} />

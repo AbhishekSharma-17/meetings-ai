@@ -14,7 +14,7 @@ const statusLabel: Record<Meeting["status"], string> = {
   failed: "Needs attention",
 };
 
-export function Dashboard({ meetings, onNewMeeting, onOpenProviders, onOpenMeeting }: { meetings: Meeting[]; onNewMeeting(): void; onOpenProviders(): void; onOpenMeeting(id: string): void }) {
+export function Dashboard({ meetings, onNewMeeting, onOpenCalendar, onOpenProviders, onOpenMeeting }: { meetings: Meeting[]; onNewMeeting(): void; onOpenCalendar(): void; onOpenProviders(): void; onOpenMeeting(id: string): void }) {
   const readyCount = meetings.filter((meeting) => meeting.status === "ready").length;
   const liveCount = meetings.filter((meeting) => meeting.status === "live").length;
   return (
@@ -25,7 +25,7 @@ export function Dashboard({ meetings, onNewMeeting, onOpenProviders, onOpenMeeti
           <h1>From conversation<br /><span>to clarity.</span></h1>
           <p className="intro">Capture the meeting, review what matters, and move decisions forward.</p>
         </div>
-        <button className="button primary" onClick={onNewMeeting}><PlusIcon /> New meeting</button>
+        <div className="dashboard-hero-actions"><button className="button secondary" onClick={onOpenCalendar}>Find in calendar</button><button className="button primary" onClick={onNewMeeting}><PlusIcon /> New meeting</button></div>
       </div>
 
       <div className="notice" role="status">

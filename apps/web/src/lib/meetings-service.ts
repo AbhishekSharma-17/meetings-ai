@@ -1,4 +1,4 @@
-import type { AuditEvent, Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, PostMeetingJob, ProfileKind, ProviderProfile, ResendStatus, RetentionPolicy, SpeakerIdentity, TranscriptSegment, TranscriptionRoute, Workspace, WorkspaceMember, WorkspaceOperations, WorkspaceOption } from "./types";
+import type { AuditEvent, CalendarConnection, CalendarEvent, CalendarPeriod, CalendarSchedule, Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, PostMeetingJob, ProfileKind, ProviderProfile, ResendStatus, RetentionPolicy, SpeakerIdentity, TranscriptSegment, TranscriptionRoute, Workspace, WorkspaceMember, WorkspaceOperations, WorkspaceOption } from "./types";
 
 export interface MeetingsService {
   getSession(): Promise<boolean>;
@@ -37,6 +37,13 @@ export interface MeetingsService {
   chatKnowledge(query: string, tags: string[], knowledgeBaseId?: string | null, conversationId?: string | null): Promise<KnowledgeChatResponse>;
   listMeetings(): Promise<Meeting[]>;
   createMeeting(input: CreateMeetingInput): Promise<MeetingDetail>;
+  listCalendarConnections(): Promise<CalendarConnection[]>;
+  connectCalendar(provider: CalendarConnection["provider"]): Promise<string>;
+  scanCalendar(connectionId: string, period: CalendarPeriod, timezone: string): Promise<CalendarEvent[]>;
+  listCalendarSchedules(): Promise<CalendarSchedule[]>;
+  getCalendarSchedule(meetingId: string): Promise<CalendarSchedule | null>;
+  scheduleCalendarEvent(event: CalendarEvent, period: CalendarPeriod, timezone: string, input: CreateMeetingInput): Promise<MeetingDetail>;
+  cancelCalendarSchedule(meetingId: string): Promise<CalendarSchedule>;
   getMeeting(id: string): Promise<MeetingDetail>;
   deleteMeeting(id: string): Promise<void>;
   updateMeetingKnowledge(id: string, tags: string[], knowledgeEnabled: boolean, knowledgeBaseId?: string | null): Promise<MeetingDetail>;
@@ -446,6 +453,46 @@ class HttpMeetingsService implements MeetingsService {
       }),
     });
     return toMeetingDetail(meeting);
+  }
+
+  async listCalendarConnections(): Promise<CalendarConnection[]> {
+    return api<CalendarConnection[]>("/v1/calendar/connections");
+  }
+
+  async connectCalendar(provider: CalendarConnection["provider"]): Promise<string> {
+    const result = await api<{ redirect_url: string }>(`/v1/calendar/connect/${provider}`, { method: "POST" });
+    return result.redirect_url;
+  }
+
+  async scanCalendar(connectionId: string, period: CalendarPeriod, timezone: string): Promise<CalendarEvent[]> {
+    const params = new URLSearchParams({ connection_id: connectionId, period, timezone });
+    const result = await api<{ events: CalendarEvent[] }>(`/v1/calendar/events?${params}`);
+    return result.events;
+  }
+
+  async listCalendarSchedules(): Promise<CalendarSchedule[]> {
+    return api<CalendarSchedule[]>("/v1/calendar/schedules");
+  }
+
+  async getCalendarSchedule(meetingId: string): Promise<CalendarSchedule | null> {
+    try { return await api<CalendarSchedule>(`/v1/calendar/schedules/${meetingId}`); }
+    catch (cause) { if (cause instanceof ApiError && cause.status === 404) return null; throw cause; }
+  }
+
+  async scheduleCalendarEvent(event: CalendarEvent, period: CalendarPeriod, timezone: string, input: CreateMeetingInput): Promise<MeetingDetail> {
+    const result = await api<{ meeting: BackendMeeting }>("/v1/calendar/schedules", { method: "POST", body: JSON.stringify({
+      connection_id: event.connection_id, event_id: event.event_id, period, timezone,
+      meeting: {
+        meeting_url: event.meeting_url, title: input.title || event.title, bot_name: input.botName || "Meetings AI",
+        delivery_settings: input.deliverySettings, tags: input.tags ?? [],
+        knowledge_enabled: input.knowledgeEnabled ?? false, knowledge_base_id: input.knowledgeBaseId ?? null,
+      },
+    }) });
+    return toMeetingDetail(result.meeting);
+  }
+
+  async cancelCalendarSchedule(meetingId: string): Promise<CalendarSchedule> {
+    return api<CalendarSchedule>(`/v1/calendar/schedules/${meetingId}/cancel`, { method: "POST" });
   }
 
   async getMeeting(id: string): Promise<MeetingDetail> {

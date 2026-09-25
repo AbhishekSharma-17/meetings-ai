@@ -174,6 +174,25 @@ class KnowledgeIndexJobRow(Base):
     last_error: Mapped[str | None] = mapped_column(Text)
 
 
+class CalendarScheduleRow(Base):
+    __tablename__ = "calendar_schedules"
+    __table_args__ = (UniqueConstraint("organization_id", "connection_id", "event_id", "starts_at"),)
+
+    meeting_id: Mapped[str] = mapped_column(String(36), ForeignKey("meetings.id"), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    connection_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    provider: Mapped[str] = mapped_column(String(30), nullable=False)
+    event_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class MeetingKnowledgeBaseRow(Base):
     __tablename__ = "meeting_knowledge_bases"
 
@@ -419,7 +438,7 @@ class SchemaMigrationError(RuntimeError):
 
 
 # Version 3 is the last schema in the original checked-in application. Versions
-# 4–16 add only tables, so they can be applied to an existing version-3 database
+# 4–17 add only tables, so they can be applied to an existing version-3 database
 # without rewriting its meeting or credential rows. Keep this manifest frozen:
 # adding a model column requires a new version and an explicit migration.
 SCHEMA_TABLES_BY_VERSION: dict[int, tuple[str, ...]] = {
@@ -443,6 +462,7 @@ SCHEMA_TABLES_BY_VERSION: dict[int, tuple[str, ...]] = {
     14: ("knowledge_embeddings",),
     15: ("knowledge_index_jobs",),
     16: ("workspace_retention",),
+    17: ("calendar_schedules",),
 }
 
 SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
@@ -475,6 +495,7 @@ SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
     "knowledge_base_access": ("knowledge_base_id", "user_id", "access"),
     "knowledge_embeddings": ("id", "organization_id", "knowledge_base_id", "meeting_id", "source_id", "fingerprint", "profile_id", "model", "dimensions", "vector", "updated_at"),
     "knowledge_index_jobs": ("knowledge_base_id", "organization_id", "status", "attempts", "requested_at", "started_at", "completed_at", "next_retry_at", "last_error"),
+    "calendar_schedules": ("meeting_id", "organization_id", "user_id", "connection_id", "provider", "event_id", "starts_at", "ends_at", "status", "attempts", "last_error", "created_at", "updated_at"),
     "meeting_knowledge_bases": ("meeting_id", "knowledge_base_id"),
     "knowledge_conversations": ("id", "knowledge_base_id", "user_id", "title", "created_at", "updated_at"),
     "knowledge_messages": ("id", "conversation_id", "position", "role", "content", "citations", "provider", "model", "created_at"),
@@ -522,7 +543,7 @@ def _validate_database_schema(connection, version: int) -> None:
 class Database:
     """Upgrades known schemas and rejects unknown or incomplete ones."""
 
-    SCHEMA_VERSION = 16
+    SCHEMA_VERSION = 17
 
     def __init__(self, url: str) -> None:
         engine_options: dict[str, object] = {"pool_pre_ping": True}

@@ -27,7 +27,7 @@ def test_fresh_database_records_each_version_and_is_idempotent(tmp_path) -> None
 
     with database.engine.connect() as connection:
         versions = connection.execute(select(SchemaVersionRow.version)).scalars().all()
-    assert versions == [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+    assert versions == [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
     database.engine.dispose()
 
 
@@ -50,7 +50,7 @@ def test_version_three_upgrade_preserves_existing_rows(tmp_path) -> None:
             "SELECT policy FROM provider_defaults WHERE capability='transcription'"
         )).scalar_one() == "cloud_only"
         assert connection.execute(select(SchemaVersionRow.version)).scalars().all() == [
-            3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+            3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
         ]
         assert connection.execute(text(
             "SELECT policy FROM organization_provider_defaults WHERE capability='transcription'"
@@ -76,6 +76,7 @@ def test_version_twelve_upgrade_backfills_meeting_and_provider_owners(tmp_path) 
         connection.execute(text("DROP TABLE workspace_retention"))
         connection.execute(text("DROP TABLE knowledge_index_jobs"))
         connection.execute(text("DROP TABLE knowledge_embeddings"))
+        connection.execute(text("DROP TABLE calendar_schedules"))
         connection.execute(text("DROP TABLE organization_provider_defaults"))
         connection.execute(text("DROP TABLE meeting_tenants"))
         connection.execute(text("DROP TABLE provider_tenants"))
@@ -83,6 +84,7 @@ def test_version_twelve_upgrade_backfills_meeting_and_provider_owners(tmp_path) 
         connection.execute(text("DELETE FROM schema_version WHERE version = 14"))
         connection.execute(text("DELETE FROM schema_version WHERE version = 15"))
         connection.execute(text("DELETE FROM schema_version WHERE version = 16"))
+        connection.execute(text("DELETE FROM schema_version WHERE version = 17"))
         connection.execute(text(
             "INSERT INTO provider_defaults (capability, policy, cloud_profile_id) "
             "VALUES ('text_generation', 'cloud_only', :profile_id)"
@@ -120,10 +122,10 @@ def test_unknown_future_version_refuses_startup(tmp_path) -> None:
     database.migrate()
     with database.engine.begin() as connection:
         connection.execute(insert(SchemaVersionRow).values(
-            version=17, applied_at=datetime.now(UTC),
+            version=18, applied_at=datetime.now(UTC),
         ))
 
-    with pytest.raises(SchemaMigrationError, match="unsupported database schema version 17"):
+    with pytest.raises(SchemaMigrationError, match="unsupported database schema version 18"):
         database.migrate()
     database.engine.dispose()
 
@@ -145,9 +147,9 @@ def test_readiness_requires_current_schema(tmp_path) -> None:
     )
     with TestClient(app) as client:
         assert client.get("/health").status_code == 200
-        assert client.get("/ready").json() == {"status": "ready", "schema_version": 16}
+        assert client.get("/ready").json() == {"status": "ready", "schema_version": 17}
         with app.state.database.engine.begin() as connection:
-                connection.execute(text("DELETE FROM schema_version WHERE version = 16"))
+                connection.execute(text("DELETE FROM schema_version WHERE version = 17"))
         response = client.get("/ready")
         assert response.status_code == 503
         assert response.json()["detail"] == "database schema is not current"
