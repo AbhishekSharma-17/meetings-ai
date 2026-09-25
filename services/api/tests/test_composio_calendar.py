@@ -91,6 +91,34 @@ def test_composio_tool_scan_filters_non_meetings_and_uses_explicit_account() -> 
     assert b'"version":"20260915_00"' in requests[-1].content
 
 
+def test_multiple_accounts_of_same_provider_are_listed_and_selected_explicitly() -> None:
+    import asyncio
+
+    actor = _actor()
+    requests: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/connected_accounts"):
+            return httpx.Response(200, json={"items": [
+                {"id": "ca-work", "toolkit": {"slug": "googlecalendar"}, "user_id":
+                 f"meetings-ai:{actor.organization_id}:{actor.user_id}", "status": "ACTIVE",
+                 "data": {"displayName": "work@example.test"}},
+                {"id": "ca-personal", "toolkit": {"slug": "googlecalendar"}, "user_id":
+                 f"meetings-ai:{actor.organization_id}:{actor.user_id}", "status": "ACTIVE",
+                 "alias": "Personal calendar", "data": {"displayName": "personal@example.test"}},
+            ]})
+        return httpx.Response(200, json={"successful": True, "data": {"items": []}})
+
+    calendar = ComposioCalendar("test-key", transport=httpx.MockTransport(respond))
+    connections = asyncio.run(calendar.connections(actor))
+    assert [(item.id, item.label) for item in connections] == [
+        ("ca-work", "work@example.test"), ("ca-personal", "Personal calendar"),
+    ]
+    asyncio.run(calendar.events(actor, "ca-personal", "today", "UTC"))
+    assert b'"connected_account_id":"ca-personal"' in requests[-1].content
+
+
 def test_schedule_refetches_calendar_event_and_can_cancel(tmp_path) -> None:
     class FakeCalendar:
         async def events(self, actor, connection_id, period, timezone):

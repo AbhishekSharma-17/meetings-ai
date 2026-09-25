@@ -48,11 +48,34 @@ test("calendar shows provider status and normalizes browser time zone", async ({
   });
   await page.goto("/");
   await page.getByRole("button", { name: "Calendar", exact: true }).click();
-  await expect(page.getByText("Outlook Calendar")).toBeVisible();
-  await expect(page.getByText("Connected", { exact: true })).toBeVisible();
-  await expect(page.getByText("Google Calendar")).toBeVisible();
+  await expect(page.getByLabel("Calendar connections").getByText("Outlook Calendar")).toBeVisible();
+  await expect(page.getByLabel("Calendar connections").getByText("Connected", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Calendar connections").getByText("Google Calendar")).toBeVisible();
   await page.getByRole("button", { name: "Show meetings" }).click();
   await expect(page.getByText("No upcoming supported meetings in this range")).toBeVisible();
+});
+
+test("multiple calendar accounts stay distinct and the selected account is scanned", async ({ page }) => {
+  let scannedAccount: string | null = null;
+  await page.route("**/v1/calendar/connections", (route) => route.fulfill({ json: [
+    { id: "ca-work", provider: "googlecalendar", status: "ACTIVE", label: "work@example.test" },
+    { id: "ca-personal", provider: "googlecalendar", status: "ACTIVE", label: "Personal calendar" },
+    { id: "ca-outlook", provider: "outlook", status: "ACTIVE", label: "outlook@example.test" },
+  ] }));
+  await page.route("**/v1/calendar/events?**", async (route) => {
+    scannedAccount = new URL(route.request().url()).searchParams.get("connection_id");
+    await route.fulfill({ json: { events: [], timezone: "UTC", range_start: "2026-09-25T00:00:00Z", range_end: "2026-09-26T00:00:00Z" } });
+  });
+  await page.goto("/?calendar=connected&status=success&connected_account_id=ca-personal");
+  await expect(page.getByText("2 connected accounts")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connected accounts" })).toBeVisible();
+  await expect(page.getByText("work@example.test")).toBeVisible();
+  await expect(page.getByText("Personal calendar", { exact: true })).toBeVisible();
+  await expect(page.getByText("outlook@example.test")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add another" })).toHaveCount(2);
+  await expect(page.getByRole("combobox", { name: "Scan calendar account" })).toContainText("Personal calendar");
+  await page.getByRole("button", { name: "Show meetings" }).click();
+  await expect.poll(() => scannedAccount).toBe("ca-personal");
 });
 
 test("workspace creation lives in Organization & people, not the profile menu", async ({ page }) => {

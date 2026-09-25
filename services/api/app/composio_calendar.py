@@ -214,9 +214,14 @@ class ComposioCalendar:
                 continue
             if not item.get("id") or item.get("user_id") not in {None, _user_id(actor)}:
                 continue
+            account_data = item.get("data") if isinstance(item.get("data"), dict) else {}
+            label = item.get("alias") or account_data.get("displayName")
+            if not isinstance(label, str) or not label.strip():
+                provider_name = "Google Calendar" if provider == "googlecalendar" else "Outlook Calendar"
+                label = f"{provider_name} · {str(item['id'])[-4:]}"
             connections.append(CalendarConnection(
                 id=str(item.get("id")), provider=provider, status=str(item.get("status") or "UNKNOWN"),
-                label=str(item.get("alias") or ("Google Calendar" if provider == "googlecalendar" else "Outlook Calendar")),
+                label=label.strip()[:160],
             ))
         return connections
 

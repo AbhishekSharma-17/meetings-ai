@@ -30,6 +30,7 @@ export function AppShell() {
   const [workspaceLoading, setWorkspaceLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
+  const [preferredCalendarConnectionId, setPreferredCalendarConnectionId] = useState<string | null>(null);
   const [calendarSelection, setCalendarSelection] = useState<CalendarSelection | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [activeMeetingId, setActiveMeetingId] = useState<string | null>(null);
@@ -44,8 +45,10 @@ export function AppShell() {
   const [loggingIn, setLoggingIn] = useState(false);
 
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("calendar") === "connected") {
-      queueMicrotask(() => setCalendarOpen(true));
+    const callback = new URLSearchParams(window.location.search);
+    if (callback.get("calendar") === "connected") {
+      const connectedAccountId = callback.get("connected_account_id");
+      queueMicrotask(() => { setPreferredCalendarConnectionId(connectedAccountId); setCalendarOpen(true); });
       window.history.replaceState(null, "", window.location.pathname);
     }
     void meetingsService.getSession().then(async (active) => {
@@ -159,7 +162,7 @@ export function AppShell() {
           </Dialog.Popup>
         </Dialog.Portal>
       </Dialog.Root>
-      <CalendarImportDialog open={calendarOpen && (account?.role === "owner" || account?.role === "admin")} onClose={() => setCalendarOpen(false)} onChoose={(selection) => { setCalendarSelection({ ...selection, willSchedule: new Date(selection.event.starts_at).getTime() > Date.now() + 60_000 }); setCalendarOpen(false); setDialogOpen(true); }} />
+      <CalendarImportDialog open={calendarOpen && (account?.role === "owner" || account?.role === "admin")} preferredConnectionId={preferredCalendarConnectionId} onClose={() => setCalendarOpen(false)} onChoose={(selection) => { setCalendarSelection({ ...selection, willSchedule: new Date(selection.event.starts_at).getTime() > Date.now() + 60_000 }); setCalendarOpen(false); setDialogOpen(true); }} />
       <NewMeetingDialog open={dialogOpen && (account?.role === "owner" || account?.role === "admin")} calendarSelection={calendarSelection} onClose={() => { setDialogOpen(false); setCalendarSelection(null); }} onMeetingJoined={(meeting) => {
         setDialogOpen(false);
         setCalendarSelection(null);

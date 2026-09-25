@@ -14,7 +14,7 @@ const periods: { value: CalendarPeriod; label: string }[] = [
   { value: "this_week", label: "This week" }, { value: "next_week", label: "Next week" },
 ];
 
-export function CalendarImportDialog({ open, onClose, onChoose }: { open: boolean; onClose(): void; onChoose(selection: CalendarSelection): void }) {
+export function CalendarImportDialog({ open, preferredConnectionId, onClose, onChoose }: { open: boolean; preferredConnectionId?: string | null; onClose(): void; onChoose(selection: CalendarSelection): void }) {
   const titleId = useId();
   const [connections, setConnections] = useState<CalendarConnection[]>([]);
   const [loadingConnections, setLoadingConnections] = useState(true);
@@ -38,12 +38,15 @@ export function CalendarImportDialog({ open, onClose, onChoose }: { open: boolea
         if (!alive) return;
         setConnections(nextConnections);
         setSchedules(nextSchedules);
-        setConnectionId((current) => nextConnections.some((item) => item.id === current && item.status === "ACTIVE") ? current : nextConnections.find((item) => item.status === "ACTIVE")?.id || "");
+        setConnectionId((current) => {
+          if (preferredConnectionId && nextConnections.some((item) => item.id === preferredConnectionId && item.status === "ACTIVE")) return preferredConnectionId;
+          return nextConnections.some((item) => item.id === current && item.status === "ACTIVE") ? current : nextConnections.find((item) => item.status === "ACTIVE")?.id || "";
+        });
         setLoadingConnections(false);
       })
       .catch((cause) => { if (alive) { setError(cause instanceof Error ? cause.message : "Could not load calendar connections."); setLoadingConnections(false); } });
     return () => { alive = false; };
-  }, [open]);
+  }, [open, preferredConnectionId]);
 
   async function connect(provider: CalendarConnection["provider"]) {
     setBusy(true); setError(null);
@@ -61,20 +64,21 @@ export function CalendarImportDialog({ open, onClose, onChoose }: { open: boolea
 
   if (!open) return null;
   const activeConnections = connections.filter((item) => item.status === "ACTIVE");
-  const googleConnected = activeConnections.some((item) => item.provider === "googlecalendar");
-  const outlookConnected = activeConnections.some((item) => item.provider === "outlook");
+  const googleCount = activeConnections.filter((item) => item.provider === "googlecalendar").length;
+  const outlookCount = activeConnections.filter((item) => item.provider === "outlook").length;
   return <Dialog.Root open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
     <Dialog.Portal><Dialog.Backdrop className="dialog-backdrop" /><Dialog.Popup className="dialog calendar-dialog" aria-labelledby={titleId}>
       <Dialog.Close className="close-button" aria-label="Close"><X /></Dialog.Close>
       <p className="eyebrow"><CalendarDays size={16} /> CALENDAR</p>
       <Dialog.Title id={titleId}>Your calendar meetings</Dialog.Title>
-      <Dialog.Description className="dialog-intro">Connect a calendar, choose a time range, and review eligible meetings before sending or scheduling an assistant.</Dialog.Description>
+      <Dialog.Description className="dialog-intro">Connect one or more calendars, then choose the account and time range to review before sending or scheduling an assistant.</Dialog.Description>
       <div className="calendar-provider-grid" aria-label="Calendar connections">
-        <div className={googleConnected ? "calendar-provider-card connected" : "calendar-provider-card"}><CalendarBrandIcon provider="googlecalendar" /><div><b>Google Calendar</b><small>{googleConnected ? "Ready to scan" : "Connect your Google account"}</small></div>{googleConnected ? <span className="calendar-connection-badge"><CheckCircle2 /> Connected</span> : <button className="button secondary" type="button" disabled={busy || loadingConnections} onClick={() => void connect("googlecalendar")}>Connect</button>}</div>
-        <div className={outlookConnected ? "calendar-provider-card connected" : "calendar-provider-card"}><CalendarBrandIcon provider="outlook" /><div><b>Outlook Calendar</b><small>{outlookConnected ? "Ready to scan" : "Connect your Microsoft account"}</small></div>{outlookConnected ? <span className="calendar-connection-badge"><CheckCircle2 /> Connected</span> : <button className="button secondary" type="button" disabled={busy || loadingConnections} onClick={() => void connect("outlook")}>Connect</button>}</div>
+        <div className={googleCount ? "calendar-provider-card connected" : "calendar-provider-card"}><CalendarBrandIcon provider="googlecalendar" /><div><b>Google Calendar</b><small>{googleCount ? `${googleCount} connected account${googleCount === 1 ? "" : "s"}` : "Connect a Google account"}</small></div><div className="calendar-provider-actions">{googleCount ? <span className="calendar-connection-badge"><CheckCircle2 /> Connected</span> : null}<button className="button secondary" type="button" disabled={busy || loadingConnections} onClick={() => void connect("googlecalendar")}>{googleCount ? "Add another" : "Connect account"}</button></div></div>
+        <div className={outlookCount ? "calendar-provider-card connected" : "calendar-provider-card"}><CalendarBrandIcon provider="outlook" /><div><b>Outlook Calendar</b><small>{outlookCount ? `${outlookCount} connected account${outlookCount === 1 ? "" : "s"}` : "Connect a Microsoft account"}</small></div><div className="calendar-provider-actions">{outlookCount ? <span className="calendar-connection-badge"><CheckCircle2 /> Connected</span> : null}<button className="button secondary" type="button" disabled={busy || loadingConnections} onClick={() => void connect("outlook")}>{outlookCount ? "Add another" : "Connect account"}</button></div></div>
       </div>
+      {activeConnections.length ? <div className="calendar-account-list"><h3>Connected accounts</h3>{activeConnections.map((item) => <div className="calendar-account-row" key={item.id}><CalendarBrandIcon provider={item.provider} /><span><b>{item.label}</b><small>{item.provider === "googlecalendar" ? "Google Calendar" : "Outlook Calendar"}</small></span><span className="calendar-connection-badge"><CheckCircle2 /> Connected</span></div>)}</div> : null}
       <div className="calendar-search-controls">
-        <UiSelect id="calendar-account" label="Calendar account" value={connectionId} onChange={(value) => { setConnectionId(value); setScanned(false); }} options={activeConnections.length ? activeConnections.map((item) => ({ value: item.id, label: `${item.provider === "googlecalendar" ? "Google" : "Outlook"} · ${item.label}` })) : [{ value: "", label: loadingConnections ? "Loading calendars…" : "Connect a calendar first" }]} disabled={!activeConnections.length || busy} />
+        <UiSelect id="calendar-account" label="Scan calendar account" value={connectionId} onChange={(value) => { setConnectionId(value); setScanned(false); }} options={activeConnections.length ? activeConnections.map((item) => ({ value: item.id, label: `${item.provider === "googlecalendar" ? "Google" : "Outlook"} · ${item.label}` })) : [{ value: "", label: loadingConnections ? "Loading calendars…" : "Connect a calendar first" }]} disabled={!activeConnections.length || busy} />
         <UiSelect id="calendar-period" label="When" value={period} onChange={(value) => { setPeriod(value as CalendarPeriod); setScanned(false); }} options={periods} disabled={busy} />
       </div>
       {connections.length > 0 && !activeConnections.length ? <p className="calendar-note">A connection is pending or expired. Complete the provider consent screen or connect again.</p> : null}
