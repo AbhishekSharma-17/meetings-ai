@@ -8,7 +8,7 @@ import os
 import re
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Literal
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
@@ -324,6 +324,22 @@ class ComposioCalendar:
         if not isinstance(url, str) or urlsplit(url).scheme != "https":
             raise CalendarError("calendar provider did not return a secure connection link")
         return CalendarConnectResponse(redirect_url=url)
+
+    async def disconnect(self, actor: Actor, connection_id: str) -> None:
+        # Never accept an account ID on its own: a project API key can access
+        # every user's connections, so first resolve it within this actor's list.
+        if not any(account.id == connection_id for account in await self.connections(actor)):
+            raise CalendarError("calendar connection not found for your account")
+        path = f"/connected_accounts/{quote(connection_id, safe='')}"
+        detail = await self._request("GET", path)
+        if detail.get("id") != connection_id or detail.get("user_id") != _user_id(actor):
+            raise CalendarError("calendar connection not found for your account")
+        result = await self._request(
+            "DELETE", path,
+            params={"revoke_on_delete": "true"},
+        )
+        if result.get("success") is not True:
+            raise CalendarError("calendar provider did not confirm disconnection")
 
     async def _execute(self, actor: Actor, connection: CalendarConnection, tool: str, arguments: dict) -> dict:
         result = await self._request("POST", f"/tools/execute/{tool}", body={

@@ -89,6 +89,31 @@ test("multiple calendar accounts stay distinct and the selected account is scann
   await expect.poll(() => scannedAccount).toBe("ca-personal");
 });
 
+test("disconnect confirms one account and leaves the other integration connected", async ({ page }) => {
+  let removed: string | null = null;
+  await page.route("**/v1/calendar/connections**", (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (route.request().method() === "DELETE") {
+      removed = path;
+      return route.fulfill({ status: 204 });
+    }
+    return route.fulfill({ json: [
+      ...(removed ? [] : [{ id: "ca-work", provider: "googlecalendar", status: "ACTIVE", label: "work@example.test" }]),
+      { id: "ca-personal", provider: "outlook", status: "ACTIVE", label: "personal@example.test" },
+    ] });
+  });
+  await page.goto("/");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Calendar" }).click();
+  await page.getByRole("tab", { name: /Integrations/ }).click();
+  await page.locator(".calendar-account-row", { hasText: "work@example.test" }).getByRole("button", { name: "Disconnect" }).click();
+  await expect(page.getByText("Saved meetings and scheduled assistants remain.")).toBeVisible();
+  expect(removed).toBeNull();
+  await page.locator(".calendar-account-row", { hasText: "work@example.test" }).getByRole("button", { name: "Confirm" }).click();
+  await expect.poll(() => removed).toBe("/v1/calendar/connections/ca-work");
+  await expect(page.getByText("work@example.test")).toHaveCount(0);
+  await expect(page.getByText("personal@example.test")).toBeVisible();
+});
+
 test("saved calendar range and meetings survive a hard reload without another manual sync", async ({ page }) => {
   const today = new Date();
   const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);

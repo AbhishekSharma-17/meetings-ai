@@ -50,6 +50,7 @@ export interface MeetingsService {
   listCalendarConnections(): Promise<CalendarConnection[]>;
   listWorkspaceCalendarConnections(): Promise<WorkspaceCalendarConnection[]>;
   connectCalendar(provider: CalendarConnection["provider"]): Promise<string>;
+  disconnectCalendar(connectionId: string): Promise<void>;
   scanCalendar(connectionId: string, period: CalendarPeriod, timezone: string): Promise<CalendarEvent[]>;
   getSyncedCalendar(startDate: string, endDate: string, timezone: string): Promise<CalendarSnapshot>;
   syncCalendar(startDate: string, endDate: string, timezone: string, connectionIds?: string[]): Promise<CalendarSnapshot>;
@@ -605,6 +606,10 @@ class HttpMeetingsService implements MeetingsService {
       method: "POST", body: JSON.stringify({ callback_origin: window.location.origin }),
     });
     return result.redirect_url;
+  }
+
+  async disconnectCalendar(connectionId: string): Promise<void> {
+    await api<void>(`/v1/calendar/connections/${encodeURIComponent(connectionId)}`, { method: "DELETE" });
   }
 
   async scanCalendar(connectionId: string, period: CalendarPeriod, timezone: string): Promise<CalendarEvent[]> {

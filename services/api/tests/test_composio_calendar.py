@@ -148,6 +148,68 @@ def test_multiple_accounts_of_same_provider_are_listed_and_selected_explicitly()
     assert b'"connected_account_id":"ca-personal"' in requests[-1].content
 
 
+def test_disconnect_only_deletes_own_account_and_requests_upstream_revocation(tmp_path) -> None:
+    requests: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/connected_accounts/ca-own") and request.method == "GET":
+            return httpx.Response(200, json={"id": "ca-own", "user_id": f"meetings-ai:{_actor().organization_id}:{_actor().user_id}"})
+        if request.method == "GET":
+            return httpx.Response(200, json={"items": [
+                {"id": "ca-own", "toolkit": {"slug": "outlook"}, "status": "ACTIVE"},
+                {"id": "ca-other", "toolkit": {"slug": "outlook"}, "user_id": "someone-else", "status": "ACTIVE"},
+            ]})
+        return httpx.Response(200, json={"success": True})
+
+    calendar = ComposioCalendar("test-key", transport=httpx.MockTransport(respond))
+    app = create_app(database_url=f"sqlite+pysqlite:///{tmp_path / 'disconnect.db'}",
+                     credential_key="test-only-credential-key", calendar_adapter=calendar)
+    with TestClient(app) as client:
+        denied = client.delete("/v1/calendar/connections/ca-other")
+        assert denied.status_code == 404
+        assert not any(request.method == "DELETE" for request in requests)
+        removed = client.delete("/v1/calendar/connections/ca-own")
+        assert removed.status_code == 204
+
+    deletes = [request for request in requests if request.method == "DELETE"]
+    assert len(deletes) == 1
+    assert deletes[0].url.path.endswith("/connected_accounts/ca-own")
+    assert deletes[0].url.params["revoke_on_delete"] == "true"
+
+
+def test_disconnect_requires_provider_confirmation() -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/connected_accounts/ca-own") and request.method == "GET":
+            return httpx.Response(200, json={"id": "ca-own", "user_id": f"meetings-ai:{_actor().organization_id}:{_actor().user_id}"})
+        if request.method == "GET":
+            return httpx.Response(200, json={"items": [{
+                "id": "ca-own", "toolkit": {"slug": "outlook"}, "status": "ACTIVE",
+            }]})
+        return httpx.Response(200, json={"success": False})
+
+    calendar = ComposioCalendar("test-key", transport=httpx.MockTransport(respond))
+    with pytest.raises(CalendarError, match="did not confirm"):
+        asyncio.run(calendar.disconnect(_actor(), "ca-own"))
+
+
+def test_disconnect_refuses_account_when_provider_detail_has_another_owner() -> None:
+    methods: list[str] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        methods.append(request.method)
+        if request.url.path.endswith("/connected_accounts/ca-shared"):
+            return httpx.Response(200, json={"id": "ca-shared", "user_id": "someone-else"})
+        return httpx.Response(200, json={"items": [{
+            "id": "ca-shared", "toolkit": {"slug": "outlook"}, "status": "ACTIVE",
+        }]})
+
+    calendar = ComposioCalendar("test-key", transport=httpx.MockTransport(respond))
+    with pytest.raises(CalendarError, match="not found for your account"):
+        asyncio.run(calendar.disconnect(_actor(), "ca-shared"))
+    assert methods == ["GET", "GET"]
+
+
 def test_calendly_scan_enriches_invitees_and_agenda() -> None:
     actor = _actor()
     start, _ = calendar_window("tomorrow", "UTC")

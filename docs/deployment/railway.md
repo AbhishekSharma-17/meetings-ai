@@ -1,9 +1,13 @@
 # Railway deployment
 
-Meetings AI is deployed in the `Postgress` Railway project, production
+Meetings AI is deployed in the `Meetings Ai` Railway project, production
 environment, under the GenAi Protos workspace. The web service is public at
 https://meetings-ai-web-production.up.railway.app. The API and Vexa gateway
 are private Railway services; Vercel is not required.
+
+The web service also has `meeting.genaiprotos.com` attached. Its CNAME and
+ownership-verification TXT records must be added at the domain's DNS provider
+before Railway can verify the domain and issue its HTTPS certificate.
 
 | Service | Purpose | Port / check |
 | --- | --- | --- |

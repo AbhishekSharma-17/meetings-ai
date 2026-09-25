@@ -240,6 +240,7 @@ def create_app(
                         or (method == "GET" and re.fullmatch(r"/v1/knowledge/text-profiles/[0-9a-f-]+/models", path))
                         or path == "/v1/auth/me"
                         or (path == "/v1/calendar/connections" and method == "GET")
+                        or (method == "DELETE" and re.fullmatch(r"/v1/calendar/connections/[^/]+", path))
                         or (re.fullmatch(r"/v1/calendar/connect/(googlecalendar|outlook|calendly|zoom)", path) and method == "POST")
                         or (path == "/v1/calendar/events" and method == "GET")
                         or (path == "/v1/calendar/synced" and method == "GET")
@@ -836,6 +837,15 @@ def create_app(
             return await calendar.connections(request.state.actor)
         except CalendarError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.delete("/v1/calendar/connections/{connection_id}", status_code=204)
+    async def calendar_disconnect(connection_id: str, request: Request) -> Response:
+        try:
+            await calendar.disconnect(request.state.actor, connection_id)
+        except CalendarError as exc:
+            code = 404 if "not found for your account" in str(exc) else 503
+            raise HTTPException(status_code=code, detail=str(exc)) from exc
+        return Response(status_code=204)
 
     @app.get("/v1/workspace/calendar-connections", response_model=list[WorkspaceCalendarConnection])
     async def workspace_calendar_connections(request: Request) -> list[WorkspaceCalendarConnection]:
