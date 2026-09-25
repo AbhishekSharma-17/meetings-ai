@@ -237,7 +237,9 @@ existing manual join flow. Live provider consent and event scans still need
 validation with real connected accounts.
 
 In **Organization & people**, admins can save company overview, services,
-products, positioning, website, and documents. **Prepare for meeting** adds
+products, positioning, website, and documents. The sidebar's dedicated
+**Meeting prep** section lists upcoming synced events; Calendar's **Prepare
+for meeting** action opens the same workspace with an event selected. It adds
 target-company hints, public profile links, and a manual objective. With
 public research enabled, a configured OpenAI text profile uses the Responses
 web-search tool; final synthesis may use any configured text provider. Private

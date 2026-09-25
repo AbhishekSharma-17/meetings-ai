@@ -138,6 +138,8 @@ test("meeting prep accepts context and shows a cited saved briefing", async ({ p
   await page.getByRole("button", { name: /1 meetings/ }).first().click();
   await page.locator(".calendar-agenda-event").click();
   await page.getByRole("button", { name: "Prepare for meeting" }).click();
+  await expect(page.getByRole("heading", { name: "Meeting prep" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Meeting prep" })).toHaveAttribute("aria-current", "page");
   await page.getByLabel("Target company").fill("Acme");
   await page.getByLabel("What you already know or want to learn").fill("Explore implementation constraints");
   await page.getByRole("button", { name: "Generate briefing" }).click();
@@ -145,6 +147,36 @@ test("meeting prep accepts context and shows a cited saved briefing", async ({ p
   await expect(page.getByText("Acme builds widgets.")).toBeVisible();
   await expect(page.getByRole("link", { name: /About Acme/ })).toHaveAttribute("href", "https://acme.example/about");
   expect(prepInput).toMatchObject({ target_company: "Acme", context: "Explore implementation constraints", research_enabled: true });
+});
+
+test("meeting prep opens from the sidebar and guides an empty workspace to Calendar", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("navigation", { name: "Main navigation" }).getByText("PREPARE")).toBeVisible();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Meeting prep" }).click();
+  await expect(page.getByRole("heading", { name: "Meeting prep" })).toBeVisible();
+  await expect(page.getByText("No saved upcoming meetings")).toBeVisible();
+  await page.getByRole("button", { name: "Go to Calendar" }).click();
+  await expect(page.getByRole("heading", { name: "Calendar", exact: true })).toBeVisible();
+});
+
+test("meeting prep sidebar section fits a narrow screen", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await page.getByRole("button", { name: "Meeting prep" }).click();
+  await expect(page.getByRole("heading", { name: "Meeting prep" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(391);
+});
+
+test("teammates can prepare their own meetings without meeting-management controls", async ({ page }) => {
+  await page.route("**/v1/auth/me", (route) => route.fulfill({ json: { ...owner, role: "member" } }));
+  await page.goto("/");
+  const navigation = page.getByRole("navigation", { name: "Main navigation" });
+  await expect(navigation.getByRole("button", { name: "Calendar" })).toBeVisible();
+  await expect(navigation.getByRole("button", { name: "Meeting prep" })).toBeVisible();
+  await expect(navigation.getByRole("button", { name: "Meetings", exact: true })).toHaveCount(0);
+  await navigation.getByRole("button", { name: "Meeting prep" }).click();
+  await expect(page.getByRole("heading", { name: "Meeting prep" })).toBeVisible();
 });
 
 test("meetings page filters scheduled and completed records", async ({ page }) => {
