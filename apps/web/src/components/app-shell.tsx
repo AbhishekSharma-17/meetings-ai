@@ -46,6 +46,8 @@ export function AppShell() {
 
   useEffect(() => {
     const callback = new URLSearchParams(window.location.search);
+    const invitedEmail = callback.get("invite");
+    if (invitedEmail) queueMicrotask(() => setLoginEmail(invitedEmail));
     if (callback.get("calendar") === "connected") {
       const connectedAccountId = callback.get("connected_account_id");
       queueMicrotask(() => { setPreferredCalendarConnectionId(connectedAccountId); setCalendarOpen(true); });

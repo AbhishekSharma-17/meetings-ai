@@ -64,4 +64,6 @@ async def create_embeddings(
     return EmbeddingResult(
         vectors=[vector for vector in vectors if vector is not None],
         provider=provider, model=model, dimensions=width,
+        input_tokens=(body.get("usage", {}).get("prompt_tokens") if isinstance(body.get("usage"), dict)
+                      and isinstance(body["usage"].get("prompt_tokens"), int) else None),
     )

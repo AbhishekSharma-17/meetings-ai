@@ -2,7 +2,7 @@
 
 import { FormEvent, useMemo, useState } from "react";
 import { meetingsService } from "@/lib/meetings-service";
-import type { Capability, ConnectionState, ProfileKind, ProviderProfile } from "@/lib/types";
+import type { Capability, ConnectionState, ProfileKind, ProviderProfile, TextModelCatalog } from "@/lib/types";
 import { UiSelect } from "./ui-select";
 import { AudioLines, BookOpenText, FileText, KeyRound, ShieldCheck, Trash2 } from "lucide-react";
 
@@ -76,6 +76,10 @@ function ProfileEditor({ profile, onSave, onDelete, onChange, onNotice }: { prof
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [catalog, setCatalog] = useState<TextModelCatalog | null>(null);
+  const [catalogSearch, setCatalogSearch] = useState("");
+  const [catalogBusy, setCatalogBusy] = useState(false);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
   const capabilities = useMemo(() => profileInfo[draft.kind].capabilities, [draft.kind]);
   const hasUnsavedChanges = Boolean(apiKey) || draft.label !== profile.label || draft.provider !== profile.provider
     || draft.executionLocation !== profile.executionLocation || draft.endpoint !== profile.endpoint
@@ -113,7 +117,14 @@ function ProfileEditor({ profile, onSave, onDelete, onChange, onNotice }: { prof
     setDraft((current) => ({ ...current, provider: value,
       executionLocation: value === "OpenAI" || value === "OpenRouter" ? "cloud" : current.executionLocation,
       endpoint: value === "OpenRouter" ? "https://openrouter.ai/api/v1" : value === "OpenAI" ? "https://api.openai.com/v1" : current.endpoint,
+      model: value === "OpenAI" && current.kind === "mom" && !current.model ? "gpt-6-luna" : current.model,
     }));
+  }
+  async function discoverModels() {
+    setCatalogBusy(true); setCatalogError(null);
+    try { setCatalog(await meetingsService.listKnowledgeModels(profile.id)); }
+    catch (cause) { setCatalogError(cause instanceof Error ? cause.message : "Could not load models."); }
+    finally { setCatalogBusy(false); }
   }
   function toggleCapability(capability: Capability) {
     const hasCapability = draft.capabilities.includes(capability);
@@ -126,6 +137,7 @@ function ProfileEditor({ profile, onSave, onDelete, onChange, onNotice }: { prof
       <label htmlFor="profile-label">Profile name</label><input id="profile-label" value={draft.label} onChange={(event) => update("label", event.target.value)} required />
       <div className="field-grid"><UiSelect id="provider" label="Provider type" value={draft.provider} onChange={setProvider} options={providerOptions.map((option) => ({ value: option, label: option }))} /><UiSelect id="location" label="Execution location" value={draft.executionLocation} onChange={(value) => update("executionLocation", value as ProviderProfile["executionLocation"])} disabled={draft.provider === "OpenAI" || draft.provider === "OpenRouter"} options={[{ value: "local", label: "Local / self-hosted" }, { value: "cloud", label: "Cloud" }]} /></div>
       <label htmlFor="model">Model</label><input id="model" value={draft.model} onChange={(event) => update("model", event.target.value)} placeholder="Model ID" required />
+      {draft.kind === "mom" && !profile.id.startsWith("new-") && (draft.provider === "OpenAI" || draft.provider === "OpenRouter") ? <div className="provider-model-discovery"><button type="button" className="button secondary" disabled={catalogBusy} onClick={() => void discoverModels()}>{catalogBusy ? "Loading models…" : "Browse live models"}</button>{catalogError ? <p className="form-error" role="alert">{catalogError}</p> : null}{catalog ? <><p className="field-hint">{catalog.models.length} models from {catalog.provider}. Choose one, then save this profile. OpenAI’s economy recommendation is gpt-6-luna; availability and prices may change.</p><input aria-label="Search provider models" value={catalogSearch} onChange={(event) => setCatalogSearch(event.target.value)} placeholder="Search model name or ID" /><div className="provider-model-results">{catalog.models.filter((item) => `${item.name} ${item.id}`.toLowerCase().includes(catalogSearch.toLowerCase())).slice(0, 35).map((item) => <button type="button" key={item.id} onClick={() => update("model", item.id)}><span><b>{item.name}</b><small>{item.id}</small></span>{item.input_per_million_usd !== null ? <small>${item.input_per_million_usd}/M in · ${item.output_per_million_usd}/M out</small> : null}</button>)}</div></> : null}</div> : null}
       <label htmlFor="endpoint">Base endpoint</label><input id="endpoint" type="url" value={draft.endpoint} onChange={(event) => update("endpoint", event.target.value)} disabled={draft.provider === "OpenAI"} placeholder="https://api.example.com/v1" />{draft.provider === "OpenRouter" || draft.provider === "OpenAI-compatible" ? <p className="field-hint">OpenRouter uses its OpenAI-compatible endpoint. For a private server, choose OpenAI-compatible and enter your URL.</p> : null}
       <div className={draft.apiKeyConfigured ? "provider-key-status saved" : "provider-key-status"}><KeyRound /><span><b>{draft.apiKeyConfigured ? "API key saved" : draft.executionLocation === "local" ? "Local connection" : "API key not configured"}</b><small>{draft.apiKeyConfigured ? `Ending in ${draft.credentialHint ?? "••••"} · encrypted at rest` : draft.executionLocation === "local" ? "A key is optional if your endpoint does not require one." : "Add a key to use this cloud provider."}</small></span></div>
       <label htmlFor="api-key">API key <span className="optional">write-only</span></label><div className="key-input"><input id="api-key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={draft.apiKeyConfigured ? "A key is already configured" : "Paste a new API key"} autoComplete="new-password" /><span aria-hidden="true">•••</span></div><p className="field-hint">Leave blank to keep the saved key, or enter a replacement. The existing key is never returned to the browser.</p>

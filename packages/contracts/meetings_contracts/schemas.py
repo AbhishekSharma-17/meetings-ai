@@ -194,6 +194,7 @@ class EmbeddingResult(BaseModel):
     provider: str
     model: str
     dimensions: Annotated[int, Field(gt=0)]
+    input_tokens: int | None = Field(default=None, ge=0)
 
 
 class MeetingPlatform(str, Enum):
@@ -240,6 +241,22 @@ class MeetingDeliverySettings(BaseModel):
         return self
 
 
+class MomGuidance(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    template: Literal["standard", "actions", "client", "discovery", "custom"] = "standard"
+    instructions: str = Field(default="", max_length=2000)
+    focus_fields: list[str] = Field(default_factory=list, max_length=8)
+
+    @field_validator("focus_fields")
+    @classmethod
+    def clean_fields(cls, values: list[str]) -> list[str]:
+        cleaned = [" ".join(value.split()) for value in values]
+        if any(not value or len(value) > 80 for value in cleaned):
+            raise ValueError("focus fields must be 1–80 characters")
+        return list(dict.fromkeys(cleaned))
+
+
 class MeetingCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -253,6 +270,7 @@ class MeetingCreate(BaseModel):
     knowledge_enabled: bool = False
     knowledge_base_id: UUID | None = None
     delivery_settings: MeetingDeliverySettings = Field(default_factory=MeetingDeliverySettings)
+    mom_guidance: MomGuidance = Field(default_factory=MomGuidance)
 
     @field_validator("tags")
     @classmethod

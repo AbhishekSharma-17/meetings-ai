@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from dataclasses import replace
 from uuid import UUID
 
 from meetings_contracts import (
@@ -34,8 +35,9 @@ class ProviderSelectionError(RuntimeError):
 
 
 class ProviderProfileService:
-    def __init__(self, repository: object) -> None:
+    def __init__(self, repository: object, usage: object | None = None) -> None:
         self.repository = repository
+        self.usage = usage
         self.adapters: dict[ProviderType, ProviderAdapter] = {
             ProviderType.OPENAI: OpenAIAdapter(),
             ProviderType.OPENAI_COMPATIBLE: OpenAICompatibleAdapter(),
@@ -123,12 +125,18 @@ class ProviderProfileService:
 
     async def generate_text(
         self, request: TextGenerationRequest, *, profile_id: UUID | None = None,
+        model_override: str | None = None,
     ) -> tuple[ProviderProfile, TextGenerationResult]:
+        if model_override and (not profile_id or len(model_override) > 200 or any(char.isspace() for char in model_override)):
+            raise ProviderSelectionError("a valid model override requires a selected provider")
         if profile_id is not None:
             profile = self.repository.get_profile(profile_id)
             if not profile.supports(Capability.TEXT_GENERATION):
                 raise ProviderSelectionError("selected profile does not support text generation")
-            result = await self.adapters[profile.provider_type].generate_text(profile, request)
+            runtime_profile = replace(profile, models={**profile.models, Capability.TEXT_GENERATION: model_override}) if model_override else profile
+            result = await self.adapters[profile.provider_type].generate_text(runtime_profile, request)
+            if self.usage:
+                self.usage.record(profile, request, result)
             return profile, result
         selection = self.repository.get_default(Capability.TEXT_GENERATION)
         if selection is None or not selection.ordered_profile_ids():
@@ -144,6 +152,8 @@ class ProviderProfileService:
                 result = await self.adapters[profile.provider_type].generate_text(
                     profile, request
                 )
+                if self.usage:
+                    self.usage.record(profile, request, result)
                 return profile, result
             except (ProviderExecutionError, RuntimeError) as exc:
                 failures.append(f"{profile.name}: {exc}")
@@ -156,7 +166,10 @@ class ProviderProfileService:
             profile = self.repository.get_profile(profile_id)
             if not profile.supports(Capability.EMBEDDINGS):
                 raise ProviderSelectionError("selected profile does not support embeddings")
-            return profile, await self.adapters[profile.provider_type].embed(profile, request)
+            result = await self.adapters[profile.provider_type].embed(profile, request)
+            if self.usage:
+                self.usage.record_embedding(profile, request, result)
+            return profile, result
         selection = self.repository.get_default(Capability.EMBEDDINGS)
         if selection is None or not selection.ordered_profile_ids():
             raise ProviderSelectionError("no default embedding provider is selected")
@@ -168,6 +181,8 @@ class ProviderProfileService:
                 continue
             try:
                 result = await self.adapters[profile.provider_type].embed(profile, request)
+                if self.usage:
+                    self.usage.record_embedding(profile, request, result)
                 return profile, result
             except (ProviderExecutionError, RuntimeError) as exc:
                 failures.append(f"{profile.name}: {exc}")

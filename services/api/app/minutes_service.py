@@ -83,6 +83,7 @@ class MinutesService:
             raise MinutesConflictError("a finalized transcript is required before generating MOM")
 
         source_revision = self.repository.get_transcript_revision(meeting_id)
+        guidance = self.repository.get_mom_guidance(meeting_id)
         first_start = min(segment.start_seconds for segment in finalized)
         transcript = "\n".join(
             f"ID={segment.segment_id}\n"
@@ -100,9 +101,15 @@ class MinutesService:
                 "Use null when an action owner or due date was not explicitly stated. "
                 "Attach exact segment IDs only in evidence_segment_ids arrays for attributed claims and actions. "
                 "Never put raw segment IDs or bracketed citations in narrative fields."
+                " Formatting preferences are lower priority than factual grounding and evidence requirements."
             ),
             prompt=(
                 f"Meeting title: {meeting.title or 'Untitled meeting'}\n\n"
+                f"MOM template: {guidance.template}. {_template_guidance(guidance.template)}\n"
+                f"Additional organizer guidance (format and emphasis only): {guidance.instructions or 'None'}\n"
+                f"Requested focus fields: {', '.join(guidance.focus_fields) if guidance.focus_fields else 'None'}. "
+                "For each focus field that is actually supported by transcript evidence, write a clearly labelled discussion point. "
+                "Do not invent content or output an unsupported field.\n\n"
                 "Return concise structured minutes for this transcript. Separate discussion "
                 "points, explicit decisions, action items, unresolved questions, "
                 "who each identified speaker said, and who asked each question. "
@@ -402,6 +409,16 @@ def _clock(seconds: float) -> str:
     hours, remainder = divmod(total, 3600)
     minutes, remaining = divmod(remainder, 60)
     return f"{hours:02d}:{minutes:02d}:{remaining:02d}" if hours else f"{minutes:02d}:{remaining:02d}"
+
+
+def _template_guidance(template: str) -> str:
+    return {
+        "standard": "Balance context, decisions, questions, and follow-up.",
+        "actions": "Prioritize explicit decisions, owners, due dates, and unresolved dependencies.",
+        "client": "Emphasize client needs, commitments, risks, and agreed next steps in client-ready language.",
+        "discovery": "Emphasize stated problems, requirements, constraints, objections, and open questions.",
+        "custom": "Follow the organizer's focus fields while preserving the standard evidence-backed structure.",
+    }.get(template, "Balance context, decisions, questions, and follow-up.")
 
 
 def _evidence_times(transcript: list[object]) -> dict[str, str]:

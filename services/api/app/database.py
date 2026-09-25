@@ -426,6 +426,32 @@ class AuditEventRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 
 
+class ModelUsageRow(Base):
+    __tablename__ = "model_usage"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+    meeting_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    knowledge_base_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    purpose: Mapped[str] = mapped_column(String(60), nullable=False)
+    provider: Mapped[str] = mapped_column(String(40), nullable=False)
+    model: Mapped[str] = mapped_column(String(200), nullable=False)
+    input_tokens: Mapped[int | None] = mapped_column(Integer)
+    output_tokens: Mapped[int | None] = mapped_column(Integer)
+    estimated_usd: Mapped[float | None] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class MeetingMomGuidanceRow(Base):
+    __tablename__ = "meeting_mom_guidance"
+
+    meeting_id: Mapped[str] = mapped_column(String(36), ForeignKey("meetings.id"), primary_key=True)
+    template: Mapped[str] = mapped_column(String(30), nullable=False)
+    instructions: Mapped[str] = mapped_column(Text, nullable=False)
+    focus_fields: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class SchemaVersionRow(Base):
     __tablename__ = "schema_version"
 
@@ -438,7 +464,7 @@ class SchemaMigrationError(RuntimeError):
 
 
 # Version 3 is the last schema in the original checked-in application. Versions
-# 4–17 add only tables, so they can be applied to an existing version-3 database
+# 4–19 add only tables, so they can be applied to an existing version-3 database
 # without rewriting its meeting or credential rows. Keep this manifest frozen:
 # adding a model column requires a new version and an explicit migration.
 SCHEMA_TABLES_BY_VERSION: dict[int, tuple[str, ...]] = {
@@ -463,6 +489,8 @@ SCHEMA_TABLES_BY_VERSION: dict[int, tuple[str, ...]] = {
     15: ("knowledge_index_jobs",),
     16: ("workspace_retention",),
     17: ("calendar_schedules",),
+    18: ("model_usage",),
+    19: ("meeting_mom_guidance",),
 }
 
 SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
@@ -501,6 +529,8 @@ SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
     "knowledge_messages": ("id", "conversation_id", "position", "role", "content", "citations", "provider", "model", "created_at"),
     "auth_rate_limit_buckets": ("bucket_key", "attempts", "expires_at_epoch"),
     "audit_events": ("id", "organization_id", "actor_user_id", "action", "resource_path", "resource_id", "status_code", "created_at"),
+    "model_usage": ("id", "organization_id", "meeting_id", "knowledge_base_id", "purpose", "provider", "model", "input_tokens", "output_tokens", "estimated_usd", "created_at"),
+    "meeting_mom_guidance": ("meeting_id", "template", "instructions", "focus_fields", "updated_at"),
 }
 
 
@@ -543,7 +573,7 @@ def _validate_database_schema(connection, version: int) -> None:
 class Database:
     """Upgrades known schemas and rejects unknown or incomplete ones."""
 
-    SCHEMA_VERSION = 17
+    SCHEMA_VERSION = 19
 
     def __init__(self, url: str) -> None:
         engine_options: dict[str, object] = {"pool_pre_ping": True}

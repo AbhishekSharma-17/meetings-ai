@@ -113,7 +113,7 @@ class KnowledgeIndexService:
             batch = sources[start:start + 32]
             try:
                 profile, result = await self.providers.embed(
-                    EmbeddingRequest(inputs=[_embedding_text(source) for source in batch]),
+                    EmbeddingRequest(inputs=[_embedding_text(source) for source in batch], metadata={"purpose": "knowledge_index", "knowledge_base_id": str(base_id)}),
                     profile_id=profile_id,
                 )
             except (ProviderExecutionError, ProviderSelectionError, ProfileNotFoundError) as exc:
@@ -223,7 +223,7 @@ class KnowledgeIndexService:
             return []
         try:
             profile, result = await self.providers.embed(
-                EmbeddingRequest(inputs=[request.query]), profile_id=UUID(first.profile_id),
+                EmbeddingRequest(inputs=[request.query], metadata={"purpose": "knowledge_search", "knowledge_base_id": str(request.knowledge_base_id)}), profile_id=UUID(first.profile_id),
             )
         except (ProviderExecutionError, ProviderSelectionError, ProfileNotFoundError):
             return []

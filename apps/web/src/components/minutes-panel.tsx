@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { meetingsService } from "@/lib/meetings-service";
-import type { ActionItem, AttributedQuestion, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MinutesDraft, PostMeetingJob, ResendStatus, SpeakerContribution, TranscriptSegment } from "@/lib/types";
+import type { ActionItem, AttributedQuestion, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MinutesDraft, MomGuidance, PostMeetingJob, ResendStatus, SpeakerContribution, TranscriptSegment } from "@/lib/types";
 
 type EditableDraft = {
   title: string;
@@ -18,6 +18,7 @@ type EditableDraft = {
 const captureInProgress = new Set<MeetingDetail["status"]>([
   "created", "joining", "waiting_room", "live", "needs_attention", "stopping", "processing",
 ]);
+const defaultMomGuidance: MomGuidance = { template: "standard", instructions: "", focus_fields: [] };
 
 export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: MeetingDetail; transcriptCount: number; segments: TranscriptSegment[] }) {
   const [minutes, setMinutes] = useState<MeetingMinutes | null>(null);
@@ -34,6 +35,27 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
   const [resendStatus, setResendStatus] = useState<ResendStatus | null>(null);
   const [resendStatusError, setResendStatusError] = useState(false);
   const [postMeetingJob, setPostMeetingJob] = useState<PostMeetingJob | null>(null);
+  const [momGuidance, setMomGuidance] = useState<MomGuidance>(defaultMomGuidance);
+  const [momFocusInput, setMomFocusInput] = useState("");
+  const [savingGuidance, setSavingGuidance] = useState(false);
+
+  useEffect(() => {
+    let current = true;
+    void meetingsService.getMomGuidance(meeting.id).then((value) => {
+      if (current) { setMomGuidance(value); setMomFocusInput(value.focus_fields.join(", ")); }
+    }).catch(() => { if (current) setError("Could not load MOM format settings."); });
+    return () => { current = false; };
+  }, [meeting.id]);
+
+  async function saveGuidance() {
+    setSavingGuidance(true); setError(null);
+    try {
+      const saved = await meetingsService.saveMomGuidance(meeting.id, { ...momGuidance, focus_fields: momFocusInput.split(/[,;\n]+/).map((item) => item.trim()).filter(Boolean) });
+      setMomGuidance(saved); setMomFocusInput(saved.focus_fields.join(", "));
+      setNotice("MOM format saved. Regenerate an existing draft to apply it.");
+    } catch (cause) { setError(messageFor(cause)); }
+    finally { setSavingGuidance(false); }
+  }
 
   useEffect(() => {
     let current = true;
@@ -145,6 +167,7 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
   async function generate() {
     setBusy("generate"); setError(null); setNotice(null);
     try {
+      await meetingsService.saveMomGuidance(meeting.id, { ...momGuidance, focus_fields: momFocusInput.split(/[,;\n]+/).map((item) => item.trim()).filter(Boolean) });
       accept(await meetingsService.generateMinutes(meeting.id));
       setNotice("MOM draft generated. Review every field before approval.");
     } catch (requestError) { setError(messageFor(requestError)); }
@@ -211,6 +234,7 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
     </div>
     {error ? <p className="form-error" role="alert">{error}</p> : null}
     {notice ? <p className="mom-notice" role="status">{notice}</p> : null}
+    <details className="mom-guidance-panel"><summary>MOM template & custom focus</summary><p>Guides the next AI draft. The transcript and its evidence remain authoritative.</p><div className="mom-guidance-grid"><label>Template<select value={momGuidance.template} disabled={minutes?.status === "sent"} onChange={(event) => setMomGuidance({ ...momGuidance, template: event.target.value as MomGuidance["template"] })}><option value="standard">Balanced meeting minutes</option><option value="actions">Decisions & action tracker</option><option value="client">Client recap</option><option value="discovery">Discovery notes</option><option value="custom">Custom focus</option></select></label><label>Focus fields <small>comma-separated</small><input value={momFocusInput} disabled={minutes?.status === "sent"} onChange={(event) => setMomFocusInput(event.target.value)} placeholder="Risks, Budget, Dependencies" /></label></div><label>Organizer guidance<textarea rows={3} maxLength={2000} value={momGuidance.instructions} disabled={minutes?.status === "sent"} onChange={(event) => setMomGuidance({ ...momGuidance, instructions: event.target.value })} placeholder="What should the draft emphasize?" /></label><p>Supported focus fields become labelled discussion points. Unsaid details are omitted.</p>{minutes?.status !== "sent" ? <button className="button secondary" type="button" disabled={savingGuidance} onClick={() => void saveGuidance()}>{savingGuidance ? "Saving…" : "Save MOM format"}</button> : null}</details>
 
     {!minutes || !draft ? <div className="mom-empty">
       <div><b>No MOM draft yet.</b><p>{momDeleted ? "The MOM was deleted. Generate a new draft manually if needed." : postMeetingJob?.last_error ? `Automatic drafting ${postMeetingJob.exhausted ? "stopped after repeated failures" : "will retry"}: ${postMeetingJob.last_error}. You can try Generate MOM manually.` : postMeetingJob?.enabled === false ? "This meeting predates automatic drafting. Generate its MOM manually." : canGenerate ? `Automatic drafting is in progress. ${transcriptCount} transcript segment${transcriptCount === 1 ? " is" : "s are"} available; you can also generate manually.` : captureInProgress.has(meeting.status) ? "The MOM will be drafted after capture completes." : "A finalized transcript is required."}</p></div>
@@ -282,9 +306,9 @@ function toPayload(draft: EditableDraft): MinutesDraft {
 }
 
 function EvidenceLinks({ ids, segments }: { ids: string[]; segments: TranscriptSegment[] }) {
-  return <div className="evidence-links">Evidence: {ids.map((id) => {
+  return <div className="evidence-links">Transcript proof <small>(elapsed from first captured turn)</small>: {ids.map((id) => {
     const segment = segments.find((item) => item.segmentId === id);
-    return <a key={id} href={`#transcript-${encodeURIComponent(id)}`} title={segment ? `${segment.speaker}: ${segment.text.slice(0, 100)}` : "Transcript evidence"}>{evidenceTime(id, segments)}</a>;
+    return <a key={id} href={`#transcript-${encodeURIComponent(id)}`} title={segment ? `Open ${segment.speaker}'s transcript turn: ${segment.text.slice(0, 100)}` : "Open transcript evidence"}>At {evidenceTime(id, segments)}</a>;
   })}</div>;
 }
 

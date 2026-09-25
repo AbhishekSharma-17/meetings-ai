@@ -23,6 +23,7 @@ from meetings_contracts import (
     SpeakerContribution,
     SpeakerIdentityPublic,
     MinutesStatus,
+    MomGuidance,
     ProviderProfile,
     ProviderType,
 )
@@ -35,6 +36,7 @@ from .database import (
     MeetingTranscriptionRouteRow,
     MeetingKnowledgeSettingsRow,
     MeetingKnowledgeBaseRow,
+    MeetingMomGuidanceRow,
     KnowledgeEmbeddingRow,
     KnowledgeIndexJobRow,
     KnowledgeBaseRow,
@@ -315,7 +317,7 @@ class SQLAlchemyRepository:
             self._queue_knowledge_index(session, meeting_id)
             self._delete_cited_conversations(session, meeting_id)
             for model in (
-                CalendarScheduleRow, KnowledgeEmbeddingRow, MeetingKnowledgeBaseRow, MeetingKnowledgeSettingsRow,
+                CalendarScheduleRow, KnowledgeEmbeddingRow, MeetingKnowledgeBaseRow, MeetingKnowledgeSettingsRow, MeetingMomGuidanceRow,
                 MeetingDeliverySettingsRow, PostMeetingJobRow, TranscriptSegmentRow,
                 TranscriptSegmentMetadataRow, TranscriptSpeakerCorrectionRow,
                 MeetingSpeakerIdentityRow, TranscriptReviewStateRow, MinutesSourceRow,
@@ -344,6 +346,27 @@ class SQLAlchemyRepository:
                 send_to_participants=row.send_to_participants,
                 include_transcript=row.include_transcript,
             )
+
+    def get_mom_guidance(self, meeting_id: UUID) -> MomGuidance:
+        self.get_meeting(meeting_id)
+        with self.database.session_factory() as session:
+            row = session.get(MeetingMomGuidanceRow, str(meeting_id))
+            if row is None:
+                return MomGuidance()
+            return MomGuidance(template=row.template, instructions=row.instructions, focus_fields=row.focus_fields)
+
+    def save_mom_guidance(self, meeting_id: UUID, guidance: MomGuidance) -> MomGuidance:
+        self.get_meeting(meeting_id)
+        with self.database.session_factory.begin() as session:
+            row = session.get(MeetingMomGuidanceRow, str(meeting_id))
+            if row is None:
+                row = MeetingMomGuidanceRow(meeting_id=str(meeting_id))
+                session.add(row)
+            row.template = guidance.template
+            row.instructions = guidance.instructions
+            row.focus_fields = guidance.focus_fields
+            row.updated_at = datetime.now(UTC)
+        return guidance
 
     def save_delivery_settings(
         self, meeting_id: UUID, settings: MeetingDeliverySettings

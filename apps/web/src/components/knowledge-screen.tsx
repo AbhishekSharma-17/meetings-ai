@@ -2,8 +2,8 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { meetingsService } from "@/lib/meetings-service";
-import type { CurrentAccount, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeSource, KnowledgeWikiOverview, ProviderProfile, WorkspaceMember } from "@/lib/types";
-import { ArrowUpRight, BookOpenText, GitBranch, Plus, Search, Sparkles } from "lucide-react";
+import type { CurrentAccount, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeSource, KnowledgeTextProfile, KnowledgeWikiOverview, ProviderProfile, TextModelCatalog, WorkspaceMember } from "@/lib/types";
+import { ArrowUpRight, BookOpenText, GitBranch, Plus, Search, Sparkles, MessageCircle, Send } from "lucide-react";
 
 type Exchange = { question: string; response: KnowledgeChatResponse };
 
@@ -13,10 +13,17 @@ export function KnowledgeScreen({ onOpenSource, account }: {
 }) {
   const [query, setQuery] = useState("");
   const [tagFilter, setTagFilter] = useState("");
-  const [mode, setMode] = useState<"search" | "ask">("ask");
+  const [mode, setMode] = useState<"search" | "ask" | "wiki">("ask");
   const [bases, setBases] = useState<KnowledgeBase[]>([]);
   const [selectedBaseId, setSelectedBaseId] = useState("");
   const [profiles, setProfiles] = useState<ProviderProfile[]>([]);
+  const [textProfiles, setTextProfiles] = useState<KnowledgeTextProfile[]>([]);
+  const [chatProfileId, setChatProfileId] = useState("");
+  const [modelCatalog, setModelCatalog] = useState<TextModelCatalog | null>(null);
+  const [selectedModelId, setSelectedModelId] = useState("");
+  const [modelFilter, setModelFilter] = useState("");
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [modelError, setModelError] = useState<string | null>(null);
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
   const [shareVisibility, setShareVisibility] = useState<"private" | "organization" | "specific">("private");
   const [shareUserIds, setShareUserIds] = useState<string[]>([]);
@@ -36,6 +43,8 @@ export function KnowledgeScreen({ onOpenSource, account }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const selectedBase = bases.find((item) => item.id === selectedBaseId);
+  const effectiveProfileId = chatProfileId || selectedBase?.text_profile_id || textProfiles[0]?.id || "";
+  const selectedModel = modelCatalog?.models.find((item) => item.id === selectedModelId);
   const canManageBase = selectedBase && (account?.role === "owner" || account?.role === "admin" || selectedBase.created_by === account?.user_id);
 
   useEffect(() => {
@@ -50,6 +59,7 @@ export function KnowledgeScreen({ onOpenSource, account }: {
     if (account?.role === "owner" || account?.role === "admin") {
       void meetingsService.listProviderProfiles().then(setProfiles).catch(() => undefined);
     }
+    void meetingsService.listKnowledgeTextProfiles().then(setTextProfiles).catch(() => setModelError("Could not load text providers."));
     void meetingsService.listWorkspaceMembers().then(setMembers).catch(() => undefined);
   }, [account]);
 
@@ -60,6 +70,19 @@ export function KnowledgeScreen({ onOpenSource, account }: {
     void meetingsService.getKnowledgeMap(selectedBaseId).then(setEvidenceMap).catch(() => setEvidenceMap(null));
     void meetingsService.getKnowledgeIndex(selectedBaseId).then(setIndexStatus).catch(() => setIndexStatus(null));
   }, [selectedBaseId]);
+
+  useEffect(() => {
+    if (!effectiveProfileId) return;
+    let active = true;
+    queueMicrotask(() => { if (active) { setModelCatalog(null); setModelError(null); setSelectedModelId(""); } });
+    void meetingsService.listKnowledgeModels(effectiveProfileId).then((catalog) => {
+      if (!active) return;
+      setModelCatalog(catalog);
+      // A cost-conscious default for OpenAI, without changing the saved workspace MOM route.
+      setSelectedModelId(catalog.provider === "openai" && catalog.models.some((item) => item.id === "gpt-6-luna") ? "gpt-6-luna" : catalog.configured_model);
+    }).catch((cause) => { if (active) setModelError(cause instanceof Error ? cause.message : "Could not load the model catalog."); });
+    return () => { active = false; };
+  }, [effectiveProfileId]);
 
   useEffect(() => {
     if (!selectedBaseId) return;
@@ -76,6 +99,7 @@ export function KnowledgeScreen({ onOpenSource, account }: {
     const base = baseOverride ?? bases.find((item) => item.id === id);
     setShareVisibility(base?.visibility ?? "private");
     setShareUserIds(base?.shared_user_ids ?? []);
+    setChatProfileId(""); setModelFilter(""); setModelPickerOpen(false);
   }
 
   async function createBase(event: FormEvent<HTMLFormElement>) {
@@ -202,7 +226,7 @@ export function KnowledgeScreen({ onOpenSource, account }: {
         setSearch(await meetingsService.searchKnowledge(question, tags, selectedBaseId || null));
       } else {
         if (!selectedBaseId) throw new Error("Select a knowledge base before starting a saved chat.");
-        const response = await meetingsService.chatKnowledge(question, tags, selectedBaseId, conversationId);
+        const response = await meetingsService.chatKnowledge(question, tags, selectedBaseId, conversationId, effectiveProfileId || null, selectedModelId || null);
         setExchanges((current) => [...current, { question, response }]);
         setConversationId(response.conversation_id);
         void meetingsService.listKnowledgeConversations(selectedBaseId).then(setConversations).catch(() => undefined);
@@ -222,17 +246,20 @@ export function KnowledgeScreen({ onOpenSource, account }: {
     {selectedBase && canManageBase ? <div className="knowledge-base-management" aria-label="Knowledge base controls"><span><b>{selectedBase.name} access</b><small>{selectedBase.visibility === "organization" ? "Shared with everyone in this organization" : selectedBase.visibility === "specific" ? `Shared with ${selectedBase.shared_user_ids.length} selected teammate${selectedBase.shared_user_ids.length === 1 ? "" : "s"}` : "Private to the creator and workspace admins"}. Configure this knowledge base independently of other bases.</small></span><button type="button" className="button secondary" onClick={() => document.getElementById("knowledge-visibility")?.scrollIntoView({ behavior: "smooth", block: "center" })}>Manage sharing</button>{confirmDeleteBase ? <><button type="button" className="button danger" disabled={busy} onClick={() => void deleteBase()}>Confirm delete base</button><button type="button" className="button secondary" onClick={() => setConfirmDeleteBase(false)}>Cancel</button></> : <button type="button" className="button secondary" onClick={() => setConfirmDeleteBase(true)}>Delete knowledge base</button>}</div> : null}
     {selectedBase && conversationId ? <div className="knowledge-chat-management" aria-label="Saved chat controls"><span><b>Saved chat</b><small>Export includes stored answers and citations. Check them against current meeting records.</small></span><button type="button" className="button secondary" onClick={() => void exportConversation()}>Export JSON</button>{confirmDeleteConversation ? <><button type="button" className="button danger" disabled={busy} onClick={() => void deleteConversation()}>Confirm delete</button><button type="button" className="button secondary" onClick={() => setConfirmDeleteConversation(false)}>Cancel</button></> : <button type="button" className="button secondary" onClick={() => setConfirmDeleteConversation(true)}>Delete chat</button>}</div> : null}
     <form className="knowledge-query" onSubmit={(event) => void submit(event)}>
-      <div className="knowledge-mode" role="group" aria-label="Knowledge mode"><button type="button" aria-pressed={mode === "search"} onClick={() => setMode("search")}><Search /> Find sources</button><button type="button" aria-pressed={mode === "ask"} onClick={() => setMode("ask")}><Sparkles /> Ask AI</button></div>
-      <label htmlFor="knowledge-question">{mode === "ask" ? "Ask a question" : "Search meetings"}</label>
-      <div className="knowledge-query-row"><input id="knowledge-question" value={query} onChange={(event) => setQuery(event.target.value)} minLength={3} maxLength={500} required placeholder={mode === "ask" ? "Who committed to the launch plan?" : "Try a person, decision, topic, or exact phrase"} /><button className="button primary" disabled={busy}>{busy ? "Working…" : mode === "ask" ? "Ask AI" : "Search"}</button></div>
-      <label htmlFor="knowledge-tags">Limit to tags <span className="optional">optional, comma-separated</span></label>
-      <input id="knowledge-tags" value={tagFilter} onChange={(event) => setTagFilter(event.target.value)} placeholder="e.g. roadmap, customer research" />
-      {mode === "ask" ? <p className="field-hint">{selectedBase ? `Chat with ${selectedBase.name}. Conversations are saved; each answer retrieves fresh sources and cites transcript turns.` : "Select a named knowledge base on the left to start a saved chat."} {indexStatus?.indexed_sources ? "Hybrid lexical and semantic retrieval is available for indexed sources." : "Retrieval is lexical until this base is indexed."}</p> : null}
+      <div className="knowledge-mode" role="group" aria-label="Knowledge mode"><button type="button" aria-pressed={mode === "search"} onClick={() => setMode("search")}><Search /> Sources</button><button type="button" aria-pressed={mode === "ask"} onClick={() => setMode("ask")}><MessageCircle /> Ask AI</button><button type="button" aria-pressed={mode === "wiki"} onClick={() => setMode("wiki")}><BookOpenText /> Wiki</button></div>
+      {mode !== "wiki" ? <>
+        {mode === "ask" ? <div className="knowledge-chat-settings"><label htmlFor="chat-provider">Chat provider</label><select id="chat-provider" value={effectiveProfileId} onChange={(event) => { setChatProfileId(event.target.value); setSelectedModelId(""); }}><option value="" disabled>Choose a provider</option>{textProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}{profile.base_url?.includes("openrouter.ai") ? " · OpenRouter" : profile.provider_type === "openai" ? " · OpenAI" : " · Compatible"}</option>)}</select><div className="knowledge-model-picker"><label htmlFor="chat-model-search">Model</label><input id="chat-model-search" value={modelPickerOpen ? modelFilter : selectedModel?.name ?? modelCatalog?.configured_model ?? "Loading models…"} onFocus={() => { setModelPickerOpen(true); setModelFilter(""); }} onChange={(event) => { setModelFilter(event.target.value); setModelPickerOpen(true); }} autoComplete="off" placeholder="Search available models" disabled={!modelCatalog} />{modelPickerOpen && modelCatalog ? <div className="knowledge-model-options" role="listbox" aria-label="Available models">{modelCatalog.models.filter((item) => `${item.name} ${item.id}`.toLowerCase().includes(modelFilter.toLowerCase())).slice(0, 40).map((item) => <button type="button" role="option" aria-selected={item.id === selectedModelId} key={item.id} onClick={() => { setSelectedModelId(item.id); setModelPickerOpen(false); setModelFilter(""); }}><span><b>{item.name}</b><small>{item.id}</small></span>{item.input_per_million_usd !== null ? <small>${item.input_per_million_usd}/M in · ${item.output_per_million_usd}/M out</small> : null}</button>)}<button type="button" className="knowledge-model-close" onClick={() => setModelPickerOpen(false)}>Close model list</button></div> : null}</div>{modelError ? <small className="form-error">{modelError}</small> : <small className="field-hint">{modelCatalog?.live_catalog ? `${modelCatalog.models.length} live models available. Prices, if shown, are provider list rates.` : "Using this provider’s saved model."}</small>}</div> : null}
+        <label htmlFor="knowledge-question">{mode === "ask" ? "Message your knowledge base" : "Search meetings"}</label>
+        <div className="knowledge-query-row"><input id="knowledge-question" value={query} onChange={(event) => setQuery(event.target.value)} minLength={3} maxLength={500} required placeholder={mode === "ask" ? "Ask about a decision, person, date, or follow-up…" : "Try a person, decision, topic, or exact phrase"} /><button className="button primary" disabled={busy || (mode === "ask" && !selectedBaseId)}>{busy ? "Working…" : mode === "ask" ? <><Send size={16} /> Send</> : "Search"}</button></div>
+        <details className="knowledge-chat-filters"><summary>Filter by tags (optional)</summary><input id="knowledge-tags" value={tagFilter} onChange={(event) => setTagFilter(event.target.value)} placeholder="e.g. roadmap, customer research" /></details>
+        {mode === "ask" ? <p className="field-hint">{selectedBase ? `Chat memory is saved in ${selectedBase.name}; answers retrieve fresh, cited evidence.` : "Select a named knowledge base to start a saved chat."} {indexStatus?.indexed_sources ? "Hybrid keyword + semantic retrieval enabled." : "Keyword retrieval until this base is indexed."}</p> : null}
+      </> : <p className="field-hint">Browse connected meetings, approved MOMs, people, and topics below.</p>}
     </form>
     {error ? <p className="form-error knowledge-error" role="alert">{error}</p> : null}
     {notice ? <p className="field-hint" role="status">{notice}</p> : null}
     {mode === "search" && search ? <div className="knowledge-results"><div className="section-heading"><div><h2>Matching sources</h2><p>{search.count} result{search.count === 1 ? "" : "s"} · {search.retrieval_mode === "hybrid" ? "hybrid lexical + semantic" : "lexical"} retrieval{search.truncated_meeting_scope ? " · newest 200 meetings searched" : ""}</p></div></div>{search.sources.length ? <div className="knowledge-source-list">{search.sources.map((source) => <SourceCard key={source.source_id} source={source} onOpenSource={onOpenSource} />)}</div> : <div className="empty-state"><b>No matching source found.</b><p>Try a different phrase or tag. Only opted-in completed meetings are searchable.</p></div>}</div> : null}
-    {mode === "ask" ? <div className="knowledge-results"><div className="section-heading"><div><h2>{conversationId ? "Saved conversation" : selectedBase ? `${selectedBase.name} wiki` : "Choose a knowledge base"}</h2><p>{conversationId ? "Answers are drafts; verify each cited source." : "Meetings, decisions, and conversations stay connected to their originals."}</p></div></div>{exchanges.length ? <div className="knowledge-chat-thread" aria-live="polite">{exchanges.map((exchange, index) => <div className="knowledge-chat-turn" key={`${index}:${exchange.question}`}><div className="knowledge-chat-user"><small>You</small><p>{exchange.question}</p></div><article className="knowledge-chat-assistant"><small>Meetings AI · {exchange.response.model ? `${exchange.response.provider} / ${exchange.response.model}` : "No matching sources"}</small><p className="knowledge-answer">{exchange.response.answer}</p>{exchange.response.citations.length ? <div className="knowledge-citations"><b>Evidence</b>{exchange.response.citations.map((source) => <SourceCard key={source.source_id} source={source} onOpenSource={onOpenSource} />)}</div> : null}</article></div>)}</div> : overview ? <><WikiOverview overview={overview} onOpenMeeting={(id) => onOpenSource(id, "")} />{evidenceMap ? <EvidenceMap map={evidenceMap} onOpenSource={onOpenSource} /> : null}</> : <div className="empty-state"><b>Start with a question.</b><p>Select a knowledge base, then ask about a person, commitment, decision, or date.</p></div>}</div> : null}
+    {mode === "ask" ? <div className="knowledge-results knowledge-chat-panel"><div className="section-heading"><div><h2>{selectedBase ? `Ask ${selectedBase.name}` : "Choose a knowledge base"}</h2><p>Searches the selected base on every turn. Saved conversation history helps resolve follow-up questions.</p></div></div>{exchanges.length ? <div className="knowledge-chat-thread" aria-live="polite">{exchanges.map((exchange, index) => <div className="knowledge-chat-turn" key={`${index}:${exchange.question}`}><div className="knowledge-chat-user"><small>You</small><p>{exchange.question}</p></div><article className="knowledge-chat-assistant"><small>Meetings AI · {exchange.response.model ? `${exchange.response.provider} / ${exchange.response.model}` : "No matching sources"}</small><p className="knowledge-answer">{exchange.response.answer}</p>{exchange.response.citations.length ? <details className="knowledge-citations"><summary>{exchange.response.citations.length} cited source{exchange.response.citations.length === 1 ? "" : "s"} · open transcript</summary>{exchange.response.citations.map((source) => <SourceCard key={source.source_id} source={source} onOpenSource={onOpenSource} />)}</details> : null}</article></div>)}</div> : <div className="knowledge-chat-empty"><Sparkles /><h3>Start a conversation</h3><p>Ask what was decided, who committed to an action, or how a topic evolved across meetings. Each answer links back to a timestamped source.</p></div>}</div> : null}
+    {mode === "wiki" ? <div className="knowledge-results"><div className="section-heading"><div><h2>{selectedBase ? `${selectedBase.name} wiki` : "Choose a knowledge base"}</h2><p>Meetings, decisions, and conversations stay connected to their originals.</p></div></div>{overview ? <><WikiOverview overview={overview} onOpenMeeting={(id) => onOpenSource(id, "")} />{evidenceMap ? <EvidenceMap map={evidenceMap} onOpenSource={onOpenSource} /> : null}</> : <div className="empty-state"><b>No wiki to show yet.</b><p>Select a knowledge base with completed meetings.</p></div>}</div> : null}
   </div></div></section>;
 }
 

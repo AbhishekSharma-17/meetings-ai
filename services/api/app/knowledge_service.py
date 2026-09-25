@@ -20,6 +20,8 @@ class KnowledgeQuery(BaseModel):
     tags: list[str] = Field(default_factory=list, max_length=12)
     knowledge_base_id: UUID | None = None
     conversation_id: UUID | None = None
+    text_profile_id: UUID | None = None
+    model_id: str | None = Field(default=None, min_length=1, max_length=200)
     limit: int = Field(default=20, ge=1, le=50)
 
     @field_validator("query")
@@ -240,8 +242,9 @@ class KnowledgeService:
             if request.knowledge_base_id is None or self.bases is None:
                 raise KnowledgeAnswerError("a knowledge base is required to continue a conversation")
             history = self.bases.get_conversation(request.knowledge_base_id, request.conversation_id, actor).messages[-6:]
-        previous_question = next((item.content for item in reversed(history) if item.role == "user"), "")
-        retrieval_query = f"{previous_question} {request.query}" if previous_question else request.query
+        previous_questions = [item.content for item in history if item.role == "user"][-3:]
+        previous_question = previous_questions[-1] if previous_questions else ""
+        retrieval_query = " ".join([*previous_questions, request.query])[-500:]
         searches = [retrieval_query[:500]]
         if self._needs_query_plan(request.query):
             searches += await self._plan_queries(request, previous_question, actor)
@@ -290,8 +293,8 @@ class KnowledgeService:
                 "use only the supplied K labels, and cite every substantive claim."
             ),
             prompt=(
-                f"Previous user question (for resolving references, not as meeting evidence):\n"
-                + previous_question[:600]
+                f"Recent conversation (for resolving references, not as meeting evidence):\n"
+                + "\n".join(f"{item.role}: {item.content[:500]}" for item in history[-6:])
                 + f"\n\nCurrent question: {request.query}\n\nMeeting evidence:\n{context}"
             ),
             max_output_tokens=700,
@@ -303,13 +306,15 @@ class KnowledgeService:
                 },
                 "required": ["answer", "citation_ids"],
             },
-            metadata={"capability": "text_generation", "purpose": "knowledge_answer"},
+            metadata={"capability": "text_generation", "purpose": "knowledge_answer", "knowledge_base_id": str(request.knowledge_base_id) if request.knowledge_base_id else None},
         )
         try:
-            if request.knowledge_base_id and self.bases:
+            if request.text_profile_id:
+                profile, result = await self.providers.generate_text(prompt, profile_id=request.text_profile_id, **({"model_override": request.model_id} if request.model_id else {}))
+            elif request.knowledge_base_id and self.bases:
                 base = self.bases.get(request.knowledge_base_id, actor)
                 if base.text_profile_id:
-                    profile, result = await self.providers.generate_text(prompt, profile_id=base.text_profile_id)
+                    profile, result = await self.providers.generate_text(prompt, profile_id=base.text_profile_id, **({"model_override": request.model_id} if request.model_id else {}))
                 else:
                     profile, result = await self.providers.generate_text(prompt)
             else:
@@ -363,11 +368,11 @@ class KnowledgeService:
                 "properties": {"search_queries": {"type": "array", "items": {"type": "string"}}},
                 "required": ["search_queries"],
             },
-            metadata={"capability": "text_generation", "purpose": "knowledge_query_plan"},
+            metadata={"capability": "text_generation", "purpose": "knowledge_query_plan", "knowledge_base_id": str(request.knowledge_base_id) if request.knowledge_base_id else None},
         )
         try:
             base = self.bases.get(request.knowledge_base_id, actor) if request.knowledge_base_id and self.bases else None
-            _, result = await self.providers.generate_text(prompt, profile_id=base.text_profile_id if base else None)
+            _, result = await self.providers.generate_text(prompt, profile_id=request.text_profile_id or (base.text_profile_id if base else None), **({"model_override": request.model_id} if request.model_id else {}))
             payload = result.structured_output or json.loads(result.text)
             queries = payload.get("search_queries", [])
             if not isinstance(queries, list):

@@ -15,6 +15,7 @@ from .accounts import Actor
 from .database import (
     AuditEventRow, AuthRateLimitBucketRow, Database, EmailDeliveryRow,
     KnowledgeIndexJobRow, MeetingRow, MeetingTenantRow, PostMeetingJobRow,
+    OrganizationMembershipRow, KnowledgeConversationRow, KnowledgeBaseRow,
 )
 
 
@@ -89,6 +90,10 @@ class AuditEventPublic(BaseModel):
 
 
 class WorkspaceOperationsPublic(BaseModel):
+    people: int
+    meetings_captured: int
+    completed_meetings: int
+    saved_chats: int
     active_captures: int
     failed_captures: int
     failed_mom_jobs: int
@@ -117,7 +122,14 @@ def workspace_operations(database: Database, organization_id: UUID) -> Workspace
         last_audit = session.execute(select(func.max(AuditEventRow.created_at)).where(
             AuditEventRow.organization_id == org,
         )).scalar_one_or_none()
+        people = session.execute(select(func.count()).select_from(OrganizationMembershipRow).where(
+            OrganizationMembershipRow.organization_id == org,
+        )).scalar_one()
+        saved_chats = session.execute(select(func.count()).select_from(KnowledgeConversationRow).join(
+            KnowledgeBaseRow, KnowledgeBaseRow.id == KnowledgeConversationRow.knowledge_base_id,
+        ).where(KnowledgeBaseRow.organization_id == org)).scalar_one()
     return WorkspaceOperationsPublic(
+        people=people, meetings_captured=len(meetings), completed_meetings=meetings.count("completed"), saved_chats=saved_chats,
         active_captures=sum(status in {"requested", "joining", "awaiting_admission", "active", "needs_human_help", "stopping"} for status in meetings),
         failed_captures=meetings.count("failed"),
         failed_mom_jobs=mom_failures,

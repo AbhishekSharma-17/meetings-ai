@@ -17,6 +17,9 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
   const [selectedBaseId, setSelectedBaseId] = useState("");
   const [newBaseName, setNewBaseName] = useState("");
   const [tagInput, setTagInput] = useState("");
+  const [momTemplate, setMomTemplate] = useState<"standard" | "actions" | "client" | "discovery" | "custom">("standard");
+  const [momInstructions, setMomInstructions] = useState("");
+  const [momFocusInput, setMomFocusInput] = useState("");
   const [joinTiming, setJoinTiming] = useState<"now" | "scheduled">("now");
   const [scheduledStart, setScheduledStart] = useState("");
   useEffect(() => {
@@ -31,7 +34,7 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
   }, [open]);
   if (!open) return null;
 
-  function close() { setError(null); setJoining(false); setSelectedBaseId(""); setNewBaseName(""); setTagInput(""); setKnowledgeEnabled(false); setJoinTiming("now"); setScheduledStart(""); onClose(); }
+  function close() { setError(null); setJoining(false); setSelectedBaseId(""); setNewBaseName(""); setTagInput(""); setKnowledgeEnabled(false); setMomTemplate("standard"); setMomInstructions(""); setMomFocusInput(""); setJoinTiming("now"); setScheduledStart(""); onClose(); }
 
   async function resolveKnowledgeBaseId(): Promise<string | null> {
     if (!knowledgeEnabled) return null;
@@ -90,6 +93,7 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
         knowledgeEnabled,
         knowledgeBaseId,
         deliverySettings,
+        momGuidance: { template: momTemplate, instructions: momInstructions.trim(), focus_fields: momFocusInput.split(/[,;\n]+/).map((item) => item.trim()).filter(Boolean) },
       };
       const shouldSchedule = calendarSelection && new Date(calendarSelection.event.starts_at).getTime() > Date.now() + 60_000;
       if (shouldSchedule) {
@@ -149,6 +153,7 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
           {tagInput.trim() ? <div className="meeting-tag-preview" aria-label="Tags to add">{tagInput.split(/[,;\n]+/).map((item) => item.trim()).filter(Boolean).map((item, index) => <span key={`${item}:${index}`}>#{item}</span>)}</div> : null}
           <p>One knowledge base can hold many meetings. Tags can be multiple. An existing name reuses that base; a new name creates one.</p></div>
         </div>
+        <details className="meeting-mom-options"><summary>MOM format & analysis guide</summary><p>Choose how the assistant organizes the draft after the meeting. Transcript evidence remains the source of truth.</p><label htmlFor="mom-template">Template</label><select id="mom-template" value={momTemplate} onChange={(event) => setMomTemplate(event.target.value as typeof momTemplate)} disabled={joining}><option value="standard">Balanced meeting minutes</option><option value="actions">Decisions & action tracker</option><option value="client">Client recap</option><option value="discovery">Discovery notes</option><option value="custom">Custom focus</option></select><label htmlFor="mom-focus">Additional fields to cover <span className="optional">comma-separated</span></label><input id="mom-focus" value={momFocusInput} onChange={(event) => setMomFocusInput(event.target.value)} placeholder="e.g. Risks, Budget, Dependencies" disabled={joining} /><label htmlFor="mom-instructions">Organizer guidance <span className="optional">optional</span></label><textarea id="mom-instructions" value={momInstructions} onChange={(event) => setMomInstructions(event.target.value)} maxLength={2000} rows={3} placeholder="What should the draft emphasize?" disabled={joining} /><p>Supported focus fields appear as labelled discussion points; unsupported claims are omitted.</p></details>
         <details className="meeting-delivery-options">
           <summary>Recap delivery options</summary>
           <p>Recipients are saved with this meeting. No email is sent until you review and approve its MOM.</p>

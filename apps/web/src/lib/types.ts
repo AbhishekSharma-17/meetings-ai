@@ -70,6 +70,10 @@ export type AuditEvent = {
 };
 
 export type WorkspaceOperations = {
+  people: number;
+  meetings_captured: number;
+  completed_meetings: number;
+  saved_chats: number;
   active_captures: number;
   failed_captures: number;
   failed_mom_jobs: number;
@@ -77,6 +81,16 @@ export type WorkspaceOperations = {
   failed_index_jobs: number;
   failed_email_deliveries: number;
   latest_audit_at: string | null;
+};
+
+export type UsageSummary = {
+  total_requests: number;
+  input_tokens: number;
+  output_tokens: number;
+  estimated_usd: number;
+  unpriced_requests: number;
+  recent: Array<{ id: string; meeting_id: string | null; knowledge_base_id: string | null; purpose: string; provider: string; model: string; input_tokens: number | null; output_tokens: number | null; estimated_usd: number | null; created_at: string }>;
+  by_meeting: Array<{ meeting_id: string; requests: number; input_tokens: number; output_tokens: number; estimated_usd: number; unpriced_requests: number }>;
 };
 
 export type RetentionPolicy = {
@@ -99,6 +113,7 @@ export type InviteResult = {
   account: CurrentAccount;
   temporary_password: string | null;
   note: string;
+  email_sent: boolean;
 };
 
 export type KnowledgeSource = {
@@ -162,6 +177,22 @@ export type KnowledgeChatResponse = {
   model: string | null;
   retrieval_mode: "lexical" | "hybrid";
   note: string;
+};
+
+export type KnowledgeTextProfile = {
+  id: string;
+  name: string;
+  provider_type: "openai" | "openai_compatible" | "vexa_native";
+  base_url: string | null;
+  capabilities: Array<{ capability: string; model: string }>;
+};
+
+export type TextModelCatalog = {
+  profile_id: string;
+  provider: string;
+  configured_model: string;
+  live_catalog: boolean;
+  models: Array<{ id: string; name: string; input_per_million_usd: number | null; output_per_million_usd: number | null }>;
 };
 
 export type KnowledgeBase = {
@@ -316,6 +347,13 @@ export type CreateMeetingInput = {
   tags?: string[];
   knowledgeEnabled?: boolean;
   knowledgeBaseId?: string | null;
+  momGuidance?: MomGuidance;
+};
+
+export type MomGuidance = {
+  template: "standard" | "actions" | "client" | "discovery" | "custom";
+  instructions: string;
+  focus_fields: string[];
 };
 
 export type CalendarConnection = { id: string; provider: "googlecalendar" | "outlook"; status: string; label: string };

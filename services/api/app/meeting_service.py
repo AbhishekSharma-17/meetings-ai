@@ -75,6 +75,7 @@ class MeetingService:
         if saved.knowledge_base_id and self.knowledge_bases:
             self.knowledge_bases.assign_meeting(saved.id, saved.knowledge_base_id)
         self.repository.save_delivery_settings(saved.id, payload.delivery_settings)
+        self.repository.save_mom_guidance(saved.id, payload.mom_guidance)
         self.repository.initialize_post_meeting_job(saved.id)
         return saved
 

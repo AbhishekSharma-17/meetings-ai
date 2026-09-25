@@ -2,6 +2,8 @@ import os
 import asyncio
 import logging
 import re
+from html import escape
+from urllib.parse import quote
 from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID
@@ -23,6 +25,7 @@ from meetings_contracts import (
     MeetingCreate,
     MeetingKnowledgeUpdate,
     MeetingDeliverySettings,
+    MomGuidance,
     MeetingListResponse,
     MeetingMinutesDraft,
     MeetingMinutesPublic,
@@ -59,6 +62,8 @@ from .runtime_config import validate_runtime_config
 from .retention import RetentionPolicy, RetentionService
 from .security import CredentialCipher
 from .service import ProfileValidationError, ProviderProfileService, ProviderSelectionError
+from .model_catalog import ModelCatalogError, ModelCatalogService, TextModelCatalog
+from .usage import UsageLedger, UsageSummary
 from .stt_route import STTRouteError
 from .tenant import tenant_scope
 from .workspace_service import WorkspacePatch, WorkspacePublic, WorkspaceMemberPublic, WorkspaceService
@@ -111,7 +116,9 @@ def create_app(
     cipher = CredentialCipher(resolved_credential_key)
     repository = SQLAlchemyRepository(database, cipher)
     workspace_service = WorkspaceService(database)
-    service = ProviderProfileService(repository)
+    model_catalog = ModelCatalogService()
+    usage = UsageLedger(database, model_catalog)
+    service = ProviderProfileService(repository, usage)
     knowledge_bases = KnowledgeBaseService(database, repository)
     vexa = vexa_adapter or VexaCaptureAdapter(
         os.getenv("VEXA_BASE_URL", "http://localhost:8056"),
@@ -217,6 +224,8 @@ def create_app(
                         or (method == "DELETE" and re.fullmatch(r"/v1/knowledge-bases/[0-9a-f-]+/conversations/[0-9a-f-]+", path))
                         or (method == "PUT" and re.fullmatch(r"/v1/knowledge-bases/[0-9a-f-]+/sharing", path))
                         or (path in {"/v1/knowledge/search", "/v1/knowledge/chat"} and method == "POST")
+                        or (method == "GET" and path == "/v1/knowledge/text-profiles")
+                        or (method == "GET" and re.fullmatch(r"/v1/knowledge/text-profiles/[0-9a-f-]+/models", path))
                         or path == "/v1/auth/me"
                         or (path == "/v1/calendar/connections" and method == "GET")
                         or (re.fullmatch(r"/v1/calendar/connect/(googlecalendar|outlook)", path) and method == "POST")
@@ -324,11 +333,51 @@ def create_app(
         return {"changed": True}
 
     @app.post("/v1/workspace/invite", response_model=InviteResult, status_code=201)
-    def invite_member(payload: InviteRequest, request: Request) -> InviteResult:
+    async def invite_member(payload: InviteRequest, request: Request) -> InviteResult:
         try:
-            return accounts.invite(request.state.actor, payload)
+            result = accounts.invite(request.state.actor, payload)
         except AccountError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if not resend.configuration()["can_attempt_send"]:
+            result.note = "Account added, but email delivery is not configured. Share the temporary password privately if one was created; existing users can sign in normally."
+            return result
+        workspace_name = workspace_service.get().display_name
+        sign_in_url = f"{os.getenv('WEB_ORIGIN', 'http://localhost:3020').rstrip('/')}/?invite={quote(payload.email)}"
+        subject = f"You've been invited to {workspace_name} on Meetings AI"
+        password_line = f"Temporary password: {result.temporary_password}\n" if result.temporary_password else "Use your existing Meetings AI password.\n"
+        plain = (
+            f"{payload.display_name},\n\n"
+            f"{request.state.actor.display_name} invited you to {workspace_name} on Meetings AI as a {payload.role}.\n"
+            f"Sign in: {sign_in_url}\nEmail: {payload.email}\n{password_line}"
+            + ("You will be asked to set a new password after signing in.\n" if result.temporary_password else "")
+            + "\nDo not forward this invitation or share its password.\n"
+        )
+        html = (
+            '<html><body style="background:#f4f7f6;padding:32px;font-family:Arial,sans-serif;color:#183331">'
+            '<div style="max-width:540px;margin:auto;background:white;border:1px solid #dce7e3;border-radius:12px;padding:32px">'
+            '<div style="font-size:15px;font-weight:bold;color:#13766d">▣ Meetings AI</div>'
+            f'<h1 style="font-size:24px;margin:28px 0 8px">Join {escape(workspace_name)}</h1>'
+            f'<p>{escape(request.state.actor.display_name)} invited you to this workspace as a {escape(payload.role)}.</p>'
+            f'<p><b>Sign-in email</b><br>{escape(payload.email)}</p>'
+            + (f'<p><b>Temporary password</b><br><code style="font-size:16px">{escape(result.temporary_password)}</code></p>' if result.temporary_password else '<p>Use your existing Meetings AI password.</p>')
+            + f'<p><a href="{escape(sign_in_url, quote=True)}" style="display:inline-block;background:#13766d;color:white;padding:12px 20px;border-radius:7px;text-decoration:none">Open Meetings AI</a></p>'
+            + ('<p>You must choose a new password after your first sign-in.</p>' if result.temporary_password else '')
+            + '<p style="font-size:12px;color:#687c77;margin-top:32px">This invitation contains a sign-in credential. Do not forward it.</p></div></body></html>'
+        )
+        try:
+            new_account = result.temporary_password is not None
+            await resend.send(
+                recipients=[payload.email], subject=subject, html=html, text=plain,
+                idempotency_key=f"invite-{request.state.actor.organization_id}-{result.account.user_id}",
+            )
+            result.email_sent = True
+            result.temporary_password = None
+            result.note = "Invitation email sent. The teammate must change the temporary password on first sign-in." if new_account else "Workspace notification emailed. The teammate can use their existing password."
+        except EmailDeliveryError:
+            # The account was already created; return its one-time secret to the admin
+            # instead of losing access behind a misleading HTTP 500.
+            result.note = "Account added, but invitation email failed. Share the temporary password privately if one was created; existing users can sign in normally."
+        return result
 
     def set_workspace_session(response: Response, actor: Actor) -> None:
         if not admin:
@@ -406,6 +455,10 @@ def create_app(
     @app.get("/v1/workspace/operations", response_model=WorkspaceOperationsPublic)
     def get_workspace_operations(request: Request) -> WorkspaceOperationsPublic:
         return workspace_operations(database, request.state.actor.organization_id)
+
+    @app.get("/v1/workspace/usage", response_model=UsageSummary)
+    def get_workspace_usage(request: Request) -> UsageSummary:
+        return usage.summary(request.state.actor.organization_id)
 
     @app.get("/v1/workspace/retention", response_model=RetentionPolicy)
     def get_workspace_retention(request: Request) -> RetentionPolicy:
@@ -525,6 +578,15 @@ def create_app(
     @app.post("/v1/knowledge/chat", response_model=KnowledgeChatResponse)
     async def chat_knowledge(payload: KnowledgeQuery, request: Request) -> KnowledgeChatResponse:
         try:
+            if payload.model_id:
+                profile_id = payload.text_profile_id
+                if not profile_id and payload.knowledge_base_id:
+                    profile_id = knowledge_bases.get(payload.knowledge_base_id, request.state.actor).text_profile_id
+                if not profile_id:
+                    raise HTTPException(status_code=422, detail="select a text provider before selecting a model")
+                catalog = await model_catalog.list_for(repository.get_profile(profile_id))
+                if payload.model_id not in {option.id for option in catalog.models}:
+                    raise HTTPException(status_code=422, detail="choose a model from the provider catalog")
             return await knowledge_service.chat(payload, request.state.actor)
         except KnowledgeBaseNotFoundError as exc:
             raise HTTPException(status_code=404, detail="knowledge base not found") from exc
@@ -532,6 +594,10 @@ def create_app(
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except KnowledgeAnswerError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except ProfileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="text provider not found") from exc
+        except ModelCatalogError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.patch("/v1/meetings/{meeting_id}/knowledge", response_model=MeetingPublic)
     def update_meeting_knowledge(
@@ -622,6 +688,20 @@ def create_app(
     @app.get("/v1/provider-profiles", response_model=list[ProfilePublic])
     def list_profiles() -> list[ProfilePublic]:
         return [service.to_public(profile) for profile in repository.list_profiles()]
+
+    @app.get("/v1/knowledge/text-profiles", response_model=list[ProfilePublic])
+    def list_knowledge_text_profiles() -> list[ProfilePublic]:
+        return [service.to_public(profile) for profile in repository.list_profiles()
+                if profile.supports(Capability.TEXT_GENERATION)]
+
+    @app.get("/v1/knowledge/text-profiles/{profile_id}/models", response_model=TextModelCatalog)
+    async def list_knowledge_models(profile_id: UUID) -> TextModelCatalog:
+        try:
+            return await model_catalog.list_for(repository.get_profile(profile_id))
+        except ProfileNotFoundError as exc:
+            raise api_error(exc) from exc
+        except ModelCatalogError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.post(
         "/v1/provider-profiles",
@@ -754,6 +834,23 @@ def create_app(
             return repository.get_delivery_settings(meeting_id)
         except MeetingNotFoundError as exc:
             raise api_error(exc) from exc
+
+    @app.get("/v1/meetings/{meeting_id}/mom-guidance", response_model=MomGuidance)
+    def get_mom_guidance(meeting_id: UUID) -> MomGuidance:
+        try:
+            return repository.get_mom_guidance(meeting_id)
+        except MeetingNotFoundError as exc:
+            raise api_error(exc) from exc
+
+    @app.put("/v1/meetings/{meeting_id}/mom-guidance", response_model=MomGuidance)
+    def save_mom_guidance(meeting_id: UUID, payload: MomGuidance) -> MomGuidance:
+        try:
+            minutes_service.require_not_sent(meeting_id)
+            return repository.save_mom_guidance(meeting_id, payload)
+        except MeetingNotFoundError as exc:
+            raise api_error(exc) from exc
+        except MinutesConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.get("/v1/meetings/{meeting_id}/transcription-route")
     def get_transcription_route(meeting_id: UUID) -> dict[str, object]:

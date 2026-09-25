@@ -80,6 +80,7 @@ class InviteResult(BaseModel):
     account: AccountPublic
     temporary_password: str | None
     note: str = "Shown once. Share it privately; the recipient must change it on first sign-in."
+    email_sent: bool = False
 
 
 class ChangePasswordRequest(BaseModel):

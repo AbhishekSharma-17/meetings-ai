@@ -64,6 +64,9 @@ test("workspace profile can be edited", async ({ page }) => {
   };
   await page.route("**/v1/workspace**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
+    if (pathname === "/v1/workspaces") return route.fulfill({ json: [{ id: workspace.id, slug: workspace.slug, display_name: workspace.display_name, role: "owner" }] });
+    if (pathname === "/v1/workspace/usage") return route.fulfill({ json: { total_requests: 0, input_tokens: 0, output_tokens: 0, estimated_usd: 0, unpriced_requests: 0, recent: [], by_meeting: [] } });
+    if (pathname === "/v1/workspace/operations") return route.fulfill({ json: { people: 1, meetings_captured: 0, completed_meetings: 0, saved_chats: 0, active_captures: 0, failed_captures: 0, failed_mom_jobs: 0, pending_index_jobs: 0, failed_index_jobs: 0, failed_email_deliveries: 0, latest_audit_at: null } });
     if (pathname === "/v1/workspace/audit") return route.fulfill({ json: [{
       id: "00000000-0000-4000-8000-000000000099",
       actor_user_id: "00000000-0000-4000-8000-000000000002",
@@ -81,12 +84,13 @@ test("workspace profile can be edited", async ({ page }) => {
   });
 
   await page.goto("/");
-  await page.getByRole("button", { name: "Workspace", exact: true }).click();
+  await page.getByRole("button", { name: /Workspace owner developer@genaiprotos.com/ }).click();
+  await page.getByRole("button", { name: "Organization & people" }).click();
   await expect(page.getByRole("heading", { name: "Workspace settings" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Organization profile" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Recent activity" })).toBeVisible();
   await expect(page.getByRole("region", { name: "People & access" }).getByText("Local administrator")).toBeVisible();
-  await page.getByLabel("Workspace name").fill("Research Team");
+  await page.getByLabel("Workspace name", { exact: true }).fill("Research Team");
   await page.getByLabel("Contact email optional").fill("team@example.com");
   await page.getByRole("button", { name: "Save workspace" }).click();
   await expect(page.getByText("Workspace profile saved.")).toBeVisible();
@@ -123,7 +127,8 @@ test("owner can change a member role and remove workspace access", async ({ page
     return route.fallback();
   });
   await page.goto("/");
-  await page.getByRole("button", { name: "Workspace", exact: true }).click();
+  await page.getByRole("button", { name: /Workspace owner developer@genaiprotos.com/ }).click();
+  await page.getByRole("button", { name: "Organization & people" }).click();
   await page.getByRole("combobox", { name: "Role for Team Member" }).click();
   await page.getByRole("option", { name: "Admin" }).click();
   await expect(page.getByText("Member role updated.")).toBeVisible();
@@ -162,7 +167,7 @@ test("owner can invite a teammate and share a named knowledge base", async ({ pa
         email: payload.email, role: payload.role, status: "invited" });
       return route.fulfill({ status: 201, json: {
         account: { ...members[1], organization_id: base.organization_id, must_change_password: true },
-        temporary_password: "one-time-test-password", note: "Shown once.",
+        temporary_password: "one-time-test-password", note: "Email delivery is not configured.", email_sent: false,
       } });
     }
     return route.fallback();
@@ -180,10 +185,11 @@ test("owner can invite a teammate and share a named knowledge base", async ({ pa
   });
 
   await page.goto("/");
-  await page.getByRole("button", { name: "Workspace", exact: true }).click();
+  await page.getByRole("button", { name: /Workspace owner developer@genaiprotos.com/ }).click();
+  await page.getByRole("button", { name: "Organization & people" }).click();
   await page.getByLabel("Name", { exact: true }).fill("Team Member");
   await page.getByLabel("Work email").fill("teammate@example.com");
-  await page.getByRole("button", { name: "Add teammate" }).click();
+  await page.getByRole("button", { name: "Send invitation" }).click();
   await expect(page.getByText("one-time-test-password")).toBeVisible();
   await expect(page.getByText("Team Member", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "AI knowledge" }).click();
@@ -515,9 +521,10 @@ test("AI knowledge links tagged evidence to the exact transcript turn", async ({
   await page.goto("/");
   await page.getByRole("button", { name: "AI knowledge" }).click();
   await expect(page.getByRole("heading", { name: "Your meeting wiki." })).toBeVisible();
-  await page.getByRole("button", { name: "Find sources" }).click();
+  await page.getByRole("button", { name: "Sources" }).click();
   await page.getByLabel("Search meetings").fill("roadmap");
-  await page.getByLabel("Limit to tags").fill("roadmap");
+  await page.getByText("Filter by tags (optional)").click();
+  await page.locator("#knowledge-tags").fill("roadmap");
   await page.getByRole("button", { name: "Search", exact: true }).click();
   await expect(page.getByText(source.text)).toBeVisible();
   await expect(page.getByText("Speaker: Alice", { exact: true })).toBeVisible();
@@ -528,15 +535,17 @@ test("AI knowledge links tagged evidence to the exact transcript turn", async ({
   await page.getByRole("button", { name: /All meetings/ }).first().click();
   await page.getByRole("button", { name: /Acme client/ }).click();
   await expect(page.getByText("No sources indexed yet")).toBeVisible();
-  await page.getByRole("button", { name: "Ask AI" }).first().click();
+  await page.getByRole("button", { name: "Wiki", exact: true }).click();
   await expect(page.getByRole("heading", { name: "People & topics" })).toBeVisible();
   await page.getByText("Unverified label · 1 meeting").click();
   await expect(page.locator("details").filter({ hasText: "Unverified label" }).getByText(source.text)).toBeVisible();
-  await page.getByRole("button", { name: "Reindex knowledge" }).click();
+  await page.getByRole("button", { name: "Reindex now" }).click();
   await expect(page.getByText("1 source indexed · test-embedding")).toBeVisible();
-  await page.getByLabel("Ask a question").fill("Who owns the roadmap?");
-  await page.getByRole("button", { name: "Ask AI", exact: true }).last().click();
+  await page.getByRole("button", { name: "Ask AI", exact: true }).click();
+  await page.getByLabel("Message your knowledge base").fill("Who owns the roadmap?");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page.getByText("Alice committed to the roadmap on Friday [K1].")).toBeVisible();
+  await page.getByText("1 cited source · open transcript").click();
   await expect(page.getByRole("button", { name: "Open cited transcript" })).toBeVisible();
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export JSON" }).click();
@@ -646,6 +655,7 @@ test("finished meeting supports MOM review approval and delivery", async ({ page
     internal_recipients: [] as string[], participant_recipients: [] as string[],
     send_to_participants: false, include_transcript: false,
   };
+  let momGuidance = { template: "standard", instructions: "", focus_fields: [] as string[] };
 
   await page.route("**/v1/meetings**", async (route) => {
     const request = route.request();
@@ -692,6 +702,11 @@ test("finished meeting supports MOM review approval and delivery", async ({ page
       deliverySettings = request.postDataJSON();
       return route.fulfill({ json: deliverySettings });
     }
+    if (pathname === `/v1/meetings/${meetingId}/mom-guidance` && request.method() === "GET") return route.fulfill({ json: momGuidance });
+    if (pathname === `/v1/meetings/${meetingId}/mom-guidance` && request.method() === "PUT") {
+      momGuidance = request.postDataJSON();
+      return route.fulfill({ json: momGuidance });
+    }
     if (pathname === `/v1/meetings/${meetingId}/minutes` && request.method() === "GET") {
       return minutes ? route.fulfill({ json: minutes }) : route.fulfill({ status: 404, json: { detail: "MOM has not been generated" } });
     }
@@ -721,7 +736,7 @@ test("finished meeting supports MOM review approval and delivery", async ({ page
     "OpenRouter STT · microsoft/mai-transcribe-2 · openrouter.ai",
   );
   await expect(page.getByText("1 unidentified turn")).toBeVisible();
-  await page.getByRole("button", { name: "Review speaker" }).nth(1).click();
+  await page.locator(".transcript-list-compact li").filter({ hasText: "I will review the MOM." }).getByRole("button", { name: "Review speaker" }).click();
   await page.getByLabel("Correct speaker name").fill("Bob");
   await page.getByRole("button", { name: "Save speaker" }).click();
   await expect(page.getByText("Speakers heard: Alice, Bob")).toBeVisible();

@@ -1,4 +1,4 @@
-import type { AuditEvent, CalendarConnection, CalendarEvent, CalendarPeriod, CalendarSchedule, Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, PostMeetingJob, ProfileKind, ProviderProfile, ResendStatus, RetentionPolicy, SpeakerIdentity, TranscriptSegment, TranscriptionRoute, Workspace, WorkspaceMember, WorkspaceOperations, WorkspaceOption } from "./types";
+import type { AuditEvent, CalendarConnection, CalendarEvent, CalendarPeriod, CalendarSchedule, Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeTextProfile, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, MomGuidance, PostMeetingJob, ProfileKind, ProviderProfile, ResendStatus, RetentionPolicy, SpeakerIdentity, TextModelCatalog, TranscriptSegment, TranscriptionRoute, UsageSummary, Workspace, WorkspaceMember, WorkspaceOperations, WorkspaceOption } from "./types";
 
 export interface MeetingsService {
   getSession(): Promise<boolean>;
@@ -19,6 +19,7 @@ export interface MeetingsService {
   listWorkspaceMembers(): Promise<WorkspaceMember[]>;
   listWorkspaceAudit(): Promise<AuditEvent[]>;
   getWorkspaceOperations(): Promise<WorkspaceOperations>;
+  getWorkspaceUsage(): Promise<UsageSummary>;
   getRetentionPolicy(): Promise<RetentionPolicy>;
   saveRetentionPolicy(policy: RetentionPolicy): Promise<RetentionPolicy>;
   listKnowledgeBases(): Promise<KnowledgeBase[]>;
@@ -34,7 +35,9 @@ export interface MeetingsService {
   getKnowledgeConversation(baseId: string, conversationId: string): Promise<KnowledgeConversation>;
   deleteKnowledgeConversation(baseId: string, conversationId: string): Promise<void>;
   searchKnowledge(query: string, tags: string[], knowledgeBaseId?: string | null): Promise<KnowledgeSearchResponse>;
-  chatKnowledge(query: string, tags: string[], knowledgeBaseId?: string | null, conversationId?: string | null): Promise<KnowledgeChatResponse>;
+  chatKnowledge(query: string, tags: string[], knowledgeBaseId?: string | null, conversationId?: string | null, profileId?: string | null, modelId?: string | null): Promise<KnowledgeChatResponse>;
+  listKnowledgeTextProfiles(): Promise<KnowledgeTextProfile[]>;
+  listKnowledgeModels(profileId: string): Promise<TextModelCatalog>;
   listMeetings(): Promise<Meeting[]>;
   createMeeting(input: CreateMeetingInput): Promise<MeetingDetail>;
   scheduleMeeting(input: CreateMeetingInput, startsAt: string): Promise<MeetingDetail>;
@@ -59,6 +62,8 @@ export interface MeetingsService {
   saveSpeakerIdentity(id: string, speaker: string, email: string | null): Promise<SpeakerIdentity[]>;
   correctSpeaker(id: string, segmentId: string, displayName: string | null, applyToRawLabel: boolean): Promise<TranscriptSegment[]>;
   getMinutes(id: string): Promise<MeetingMinutes | null>;
+  getMomGuidance(id: string): Promise<MomGuidance>;
+  saveMomGuidance(id: string, guidance: MomGuidance): Promise<MomGuidance>;
   deleteMinutes(id: string): Promise<void>;
   generateMinutes(id: string): Promise<MeetingMinutes>;
   saveMinutes(id: string, draft: MinutesDraft): Promise<MeetingMinutes>;
@@ -381,6 +386,10 @@ class HttpMeetingsService implements MeetingsService {
     return api<WorkspaceOperations>("/v1/workspace/operations");
   }
 
+  async getWorkspaceUsage(): Promise<UsageSummary> {
+    return api<UsageSummary>("/v1/workspace/usage");
+  }
+
   async getRetentionPolicy(): Promise<RetentionPolicy> {
     return api<RetentionPolicy>("/v1/workspace/retention");
   }
@@ -449,10 +458,18 @@ class HttpMeetingsService implements MeetingsService {
     });
   }
 
-  async chatKnowledge(query: string, tags: string[], knowledgeBaseId?: string | null, conversationId?: string | null): Promise<KnowledgeChatResponse> {
+  async chatKnowledge(query: string, tags: string[], knowledgeBaseId?: string | null, conversationId?: string | null, profileId?: string | null, modelId?: string | null): Promise<KnowledgeChatResponse> {
     return api<KnowledgeChatResponse>("/v1/knowledge/chat", {
-      method: "POST", body: JSON.stringify({ query, tags, limit: 8, knowledge_base_id: knowledgeBaseId ?? null, conversation_id: conversationId ?? null }),
+      method: "POST", body: JSON.stringify({ query, tags, limit: 8, knowledge_base_id: knowledgeBaseId ?? null, conversation_id: conversationId ?? null, text_profile_id: profileId ?? null, model_id: modelId ?? null }),
     });
+  }
+
+  async listKnowledgeTextProfiles(): Promise<KnowledgeTextProfile[]> {
+    return api<KnowledgeTextProfile[]>("/v1/knowledge/text-profiles");
+  }
+
+  async listKnowledgeModels(profileId: string): Promise<TextModelCatalog> {
+    return api<TextModelCatalog>(`/v1/knowledge/text-profiles/${profileId}/models`);
   }
 
   async listMeetings(): Promise<Meeting[]> {
@@ -473,6 +490,7 @@ class HttpMeetingsService implements MeetingsService {
         ...(input.title ? { title: input.title } : {}),
         ...(input.botName ? { bot_name: input.botName } : {}),
         ...(input.deliverySettings ? { delivery_settings: input.deliverySettings } : {}),
+        ...(input.momGuidance ? { mom_guidance: input.momGuidance } : {}),
         tags: input.tags ?? [],
         knowledge_enabled: input.knowledgeEnabled ?? false,
         knowledge_base_id: input.knowledgeBaseId ?? null,
@@ -489,6 +507,7 @@ class HttpMeetingsService implements MeetingsService {
         meeting: {
           meeting_url: input.meetingUrl, title: input.title || undefined,
           bot_name: input.botName || "Meetings AI", delivery_settings: input.deliverySettings,
+          mom_guidance: input.momGuidance,
           tags: input.tags ?? [], knowledge_enabled: input.knowledgeEnabled ?? false,
           knowledge_base_id: input.knowledgeBaseId ?? null,
         },
@@ -529,6 +548,7 @@ class HttpMeetingsService implements MeetingsService {
       meeting: {
         meeting_url: event.meeting_url, title: input.title || event.title, bot_name: input.botName || "Meetings AI",
         delivery_settings: input.deliverySettings, tags: input.tags ?? [],
+        mom_guidance: input.momGuidance,
         knowledge_enabled: input.knowledgeEnabled ?? false, knowledge_base_id: input.knowledgeBaseId ?? null,
       },
     }) });
@@ -616,6 +636,14 @@ class HttpMeetingsService implements MeetingsService {
       if (error instanceof ApiError && error.status === 404) return null;
       throw error;
     }
+  }
+
+  async getMomGuidance(id: string): Promise<MomGuidance> {
+    return api<MomGuidance>(`/v1/meetings/${id}/mom-guidance`);
+  }
+
+  async saveMomGuidance(id: string, guidance: MomGuidance): Promise<MomGuidance> {
+    return api<MomGuidance>(`/v1/meetings/${id}/mom-guidance`, { method: "PUT", body: JSON.stringify(guidance) });
   }
 
   async deleteMinutes(id: string): Promise<void> {

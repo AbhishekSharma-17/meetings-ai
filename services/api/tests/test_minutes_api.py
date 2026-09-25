@@ -24,6 +24,8 @@ from app.minutes_service import MinutesGenerationError, _email_content, _normali
 class FakeTextAdapter:
     async def generate_text(self, profile, request):
         assert request.max_output_tokens == 12000
+        assert "MOM template: actions." in request.prompt
+        assert "Requested focus fields: Risks" in request.prompt
         assert "SPEAKER=Anna\nTEXT=We approved the internal MVP" in request.prompt
         segment_id = re.search(r"ID=([^\n]+)", request.prompt).group(1)
         payload = {
@@ -102,9 +104,11 @@ def test_generate_review_approve_and_send_minutes() -> None:
             json={
                 "meeting_url": "https://meet.google.com/abc-defg-hij",
                 "title": "Internal MVP review",
+                "mom_guidance": {"template": "actions", "instructions": "Emphasize blockers", "focus_fields": ["Risks"]},
             },
         ).json()
         meeting_id = meeting["id"]
+        assert client.get(f"/v1/meetings/{meeting_id}/mom-guidance").json()["template"] == "actions"
         persisted = app.state.repository.get_meeting(meeting_id)
         persisted.status = MeetingStatus.COMPLETED
         app.state.repository.save_meeting(persisted)
