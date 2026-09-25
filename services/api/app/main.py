@@ -199,6 +199,7 @@ def create_app(
                         or (method == "GET" and path in {"/v1/workspace", "/v1/workspace/members", "/v1/workspaces"})
                         or (method == "POST" and (path == "/v1/workspaces" or re.fullmatch(r"/v1/workspaces/[0-9a-f-]+/switch", path)))
                         or (path.startswith("/v1/knowledge-bases") and method in {"GET", "POST", "PATCH"})
+                        or (method == "DELETE" and re.fullmatch(r"/v1/knowledge-bases/[0-9a-f-]+/conversations/[0-9a-f-]+", path))
                         or (method == "PUT" and re.fullmatch(r"/v1/knowledge-bases/[0-9a-f-]+/sharing", path))
                         or (path in {"/v1/knowledge/search", "/v1/knowledge/chat"} and method == "POST")
                         or path == "/v1/auth/me"
@@ -449,6 +450,14 @@ def create_app(
             return knowledge_bases.get_conversation(base_id, conversation_id, request.state.actor)
         except KnowledgeBaseNotFoundError as exc:
             raise HTTPException(status_code=404, detail="conversation not found") from exc
+
+    @app.delete("/v1/knowledge-bases/{base_id}/conversations/{conversation_id}", status_code=204)
+    def delete_knowledge_conversation(base_id: UUID, conversation_id: UUID, request: Request) -> Response:
+        try:
+            knowledge_bases.delete_conversation(base_id, conversation_id, request.state.actor)
+        except KnowledgeBaseNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="conversation not found") from exc
+        return Response(status_code=204)
 
     @app.post("/v1/knowledge/search", response_model=KnowledgeSearchResponse)
     async def search_knowledge(payload: KnowledgeQuery, request: Request) -> KnowledgeSearchResponse:

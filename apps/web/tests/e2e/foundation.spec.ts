@@ -439,10 +439,25 @@ test("AI knowledge links tagged evidence to the exact transcript turn", async ({
   };
   let searchPayload: Record<string, unknown> | null = null;
   let indexedSources = 0;
+  let chatDeleted = false;
   await page.route("**/v1/knowledge-bases**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === "/v1/knowledge-bases") return route.fulfill({ json: [base] });
     if (pathname === `/v1/knowledge-bases/${baseId}/conversations`) return route.fulfill({ json: [] });
+    if (pathname === `/v1/knowledge-bases/${baseId}/conversations/00000000-0000-4000-8000-000000000077`) {
+      if (route.request().method() === "DELETE") {
+        chatDeleted = true;
+        return route.fulfill({ status: 204, body: "" });
+      }
+      return route.fulfill({ json: {
+        id: "00000000-0000-4000-8000-000000000077", knowledge_base_id: baseId,
+        title: "Who owns the roadmap?", created_at: "2026-09-25T10:00:00Z", updated_at: "2026-09-25T10:00:00Z",
+        messages: [
+          { id: "00000000-0000-4000-8000-000000000078", role: "user", content: "Who owns the roadmap?", citations: [], provider: null, model: null, created_at: "2026-09-25T10:00:00Z" },
+          { id: "00000000-0000-4000-8000-000000000079", role: "assistant", content: "Alice committed to the roadmap on Friday [K1].", citations: [source], provider: "test-provider", model: "economy-test", created_at: "2026-09-25T10:00:01Z" },
+        ],
+      } });
+    }
     if (pathname === `/v1/knowledge-bases/${baseId}/reindex`) indexedSources = 1;
     if (pathname === `/v1/knowledge-bases/${baseId}/index` || pathname === `/v1/knowledge-bases/${baseId}/reindex`) {
       return route.fulfill({ json: {
@@ -503,6 +518,13 @@ test("AI knowledge links tagged evidence to the exact transcript turn", async ({
   await page.getByRole("button", { name: "Ask AI", exact: true }).last().click();
   await expect(page.getByText("Alice committed to the roadmap on Friday [K1].")).toBeVisible();
   await expect(page.getByRole("button", { name: "Open cited transcript" })).toBeVisible();
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export JSON" }).click();
+  expect((await downloadPromise).suggestedFilename()).toBe("meetings-ai-chat-00000000-0000-4000-8000-000000000077.json");
+  await page.getByRole("button", { name: "Delete chat" }).click();
+  await page.getByRole("button", { name: "Confirm delete" }).click();
+  await expect(page.getByText("Saved chat deleted. Downloaded copies are not affected.")).toBeVisible();
+  expect(chatDeleted).toBe(true);
 });
 
 test("join failures open the durable meeting record with a retry path", async ({ page }) => {

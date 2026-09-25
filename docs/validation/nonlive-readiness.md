@@ -41,8 +41,9 @@ or healthy containers as proof of those outcomes.
   delivery, including sender-domain acceptance and participant opt-in.
 - Production multi-replica operation, backups/restores, and tenant isolation.
 - Live semantic retrieval quality, query-planning agents, linked topic/person
-  pages, background indexing, and saved-chat retention/deletion. Manual
-  organization-scoped indexing and mutation-triggered vector purge are built.
+  pages, background indexing, and automatic saved-chat retention. Per-user
+  manual chat export/deletion, manual organization-scoped indexing, and
+  mutation-triggered vector purge are built.
 - Hosted database isolation/RLS, external identity/SSO, account recovery,
   distributed rate limiting, production audit retention, and billing.
 

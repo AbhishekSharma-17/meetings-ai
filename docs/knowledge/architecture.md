@@ -37,9 +37,11 @@ Opt-out, tag changes, reassignment, transcript replacement, speaker correction,
 and MOM save purge that meeting's vectors. Those sources remain searchable
 lexically where still eligible; manual reindex restores semantic coverage. A
 concurrent mutation during a reindex may leave an unusable stale vector, but
-fingerprint validation prevents it from being cited. Existing saved answer text
-and copied/exported answers are **not** revoked on opt-out; their retention and
-deletion policy remains to build.
+fingerprint validation prevents it from being cited. A user can export or delete
+their own saved conversation; deletion removes its stored answer and citation
+rows, but cannot revoke downloaded copies. Existing saved answer text is **not**
+automatically revoked on meeting opt-out; workspace retention policy and
+automated deletion remain to build.
 
 Creators and admins can share a base with everyone in their organization or
 specific members. Members can search only accessible named bases and open only

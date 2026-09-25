@@ -67,12 +67,27 @@ def test_invite_requires_password_change_and_sharing_limits_member_access(tmp_pa
         })
         assert shared.status_code == 200
         assert shared.json()["shared_user_ids"] == [member_id]
+        owner_chat = client.post("/v1/knowledge/chat", json={
+            "query": "unmentioned topic", "knowledge_base_id": private_base["id"],
+        })
+        assert owner_chat.status_code == 200
+        owner_conversation_id = owner_chat.json()["conversation_id"]
         client.post("/v1/auth/logout")
 
         client.post("/v1/auth/login", json={
             "email": "teammate@example.com", "password": "a-very-long-new-password",
         })
         assert [item["id"] for item in client.get("/v1/knowledge-bases").json()] == [private_base["id"]]
+        assert client.get(f"/v1/knowledge-bases/{private_base['id']}/conversations/{owner_conversation_id}").status_code == 404
+        assert client.delete(f"/v1/knowledge-bases/{private_base['id']}/conversations/{owner_conversation_id}").status_code == 404
+        assert client.get(f"/v1/knowledge-bases/{private_base['id']}/conversations").json() == []
+        member_chat = client.post("/v1/knowledge/chat", json={
+            "query": "unmentioned topic", "knowledge_base_id": private_base["id"],
+        })
+        assert member_chat.status_code == 200
+        member_conversation_id = member_chat.json()["conversation_id"]
+        assert client.delete(f"/v1/knowledge-bases/{private_base['id']}/conversations/{member_conversation_id}").status_code == 204
+        assert client.get(f"/v1/knowledge-bases/{private_base['id']}/conversations").json() == []
         result = client.post("/v1/knowledge/search", json={
             "query": "roadmap", "knowledge_base_id": private_base["id"],
         })

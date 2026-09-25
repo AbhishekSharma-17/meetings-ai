@@ -279,6 +279,16 @@ class KnowledgeBaseService:
             ).order_by(KnowledgeMessageRow.position)).scalars().all()
             return self._conversation_public(row, messages)
 
+    def delete_conversation(self, base_id: UUID, conversation_id: UUID, actor: Actor | None = None) -> None:
+        """Delete only the caller's saved chat and its copied answer/citation data."""
+        with self.database.session_factory.begin() as session:
+            self._row(session, base_id, actor)
+            row = self._conversation_row(session, base_id, conversation_id, actor)
+            session.execute(delete(KnowledgeMessageRow).where(
+                KnowledgeMessageRow.conversation_id == str(conversation_id)
+            ))
+            session.delete(row)
+
     def save_exchange(
         self, base_id: UUID, conversation_id: UUID | None, question: str,
         answer: str, citations: list[dict], provider: str | None, model: str | None,

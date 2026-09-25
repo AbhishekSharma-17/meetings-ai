@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
+from sqlalchemy import func, select
 
+from app.database import KnowledgeMessageRow
 from app.main import create_app
 from meetings_contracts import (
     ActionItem, MeetingMinutes, MeetingStatus, MeetingTranscriptSegment,
@@ -186,3 +188,12 @@ def test_named_knowledge_bases_scope_search_and_save_chat(tmp_path) -> None:
         assert follow_up.json()["conversation_id"] == conversation_id
         assert len(client.get(f"/v1/knowledge-bases/{base_id}/conversations/{conversation_id}").json()["messages"]) == 4
         assert client.get(f"/v1/knowledge-bases/{other}/conversations/{conversation_id}").status_code == 404
+        assert client.delete(f"/v1/knowledge-bases/{other}/conversations/{conversation_id}").status_code == 404
+        assert client.delete(f"/v1/knowledge-bases/{base_id}/conversations/{conversation_id}").status_code == 204
+        assert client.get(f"/v1/knowledge-bases/{base_id}/conversations/{conversation_id}").status_code == 404
+        assert client.get(f"/v1/knowledge-bases/{base_id}/conversations").json() == []
+        with app.state.database.session_factory() as session:
+            remaining = session.execute(select(func.count()).select_from(KnowledgeMessageRow).where(
+                KnowledgeMessageRow.conversation_id == conversation_id,
+            )).scalar_one()
+        assert remaining == 0

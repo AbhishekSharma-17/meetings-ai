@@ -26,6 +26,7 @@ export interface MeetingsService {
   shareKnowledgeBase(id: string, visibility: "private" | "organization" | "specific", userIds: string[]): Promise<KnowledgeBase>;
   listKnowledgeConversations(baseId: string): Promise<KnowledgeConversation[]>;
   getKnowledgeConversation(baseId: string, conversationId: string): Promise<KnowledgeConversation>;
+  deleteKnowledgeConversation(baseId: string, conversationId: string): Promise<void>;
   searchKnowledge(query: string, tags: string[], knowledgeBaseId?: string | null): Promise<KnowledgeSearchResponse>;
   chatKnowledge(query: string, tags: string[], knowledgeBaseId?: string | null, conversationId?: string | null): Promise<KnowledgeChatResponse>;
   listMeetings(): Promise<Meeting[]>;
@@ -369,6 +370,10 @@ class HttpMeetingsService implements MeetingsService {
 
   async getKnowledgeConversation(baseId: string, conversationId: string): Promise<KnowledgeConversation> {
     return api<KnowledgeConversation>(`/v1/knowledge-bases/${baseId}/conversations/${conversationId}`);
+  }
+
+  async deleteKnowledgeConversation(baseId: string, conversationId: string): Promise<void> {
+    return api<void>(`/v1/knowledge-bases/${baseId}/conversations/${conversationId}`, { method: "DELETE" });
   }
 
   async searchKnowledge(query: string, tags: string[], knowledgeBaseId?: string | null): Promise<KnowledgeSearchResponse> {
