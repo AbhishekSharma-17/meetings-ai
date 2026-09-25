@@ -148,6 +148,19 @@ def test_named_knowledge_bases_scope_search_and_save_chat(tmp_path) -> None:
         assert overview.json()["meetings"][0]["tags"] == ["roadmap", "customer research"]
         assert overview.json()["meetings"][0]["summary"] is None
         assert client.get(f"/v1/knowledge-bases/{other}/overview").json()["meetings"] == []
+        evidence_map = client.get(f"/v1/knowledge-bases/{base_id}/map")
+        assert evidence_map.status_code == 200
+        assert {item["label"] for item in evidence_map.json()["topics"]} == {"roadmap", "customer research"}
+        speaker = evidence_map.json()["speaker_labels"][0]
+        assert speaker["label"] == "Alice"
+        assert speaker["verified_identity"] is False
+        assert speaker["meeting_count"] == 1
+        assert speaker["sources"][0]["segment_id"] == "segment-1"
+        assert client.get(f"/v1/knowledge-bases/{other}/map").json()["topics"] == []
+        app.state.repository.save_speaker_identity(meeting_id, "Alice", "alice@example.com")
+        verified = client.get(f"/v1/knowledge-bases/{base_id}/map").json()["speaker_labels"][0]
+        assert verified["verified_identity"] is True
+        assert verified["email"] == "alice@example.com"
         app.state.repository.save_minutes(MeetingMinutes(
             meeting_id=meeting_id, title="Acme planning",
             executive_summary="Alice owns the roadmap.", decisions=["Launch on Friday"],
@@ -197,3 +210,27 @@ def test_named_knowledge_bases_scope_search_and_save_chat(tmp_path) -> None:
                 KnowledgeMessageRow.conversation_id == conversation_id,
             )).scalar_one()
         assert remaining == 0
+
+
+def test_evidence_map_does_not_merge_unverified_names_across_meetings(tmp_path) -> None:
+    app = create_app(
+        database_url=f"sqlite+pysqlite:///{tmp_path / 'map.db'}",
+        credential_key="test-credential-key",
+    )
+    with TestClient(app) as client:
+        base_id = client.post("/v1/knowledge-bases", json={"name": "Project wiki"}).json()["id"]
+        first_id = _create_completed_meeting(
+            client, app.state.repository, opted_in=True, title="First review", base_id=base_id,
+        )
+        second_id = _create_completed_meeting(
+            client, app.state.repository, opted_in=True, title="Second review", base_id=base_id,
+        )
+        initial = client.get(f"/v1/knowledge-bases/{base_id}/map").json()["speaker_labels"]
+        assert len(initial) == 2
+        assert all(not item["verified_identity"] and item["meeting_count"] == 1 for item in initial)
+        app.state.repository.save_speaker_identity(first_id, "Alice", "alice@example.com")
+        app.state.repository.save_speaker_identity(second_id, "Alice", "alice@example.com")
+        merged = client.get(f"/v1/knowledge-bases/{base_id}/map").json()["speaker_labels"]
+        assert len(merged) == 1
+        assert merged[0]["verified_identity"] is True
+        assert merged[0]["meeting_count"] == 2

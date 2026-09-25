@@ -89,6 +89,7 @@ def test_two_organizations_cannot_read_or_change_each_others_data(tmp_path, monk
         assert owner_base["organization_id"] != other_base["organization_id"]
         assert other.get(f"/v1/knowledge-bases/{owner_base['id']}").status_code == 404
         assert other.get(f"/v1/knowledge-bases/{owner_base['id']}/index").status_code == 404
+        assert other.get(f"/v1/knowledge-bases/{owner_base['id']}/map").status_code == 404
         assert other.post(f"/v1/knowledge-bases/{owner_base['id']}/reindex").status_code == 404
         assert other.post("/v1/knowledge/search", json={
             "query": "roadmap", "knowledge_base_id": owner_base["id"],

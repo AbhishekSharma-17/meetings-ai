@@ -449,6 +449,18 @@ test("AI knowledge links tagged evidence to the exact transcript turn", async ({
       return route.fulfill({ status: 204, body: "" });
     }
     if (pathname === `/v1/knowledge-bases/${baseId}/conversations`) return route.fulfill({ json: [] });
+    if (pathname === `/v1/knowledge-bases/${baseId}/overview`) return route.fulfill({ json: {
+      knowledge_base_id: baseId, name: base.name,
+      meetings: [{ id: meetingId, title: meeting.title, created_at: meeting.created_at,
+        tags: ["roadmap"], summary: null, decisions: [], action_items: [], related_meeting_ids: [] }],
+    } });
+    if (pathname === `/v1/knowledge-bases/${baseId}/map`) return route.fulfill({ json: {
+      knowledge_base_id: baseId, truncated_meeting_scope: false,
+      topics: [{ key: "roadmap", label: "roadmap", meeting_count: 1, source_count: 1,
+        verified_identity: false, email: null, sources: [source] }],
+      speaker_labels: [{ key: `unverified:${meetingId}:alice`, label: "Alice", meeting_count: 1,
+        source_count: 1, verified_identity: false, email: null, sources: [source] }],
+    } });
     if (pathname === `/v1/knowledge-bases/${baseId}/conversations/00000000-0000-4000-8000-000000000077`) {
       if (route.request().method() === "DELETE") {
         chatDeleted = true;
@@ -516,9 +528,12 @@ test("AI knowledge links tagged evidence to the exact transcript turn", async ({
   await page.getByRole("button", { name: /All meetings/ }).first().click();
   await page.getByRole("button", { name: /Acme client/ }).click();
   await expect(page.getByText("No sources indexed yet")).toBeVisible();
+  await page.getByRole("button", { name: "Ask AI" }).first().click();
+  await expect(page.getByRole("heading", { name: "People & topics" })).toBeVisible();
+  await page.getByText("Unverified label · 1 meeting").click();
+  await expect(page.locator("details").filter({ hasText: "Unverified label" }).getByText(source.text)).toBeVisible();
   await page.getByRole("button", { name: "Reindex knowledge" }).click();
   await expect(page.getByText("1 source indexed · test-embedding")).toBeVisible();
-  await page.getByRole("button", { name: "Ask AI" }).first().click();
   await page.getByLabel("Ask a question").fill("Who owns the roadmap?");
   await page.getByRole("button", { name: "Ask AI", exact: true }).last().click();
   await expect(page.getByText("Alice committed to the roadmap on Friday [K1].")).toBeVisible();

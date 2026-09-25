@@ -116,6 +116,23 @@ export type KnowledgeIndexStatus = {
   last_indexed_at: string | null;
 };
 
+export type KnowledgeMapEntry = {
+  key: string;
+  label: string;
+  meeting_count: number;
+  source_count: number;
+  verified_identity: boolean;
+  email: string | null;
+  sources: KnowledgeSource[];
+};
+
+export type KnowledgeMap = {
+  knowledge_base_id: string;
+  topics: KnowledgeMapEntry[];
+  speaker_labels: KnowledgeMapEntry[];
+  truncated_meeting_scope: boolean;
+};
+
 export type KnowledgeChatResponse = {
   answer: string;
   citations: KnowledgeSource[];

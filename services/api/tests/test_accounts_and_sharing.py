@@ -53,6 +53,7 @@ def test_invite_requires_password_change_and_sharing_limits_member_access(tmp_pa
         assert changed.status_code == 200
         assert client.get("/v1/auth/me").json()["must_change_password"] is False
         assert client.get("/v1/knowledge-bases").json() == []
+        assert client.get(f"/v1/knowledge-bases/{private_base['id']}/map").status_code == 404
         assert client.get(f"/v1/meetings/{meeting_id}").status_code == 404
         assert client.get("/v1/provider-profiles").status_code == 403
         assert client.patch("/v1/workspace", json={"display_name": "Taken over"}).status_code == 403
@@ -78,6 +79,7 @@ def test_invite_requires_password_change_and_sharing_limits_member_access(tmp_pa
             "email": "teammate@example.com", "password": "a-very-long-new-password",
         })
         assert [item["id"] for item in client.get("/v1/knowledge-bases").json()] == [private_base["id"]]
+        assert client.get(f"/v1/knowledge-bases/{private_base['id']}/map").status_code == 200
         assert client.get(f"/v1/knowledge-bases/{private_base['id']}/conversations/{owner_conversation_id}").status_code == 404
         assert client.delete(f"/v1/knowledge-bases/{private_base['id']}/conversations/{owner_conversation_id}").status_code == 404
         assert client.get(f"/v1/knowledge-bases/{private_base['id']}/conversations").json() == []

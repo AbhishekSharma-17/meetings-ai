@@ -45,7 +45,7 @@ from .adapters.base import ProviderExecutionError
 from .database import Database, SchemaVersionRow, LEGACY_ADMIN_USER_ID, LEGACY_ORGANIZATION_ID
 from .accounts import AccountError, AccountPublic, AccountService, Actor, ChangePasswordRequest, InviteRequest, InviteResult, MemberRolePatch, OrganizationCreateRequest, OrganizationOption
 from .meeting_service import MeetingConflictError, MeetingService, MeetingValidationError
-from .knowledge_service import KnowledgeAccessError, KnowledgeAnswerError, KnowledgeChatResponse, KnowledgeQuery, KnowledgeSearchResponse, KnowledgeService
+from .knowledge_service import KnowledgeAccessError, KnowledgeAnswerError, KnowledgeChatResponse, KnowledgeMapResponse, KnowledgeQuery, KnowledgeSearchResponse, KnowledgeService
 from .knowledge_index import KnowledgeIndexError, KnowledgeIndexService, KnowledgeIndexStatus
 from .knowledge_bases import KnowledgeBaseConflictError, KnowledgeBaseCreate, KnowledgeBaseNotFoundError, KnowledgeBasePatch, KnowledgeBasePublic, KnowledgeBaseService, KnowledgeConversationPublic, KnowledgeShareRequest, KnowledgeWikiOverview
 from .minutes_service import MinutesConflictError, MinutesGenerationError, MinutesService
@@ -411,6 +411,13 @@ def create_app(
     def get_knowledge_overview(base_id: UUID, request: Request) -> KnowledgeWikiOverview:
         try:
             return knowledge_bases.overview(base_id, request.state.actor)
+        except KnowledgeBaseNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="knowledge base not found") from exc
+
+    @app.get("/v1/knowledge-bases/{base_id}/map", response_model=KnowledgeMapResponse)
+    def get_knowledge_map(base_id: UUID, request: Request) -> KnowledgeMapResponse:
+        try:
+            return knowledge_service.evidence_map(base_id, request.state.actor)
         except KnowledgeBaseNotFoundError as exc:
             raise HTTPException(status_code=404, detail="knowledge base not found") from exc
 

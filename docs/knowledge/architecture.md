@@ -50,6 +50,13 @@ transcripts, and MOMs remain, but their AI knowledge opt-in is switched off and
 the base assignment is removed. Only a base creator or workspace admin can do
 this. Downloaded copies cannot be recalled.
 
+The evidence map is built live from canonical sources: literal meeting tags form
+topic groups, and named transcript turns form speaker-label groups. A confirmed
+speaker-to-email match can join evidence across meetings. Without confirmation,
+the same name in separate meetings remains separate and is shown as unverified.
+Each group previews exact, timestamped transcript evidence; it does not infer
+topics or identities from an LLM.
+
 Creators and admins can share a base with everyone in their organization or
 specific members. Members can search only accessible named bases and open only
 completed, cited meeting transcripts in those bases. Admins retain access to
@@ -59,8 +66,8 @@ production identity, and end-to-end tenant tests remain release gates.
 
 Current limits: candidate selection scans at most the 200 newest eligible
 meetings; the search response reports truncation. Follow-up retrieval includes
-the previous user question. There is no model-led query planning, entity graph,
-linked topic/person pages, automated reindex scheduling, vector database
+the previous user question. There is no model-led query planning, inferred
+entity graph, full linked topic/person pages, automated reindex scheduling, vector database
 acceleration, or real-meeting recall/factuality evaluation. Before release,
 measure retrieval, answer quality, speaker accuracy, privacy, latency, and cost
 on consented multi-speaker meetings.

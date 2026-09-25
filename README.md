@@ -25,6 +25,8 @@ The current local capture slice establishes:
 - named knowledge bases with confirmed deletion, per-base AI model choice,
   source-linked saved chats with per-user JSON export and deletion,
   and private/organization/specific-teammate sharing;
+- an evidence map of literal topics and speaker labels linked to exact transcript
+  turns, distinguishing confirmed email identities from unverified labels;
 - provider profiles for transcription, text generation and embeddings;
 - meeting tags and opt-in AI knowledge with source-linked hybrid search and
   draft Q&A through the configured text-generation provider;
@@ -172,9 +174,11 @@ Chats inside a named base are saved per user. A creator or admin can keep a
 base private, share it with this organization, or choose specific teammates.
 The meeting page can edit tags, assignment, and opt-in. A base creator or admin
 can manually reindex for hybrid lexical/semantic search; changes to canonical
-records purge that meeting's stored vectors until reindexed. A topic graph,
-planning agent, background indexing, saved-chat retention policy, and measured retrieval quality remain to
-build. See the [knowledge flow and limits](docs/knowledge/architecture.md).
+records purge that meeting's stored vectors until reindexed. The evidence map
+links literal tags and speaker labels to timestamped turns. A model-inferred
+topic graph, planning agent, background indexing, saved-chat retention policy,
+and measured retrieval quality remain to build. See the
+[knowledge flow and limits](docs/knowledge/architecture.md).
 Do not expose this as a public multi-customer SaaS before hosted database
 policies, account lifecycle, and security hardening are complete.
 

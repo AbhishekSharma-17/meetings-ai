@@ -60,6 +60,23 @@ class KnowledgeSearchResponse(BaseModel):
     truncated_meeting_scope: bool = False
 
 
+class KnowledgeMapEntry(BaseModel):
+    key: str
+    label: str
+    meeting_count: int
+    source_count: int
+    verified_identity: bool = False
+    email: str | None = None
+    sources: list[KnowledgeSource]
+
+
+class KnowledgeMapResponse(BaseModel):
+    knowledge_base_id: UUID
+    topics: list[KnowledgeMapEntry]
+    speaker_labels: list[KnowledgeMapEntry]
+    truncated_meeting_scope: bool = False
+
+
 class KnowledgeChatResponse(BaseModel):
     answer: str
     citations: list[KnowledgeSource]
@@ -154,6 +171,47 @@ class KnowledgeService:
                 )
                 sources.append(source)
         return sources, truncated
+
+    def evidence_map(self, base_id: UUID, actor: Actor | None = None) -> KnowledgeMapResponse:
+        """Link literal tags and speaker labels to canonical, timestamped evidence."""
+        sources, truncated = self.candidate_sources(
+            KnowledgeQuery(query="all", knowledge_base_id=base_id), actor,
+        )
+        topics: dict[str, list[KnowledgeSource]] = {}
+        people: dict[str, list[KnowledgeSource]] = {}
+        labels: dict[str, tuple[str, bool, str | None]] = {}
+        identities: dict[UUID, dict[str, str]] = {}
+        for source in sources:
+            for tag in source.tags:
+                topics.setdefault(tag, []).append(source)
+            if source.kind != "transcript" or not source.speaker:
+                continue
+            if source.meeting_id not in identities:
+                identities[source.meeting_id] = {
+                    item.speaker: item.email for item in self.repository.list_speaker_identities(source.meeting_id)
+                }
+            email = identities[source.meeting_id].get(source.speaker)
+            key = f"verified:{email.lower()}" if email else f"unverified:{source.meeting_id}:{source.speaker.lower()}"
+            people.setdefault(key, []).append(source)
+            labels[key] = (source.speaker, bool(email), email)
+
+        def summarize(key: str, matches: list[KnowledgeSource], *, person: bool = False) -> KnowledgeMapEntry:
+            label, verified, email = labels[key] if person else (key, False, None)
+            return KnowledgeMapEntry(
+                key=key, label=label,
+                meeting_count=len({source.meeting_id for source in matches}),
+                source_count=len(matches), verified_identity=verified, email=email,
+                sources=matches[:3],
+            )
+
+        ordering = lambda item: (-len(item[1]), item[0])
+        return KnowledgeMapResponse(
+            knowledge_base_id=base_id,
+            topics=[summarize(key, matches) for key, matches in sorted(topics.items(), key=ordering)[:30]],
+            speaker_labels=[summarize(key, matches, person=True)
+                            for key, matches in sorted(people.items(), key=ordering)[:30]],
+            truncated_meeting_scope=truncated,
+        )
 
     async def hybrid_search(self, request: KnowledgeQuery, actor: Actor | None = None) -> KnowledgeSearchResponse:
         lexical = self.search(request, actor)
