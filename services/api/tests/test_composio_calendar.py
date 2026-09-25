@@ -3,11 +3,12 @@
 from datetime import UTC, datetime, timedelta
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import update
 
 from app.accounts import Actor
-from app.composio_calendar import CalendarEvent, ComposioCalendar, calendar_window
+from app.composio_calendar import CalendarConnectResponse, CalendarError, CalendarEvent, ComposioCalendar, calendar_callback_url, calendar_window
 from app.main import create_app
 from app.database import CalendarScheduleRow
 
@@ -25,6 +26,36 @@ def test_calendar_window_respects_local_week_and_time_zone() -> None:
     start, end = calendar_window("next_week", "America/New_York", datetime(2026, 9, 25, 12, tzinfo=UTC))
     assert start.isoformat() == "2026-09-28T00:00:00-04:00"
     assert end.isoformat() == "2026-10-05T00:00:00-04:00"
+
+
+def test_callback_uses_browser_visible_loopback_port_without_allowing_external_redirect() -> None:
+    assert calendar_callback_url("http://localhost:59631", "http://localhost:3020", "development") == \
+        "http://localhost:59631/?calendar=connected"
+    with pytest.raises(CalendarError, match="not allowed"):
+        calendar_callback_url("https://attacker.example", "http://localhost:3020", "development")
+    with pytest.raises(CalendarError, match="not allowed"):
+        calendar_callback_url("https://attacker.example", "https://app.example", "production")
+    with pytest.raises(CalendarError, match="must use HTTPS"):
+        calendar_callback_url(None, "http://localhost:3020", "production")
+
+
+def test_connect_route_passes_browser_origin_to_composio(tmp_path) -> None:
+    class FakeCalendar:
+        callback: str | None = None
+
+        async def connect(self, actor, provider, callback_url):
+            self.callback = callback_url
+            return CalendarConnectResponse(redirect_url="https://connect.composio.dev/example")
+
+    fake = FakeCalendar()
+    app = create_app(database_url=f"sqlite+pysqlite:///{tmp_path / 'callback.db'}",
+                     credential_key="test-only-credential-key", calendar_adapter=fake)
+    with TestClient(app) as client:
+        response = client.post("/v1/calendar/connect/outlook", json={"callback_origin": "http://localhost:59631"})
+        assert response.status_code == 200
+        assert fake.callback == "http://localhost:59631/?calendar=connected"
+        denied = client.post("/v1/calendar/connect/outlook", json={"callback_origin": "https://attacker.example"})
+        assert denied.status_code == 400
 
 
 def test_composio_tool_scan_filters_non_meetings_and_uses_explicit_account() -> None:

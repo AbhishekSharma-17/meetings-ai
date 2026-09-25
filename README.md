@@ -203,9 +203,11 @@ policies, account lifecycle, and security hardening are complete.
 Set `COMPOSIO_API_KEY`, `COMPOSIO_GOOGLE_CALENDAR_AUTH_CONFIG_ID`, and
 `COMPOSIO_OUTLOOK_AUTH_CONFIG_ID` in the ignored `.env.local`; Compose passes
 them only to the API. Auth configurations should request calendar read-only
-scopes and restrict tools to event listing. Set `APP_BASE_URL` to the exact
-browser-reachable app origin for the OAuth callback (locally,
-`http://localhost:3020`). Run `make compose-up`, sign in, and click **Find in
+scopes and restrict tools to event listing. Set `APP_BASE_URL` to the deployed
+HTTPS app origin in production. In local development the connect action uses
+the browser-visible `localhost` port, including a forwarded port on another
+device, instead of assuming the DGX's `localhost:3020` is reachable from that
+browser. Run `make compose-up`, sign in, and click **Find in
 calendar** on Meetings. Each user connects their own calendar and explicitly
 chooses an event. The app skips cancelled, ended, and unsupported-link events.
 Future events create a scheduled record; the single-process worker joins about

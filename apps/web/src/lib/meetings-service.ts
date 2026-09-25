@@ -460,7 +460,9 @@ class HttpMeetingsService implements MeetingsService {
   }
 
   async connectCalendar(provider: CalendarConnection["provider"]): Promise<string> {
-    const result = await api<{ redirect_url: string }>(`/v1/calendar/connect/${provider}`, { method: "POST" });
+    const result = await api<{ redirect_url: string }>(`/v1/calendar/connect/${provider}`, {
+      method: "POST", body: JSON.stringify({ callback_origin: window.location.origin }),
+    });
     return result.redirect_url;
   }
 

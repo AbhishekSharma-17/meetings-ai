@@ -44,6 +44,10 @@ class CalendarConnectResponse(BaseModel):
     redirect_url: str
 
 
+class CalendarConnectRequest(BaseModel):
+    callback_origin: str | None = None
+
+
 class CalendarEvent(BaseModel):
     connection_id: str
     provider: CalendarProvider
@@ -87,6 +91,25 @@ def _user_id(actor: Actor) -> str:
     # Stable UUIDs prevent email changes or identical identities in two workspaces
     # from selecting another user's connected account.
     return f"meetings-ai:{actor.organization_id}:{actor.user_id}"
+
+
+def calendar_callback_url(requested_origin: str | None, configured_origin: str, app_env: str) -> str:
+    """Allow browser-visible loopback ports in development, not arbitrary redirects."""
+    origin = (requested_origin or configured_origin).rstrip("/")
+    try:
+        parts = urlsplit(origin)
+        _ = parts.port
+    except ValueError as exc:
+        raise CalendarError("calendar callback origin is invalid") from exc
+    if (parts.scheme not in {"http", "https"} or not parts.netloc or parts.username
+            or parts.password or parts.path or parts.query or parts.fragment):
+        raise CalendarError("calendar callback origin is invalid")
+    if app_env == "production" and parts.scheme != "https":
+        raise CalendarError("calendar callback origin must use HTTPS in production")
+    if origin != configured_origin.rstrip("/"):
+        if app_env == "production" or parts.scheme != "http" or parts.hostname not in {"localhost", "127.0.0.1"}:
+            raise CalendarError("calendar callback origin is not allowed")
+    return origin + "/?calendar=connected"
 
 
 def _event_time(value: object, timezone: str) -> datetime | None:

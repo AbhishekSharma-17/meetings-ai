@@ -42,7 +42,7 @@ from meetings_contracts import (
 from .adapters.vexa import VexaAPIError, VexaCaptureAdapter
 from .adapters.resend import EmailDeliveryError, ResendAdapter
 from .adapters.base import ProviderExecutionError
-from .composio_calendar import CalendarConnection, CalendarConnectResponse, CalendarEventsResponse, CalendarError, CalendarProvider, CalendarRange, ComposioCalendar
+from .composio_calendar import CalendarConnection, CalendarConnectRequest, CalendarConnectResponse, CalendarEventsResponse, CalendarError, CalendarProvider, CalendarRange, ComposioCalendar, calendar_callback_url
 from .calendar_schedule import CalendarScheduleError, CalendarSchedulePublic, CalendarScheduleService, ScheduleCreate
 from .database import Database, SchemaVersionRow, LEGACY_ADMIN_USER_ID, LEGACY_ORGANIZATION_ID
 from .accounts import AccountError, AccountPublic, AccountService, Actor, ChangePasswordRequest, InviteRequest, InviteResult, MemberRolePatch, OrganizationCreateRequest, OrganizationOption, ProfilePatch
@@ -687,12 +687,16 @@ def create_app(
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.post("/v1/calendar/connect/{provider}", response_model=CalendarConnectResponse)
-    async def calendar_connect(provider: CalendarProvider, request: Request) -> CalendarConnectResponse:
-        callback_url = os.getenv("APP_BASE_URL", "http://localhost:3020").rstrip("/") + "/?calendar=connected"
+    async def calendar_connect(provider: CalendarProvider, request: Request, payload: CalendarConnectRequest | None = None) -> CalendarConnectResponse:
         try:
+            callback_url = calendar_callback_url(
+                payload.callback_origin if payload else None,
+                os.getenv("APP_BASE_URL", "http://localhost:3020"),
+                os.getenv("APP_ENV", "development"),
+            )
             return await calendar.connect(request.state.actor, provider, callback_url)
         except CalendarError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+            raise HTTPException(status_code=400 if "callback origin" in str(exc) else 503, detail=str(exc)) from exc
 
     @app.get("/v1/calendar/events", response_model=CalendarEventsResponse)
     async def calendar_events(request: Request, connection_id: str, period: CalendarRange = "today", timezone: str = "UTC") -> CalendarEventsResponse:
