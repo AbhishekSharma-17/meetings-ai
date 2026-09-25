@@ -89,6 +89,82 @@ test("multiple calendar accounts stay distinct and the selected account is scann
   await expect.poll(() => scannedAccount).toBe("ca-personal");
 });
 
+test("saved calendar range and meetings survive a hard reload without another manual sync", async ({ page }) => {
+  const today = new Date();
+  const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+  const startKey = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, "0")}-01`;
+  const meetingStart = new Date(nextMonth.getFullYear(), nextMonth.getMonth(), 12, 12);
+  let syncCalls = 0;
+  await page.route("**/v1/calendar/synced?**", (route) => {
+    const requested = new URL(route.request().url()).searchParams.get("start_date");
+    return route.fulfill({ json: { events: requested === startKey ? [{
+      id: "00000000-0000-4000-8000-000000000088", synced_at: new Date().toISOString(),
+      connection_id: "outlook-account", provider: "outlook", event_id: "saved-event", title: "Saved client meeting",
+      starts_at: meetingStart.toISOString(), ends_at: new Date(meetingStart.getTime() + 3600_000).toISOString(),
+      meeting_url: "https://meet.google.com/abc-defg-hij", platform: "google_meet", invitees: [],
+    }] : [], syncs: [] } });
+  });
+  await page.route("**/v1/calendar/sync", (route) => { syncCalls += 1; return route.fulfill({ json: { events: [], syncs: [] } }); });
+  await page.goto("/");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Calendar" }).click();
+  await page.getByRole("button", { name: "Next month" }).click();
+  await expect(page.locator(".calendar-month-nav h2")).toHaveText(nextMonth.toLocaleString("en-US", { month: "long", year: "numeric" }));
+  await expect(page.getByText("Saved client meeting").first()).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Calendar", exact: true })).toBeVisible();
+  await expect(page.locator(".calendar-month-nav h2")).toHaveText(nextMonth.toLocaleString("en-US", { month: "long", year: "numeric" }));
+  await expect(page.getByText("Saved client meeting").first()).toBeVisible();
+  expect(syncCalls).toBe(0);
+});
+
+test("stale saved meetings appear immediately and update automatically after reload", async ({ page }) => {
+  const today = new Date();
+  const start = new Date(today.getFullYear(), today.getMonth(), 1);
+  const end = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+  const meetingStart = new Date(today.getFullYear(), today.getMonth(), Math.min(today.getDate(), 25), 12);
+  const baseEvent = {
+    id: "00000000-0000-4000-8000-000000000089", synced_at: new Date(Date.now() - 600_000).toISOString(),
+    connection_id: "outlook-account", provider: "outlook", event_id: "refreshed-event",
+    starts_at: meetingStart.toISOString(), ends_at: new Date(meetingStart.getTime() + 3600_000).toISOString(),
+    meeting_url: "https://meet.google.com/abc-defg-hij", platform: "google_meet", invitees: [],
+  };
+  const oldState = { connection_id: "outlook-account", last_synced_at: new Date(Date.now() - 600_000).toISOString(), range_start: start.toISOString(), range_end: end.toISOString(), truncated: false };
+  let syncCalls = 0;
+  await page.route("**/v1/calendar/synced?**", (route) => route.fulfill({ json: { events: [{ ...baseEvent, title: "Saved agenda" }], syncs: [oldState] } }));
+  await page.route("**/v1/calendar/sync", async (route) => {
+    syncCalls += 1;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    return route.fulfill({ json: { events: [{ ...baseEvent, title: "Updated agenda", synced_at: new Date().toISOString() }], syncs: [{ ...oldState, last_synced_at: new Date().toISOString() }], errors: {} } });
+  });
+  await page.goto("/");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Calendar" }).click();
+  await expect(page.getByText("Saved agenda").first()).toBeVisible();
+  await expect(page.getByText("Updated agenda").first()).toBeVisible();
+  expect(syncCalls).toBe(1);
+});
+
+test("a failed automatic refresh leaves saved calendar meetings visible", async ({ page }) => {
+  const today = new Date();
+  const starts = new Date(today.getFullYear(), today.getMonth(), Math.min(today.getDate(), 25), 12);
+  await page.route("**/v1/calendar/synced?**", (route) => route.fulfill({ json: {
+    events: [{
+      id: "00000000-0000-4000-8000-000000000090", synced_at: new Date(Date.now() - 600_000).toISOString(),
+      connection_id: "outlook-account", provider: "outlook", event_id: "kept-event", title: "Meeting kept after error",
+      starts_at: starts.toISOString(), ends_at: new Date(starts.getTime() + 3600_000).toISOString(),
+      meeting_url: "https://meet.google.com/abc-defg-hij", platform: "google_meet", invitees: [],
+    }],
+    syncs: [{ connection_id: "outlook-account", last_synced_at: new Date(Date.now() - 600_000).toISOString(),
+      range_start: new Date(today.getFullYear(), today.getMonth(), 1).toISOString(),
+      range_end: new Date(today.getFullYear(), today.getMonth() + 1, 1).toISOString(), truncated: false }],
+  } }));
+  await page.route("**/v1/calendar/sync", (route) => route.fulfill({ status: 503, json: { detail: "Calendar source unavailable" } }));
+  await page.goto("/");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Calendar" }).click();
+  await expect(page.getByText("Meeting kept after error").first()).toBeVisible();
+  await expect(page.locator(".calendar-workspace .form-error[role='alert']")).toContainText("Saved meetings are still available");
+  await expect(page.getByText("Meeting kept after error").first()).toBeVisible();
+});
+
 test("source discovery shows agenda and invitees before scheduling", async ({ page }) => {
   const startsAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
   const endsAt = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();

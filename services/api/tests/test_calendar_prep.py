@@ -8,7 +8,7 @@ import httpx
 from fastapi.testclient import TestClient
 from sqlalchemy import select, update
 
-from app.composio_calendar import CalendarConnection, CalendarEvent, CalendarEventsResponse
+from app.composio_calendar import CalendarConnection, CalendarError, CalendarEvent, CalendarEventsResponse
 from app.database import CalendarEventCacheRow, MeetingPrepRow
 from app.main import create_app
 from meetings_contracts import TextGenerationResult
@@ -20,6 +20,8 @@ WHEN = datetime(2026, 10, 6, 15, tzinfo=UTC)
 class FakeCalendar:
     def __init__(self) -> None:
         self.available = {"google": True, "outlook": True}
+        self.titles = {"google": "Acme discovery", "outlook": "Acme discovery"}
+        self.fail_connection = None
 
     async def connections(self, actor):
         return [
@@ -28,10 +30,12 @@ class FakeCalendar:
         ]
 
     async def events_for_window(self, actor, connection_id, start, end, timezone, **kwargs):
+        if connection_id == self.fail_connection:
+            raise CalendarError("upstream calendar unavailable")
         provider = "googlecalendar" if connection_id == "google" else "outlook"
         events = [CalendarEvent(
             connection_id=connection_id, provider=provider, event_id=f"meeting-{connection_id}",
-            title="Acme discovery", starts_at=WHEN, ends_at=WHEN + timedelta(hours=1),
+            title=self.titles[connection_id], starts_at=WHEN, ends_at=WHEN + timedelta(hours=1),
             meeting_url="https://meet.google.com/abc-defg-hij", platform="google_meet",
             agenda="Private launch roadmap", organizer="Host",
             invitees=[{"name": "Asha Patel", "email": "asha@acme.example"}],
@@ -66,6 +70,26 @@ def test_sync_persists_overlaps_and_resync_removes_only_missing_account(tmp_path
         assert saved.status_code == 200
         assert {event["id"] for event in saved.json()["events"]} == set(initial_ids.values())
         assert len(saved.json()["syncs"]) == 2
+
+        fake.titles["google"] = "Acme discovery — revised agenda"
+        refreshed = client.post("/v1/calendar/sync", json={
+            "connection_ids": ["google"], "start_date": "2026-10-01",
+            "end_date": "2026-10-31", "timezone": "UTC",
+        })
+        assert refreshed.status_code == 200, refreshed.text
+        revised = next(event for event in refreshed.json()["events"] if event["connection_id"] == "google")
+        assert revised["id"] == initial_ids["google"]
+        assert revised["title"] == "Acme discovery — revised agenda"
+
+        fake.fail_connection = "google"
+        unavailable = client.post("/v1/calendar/sync", json={
+            "connection_ids": ["google"], "start_date": "2026-10-01",
+            "end_date": "2026-10-31", "timezone": "UTC",
+        })
+        assert unavailable.status_code == 200
+        assert unavailable.json()["errors"] == {"google": "upstream calendar unavailable"}
+        assert next(event for event in unavailable.json()["events"] if event["connection_id"] == "google")["title"] == revised["title"]
+        fake.fail_connection = None
 
         fake.available["google"] = False
         updated = client.post("/v1/calendar/sync", json={

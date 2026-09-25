@@ -224,6 +224,15 @@ device, instead of assuming the DGX's `localhost:3020` is reachable from that
 browser. Run `make compose-up`, sign in, and open **Calendar**. Its
 **Integrations** tab shows connected accounts; the calendar displays the last
 saved snapshot and supports manual sync for a custom range of up to 90 days.
+Snapshots are stored per user and workspace in the application database, so
+meetings remain visible after a hard reload or browser restart. The Calendar
+remembers each user's date range, account filter, and selected month locally;
+the current Calendar/Meeting prep section is also restored on a tab reload.
+Previously synced accounts refresh in the background when their snapshot is
+older than five minutes or the selected date range was not covered. A failed
+refresh leaves the saved snapshot visible and reports the error. New accounts
+still need their first explicit sync, and **Sync now** forces an immediate
+update.
 Multiple accounts can be synced together, and overlapping events retain
 separate source labels. Each user connects their own account and explicitly
 chooses an event. Discovery skips cancelled and unsupported-link events.

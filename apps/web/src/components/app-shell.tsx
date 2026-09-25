@@ -51,8 +51,9 @@ export function AppShell() {
   useEffect(() => {
     const callback = new URLSearchParams(window.location.search);
     const invitedEmail = callback.get("invite");
+    const calendarConnected = callback.get("calendar") === "connected";
     if (invitedEmail) queueMicrotask(() => setLoginEmail(invitedEmail));
-    if (callback.get("calendar") === "connected") {
+    if (calendarConnected) {
       const connectedAccountId = callback.get("connected_account_id");
       queueMicrotask(() => { setPreferredCalendarConnectionId(connectedAccountId); setView("calendar"); });
       window.history.replaceState(null, "", window.location.pathname);
@@ -61,7 +62,11 @@ export function AppShell() {
       if (active) {
         const current = await meetingsService.getCurrentAccount();
         setAccount(current);
-        if (current.role !== "owner" && current.role !== "admin") setView("knowledge");
+        let restored: string | null = null;
+        try { restored = sessionStorage.getItem(`meetings-ai:active-view:${current.organization_id}:${current.user_id}`); } catch { /* Session storage is optional. */ }
+        if (current.role !== "viewer" && (calendarConnected || restored === "calendar" || restored === "prep")) {
+          setView(calendarConnected ? "calendar" : restored as View);
+        } else if (current.role !== "owner" && current.role !== "admin") setView("knowledge");
       }
       setAuthenticated(active);
     }).catch(() => setLoginError("Could not reach the API. Check that the local services are running."));
@@ -69,6 +74,11 @@ export function AppShell() {
     window.addEventListener("meetings-ai-session-expired", expired);
     return () => window.removeEventListener("meetings-ai-session-expired", expired);
   }, []);
+
+  useEffect(() => {
+    if (!account) return;
+    try { sessionStorage.setItem(`meetings-ai:active-view:${account.organization_id}:${account.user_id}`, view); } catch { /* Navigation still works without session storage. */ }
+  }, [account, view]);
 
   useEffect(() => {
     if (!authenticated || !account || account.must_change_password) return;
@@ -147,7 +157,7 @@ export function AppShell() {
       <main id="main-content">
         {view === "dashboard" ? <Dashboard meetings={meetings} onNewMeeting={() => { setCalendarSelection(null); setDialogOpen(true); }} onOpenCalendar={() => setView("calendar")} onOpenProviders={() => setView("providers")} onOpenMeeting={openMeeting} /> : null}
         {view === "meetings" ? <MeetingsLibrary meetings={meetings} onOpen={openMeeting} onNew={() => { setCalendarSelection(null); setDialogOpen(true); }} onCalendar={() => setView("calendar")} /> : null}
-        {view === "calendar" && account && account.role !== "viewer" ? <CalendarWorkspace preferredConnectionId={preferredCalendarConnectionId} canSchedule={account.role === "owner" || account.role === "admin"} onChoose={(selection) => { setCalendarSelection(selection); setDialogOpen(true); }} onPrepare={(event) => { setPrepEvent(event); setView("prep"); }} /> : null}
+        {view === "calendar" && account && account.role !== "viewer" ? <CalendarWorkspace calendarIdentity={`${account.organization_id}:${account.user_id}`} preferredConnectionId={preferredCalendarConnectionId} canSchedule={account.role === "owner" || account.role === "admin"} onChoose={(selection) => { setCalendarSelection(selection); setDialogOpen(true); }} onPrepare={(event) => { setPrepEvent(event); setView("prep"); }} /> : null}
         {view === "prep" && account && account.role !== "viewer" ? <MeetingPrepWorkspace initialEvent={prepEvent} onOpenCalendar={() => setView("calendar")} onOpenOrganization={() => setView("workspace")} /> : null}
         {view === "providers" ? providersLoadError ? <section className="page" role="alert"><h1>AI providers are unavailable</h1><p className="intro">{providersLoadError}</p><button className="button secondary" onClick={() => void meetingsService.listProviderProfiles().then((nextProfiles) => { setProfiles(nextProfiles); setProvidersLoadError(null); }).catch(() => undefined)}>Retry</button></section> : <ProviderSettings profiles={profiles} onProfilesChange={setProfiles} /> : null}
         {view === "knowledge" ? <KnowledgeScreen account={account} onOpenSource={openMeeting} /> : null}
