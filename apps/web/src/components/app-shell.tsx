@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { meetingsService } from "@/lib/meetings-service";
+import { readUiPreference } from "@/lib/ui-preferences";
 import type { CachedCalendarEvent, CurrentAccount, Meeting, ProviderProfile, Workspace, WorkspaceOption } from "@/lib/types";
 import { Dashboard } from "./dashboard";
 import { NewMeetingDialog } from "./new-meeting-dialog";
@@ -23,6 +24,17 @@ import { Dialog } from "@base-ui/react/dialog";
 import { Activity, BookOpenText, Building2, CalendarDays, ChevronUp, LayoutDashboard, LogOut, Menu, Sparkles, UserRound, Video, X } from "lucide-react";
 
 type View = "dashboard" | "meetings" | "calendar" | "prep" | "providers" | "meeting" | "workspace" | "knowledge" | "observability" | "profile";
+const views: View[] = ["dashboard", "meetings", "calendar", "prep", "providers", "meeting", "workspace", "knowledge", "observability", "profile"];
+const isView = (value: unknown): value is View => typeof value === "string" && views.includes(value as View);
+const isString = (value: unknown): value is string => typeof value === "string" && value.length > 0;
+function restoredView(scope: string): View {
+  const key = `meetings-ai:active-view:${scope}`;
+  try {
+    const legacy = sessionStorage.getItem(key);
+    if (isView(legacy)) return legacy;
+  } catch { /* Optional browser storage. */ }
+  return readUiPreference(key, "dashboard" as View, isView, "session");
+}
 
 export function AppShell() {
   const [view, setView] = useState<View>("dashboard");
@@ -41,12 +53,15 @@ export function AppShell() {
   const [focusSegmentId, setFocusSegmentId] = useState<string | null>(null);
   const [meetingReturnView, setMeetingReturnView] = useState<View>("dashboard");
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
+  const [navigationRestored, setNavigationRestored] = useState(false);
   const [account, setAccount] = useState<CurrentAccount | null>(null);
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [loginError, setLoginError] = useState<string | null>(null);
   const [loggingIn, setLoggingIn] = useState(false);
+
+  const identity = account ? `${account.organization_id}:${account.user_id}` : null;
 
   useEffect(() => {
     const callback = new URLSearchParams(window.location.search);
@@ -55,30 +70,51 @@ export function AppShell() {
     if (invitedEmail) queueMicrotask(() => setLoginEmail(invitedEmail));
     if (calendarConnected) {
       const connectedAccountId = callback.get("connected_account_id");
-      queueMicrotask(() => { setPreferredCalendarConnectionId(connectedAccountId); setView("calendar"); });
-      window.history.replaceState(null, "", window.location.pathname);
+      queueMicrotask(() => setPreferredCalendarConnectionId(connectedAccountId));
     }
     void meetingsService.getSession().then(async (active) => {
       if (active) {
         const current = await meetingsService.getCurrentAccount();
         setAccount(current);
-        let restored: string | null = null;
-        try { restored = sessionStorage.getItem(`meetings-ai:active-view:${current.organization_id}:${current.user_id}`); } catch { /* Session storage is optional. */ }
-        if (current.role !== "viewer" && (calendarConnected || restored === "calendar" || restored === "prep")) {
-          setView(calendarConnected ? "calendar" : restored as View);
-        } else if (current.role !== "owner" && current.role !== "admin") setView("knowledge");
+        const scope = `${current.organization_id}:${current.user_id}`;
+        const restored = restoredView(scope);
+        const allowed = current.role === "owner" || current.role === "admin" ? views : current.role === "viewer" ? ["knowledge", "profile", "meeting"] : ["knowledge", "calendar", "prep", "profile", "meeting"];
+        const next = calendarConnected && current.role !== "viewer" ? "calendar" : allowed.includes(restored) ? restored : current.role === "owner" || current.role === "admin" ? "dashboard" : "knowledge";
+        if (next === "meeting") {
+          const id = readUiPreference(`meetings-ai:active-meeting:${scope}`, "", isString, "session");
+          if (id) { setActiveMeetingId(id); setView("meeting"); }
+          else setView(current.role === "owner" || current.role === "admin" ? "meetings" : "knowledge");
+        }
+        if (next !== "meeting") setView(next);
       }
       setAuthenticated(active);
+      setNavigationRestored(active);
+      if (calendarConnected) window.history.replaceState(null, "", window.location.pathname);
     }).catch(() => setLoginError("Could not reach the API. Check that the local services are running."));
-    const expired = () => setAuthenticated(false);
+    const expired = () => {
+      setAuthenticated(false); setAccount(null); setNavigationRestored(false); setView("dashboard");
+      setMeetings([]); setProfiles([]); setWorkspace(null); setWorkspaces([]);
+      setActiveMeetingId(null); setCalendarSelection(null); setPrepEvent(null);
+      setPreferredCalendarConnectionId(null); setDialogOpen(false);
+    };
     window.addEventListener("meetings-ai-session-expired", expired);
     return () => window.removeEventListener("meetings-ai-session-expired", expired);
   }, []);
 
   useEffect(() => {
-    if (!account) return;
-    try { sessionStorage.setItem(`meetings-ai:active-view:${account.organization_id}:${account.user_id}`, view); } catch { /* Navigation still works without session storage. */ }
-  }, [account, view]);
+    if (!account || !navigationRestored) return;
+    try { sessionStorage.setItem(`meetings-ai:active-view:${account.organization_id}:${account.user_id}`, JSON.stringify(view)); } catch { /* Navigation still works without session storage. */ }
+  }, [account, navigationRestored, view]);
+
+  useEffect(() => {
+    if (!identity || !navigationRestored) return;
+    try {
+      if (view === "meeting" && activeMeetingId) sessionStorage.setItem(`meetings-ai:active-meeting:${identity}`, JSON.stringify(activeMeetingId));
+      else if (view !== "meeting") sessionStorage.removeItem(`meetings-ai:active-meeting:${identity}`);
+    } catch { /* Navigation still works without session storage. */ }
+  }, [identity, navigationRestored, view, activeMeetingId]);
+
+  useEffect(() => { if (view !== "prep") queueMicrotask(() => setPrepEvent(null)); }, [view]);
 
   useEffect(() => {
     if (!authenticated || !account || account.must_change_password) return;
@@ -96,7 +132,9 @@ export function AppShell() {
       await meetingsService.login(loginEmail.trim(), loginPassword);
       const current = await meetingsService.getCurrentAccount();
       setLoginPassword(""); setAccount(current); setAuthenticated(true);
-      if (current.role !== "owner" && current.role !== "admin") setView("knowledge");
+      const restored = restoredView(`${current.organization_id}:${current.user_id}`);
+      setView(current.role === "owner" || current.role === "admin" ? restored === "meeting" ? "meetings" : restored : current.role === "viewer" ? "knowledge" : restored === "calendar" || restored === "prep" ? restored : "knowledge");
+      setNavigationRestored(true);
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : "Sign in failed.");
     } finally { setLoggingIn(false); }
@@ -120,7 +158,11 @@ export function AppShell() {
   const updateMeeting = useCallback((meeting: Meeting) => {
     setMeetings((current) => current.some((candidate) => candidate.id === meeting.id) ? current.map((candidate) => candidate.id === meeting.id ? meeting : candidate) : [meeting, ...current]);
   }, []);
-  const signOut = useCallback(() => { void meetingsService.logout().finally(() => { setAuthenticated(false); setAccount(null); }); }, []);
+  const signOut = useCallback(() => { void meetingsService.logout().finally(() => {
+    setAuthenticated(false); setAccount(null); setNavigationRestored(false); setView("dashboard"); setMeetings([]); setProfiles([]);
+    setWorkspace(null); setWorkspaces([]); setActiveMeetingId(null); setCalendarSelection(null);
+    setPrepEvent(null); setPreferredCalendarConnectionId(null); setDialogOpen(false);
+  }); }, []);
   const switchWorkspace = useCallback(async (id: string) => {
     await meetingsService.switchWorkspace(id);
     window.location.reload();
@@ -156,11 +198,11 @@ export function AppShell() {
       </header>
       <main id="main-content">
         {view === "dashboard" ? <Dashboard meetings={meetings} onNewMeeting={() => { setCalendarSelection(null); setDialogOpen(true); }} onOpenCalendar={() => setView("calendar")} onOpenProviders={() => setView("providers")} onOpenMeeting={openMeeting} /> : null}
-        {view === "meetings" ? <MeetingsLibrary meetings={meetings} onOpen={openMeeting} onNew={() => { setCalendarSelection(null); setDialogOpen(true); }} onCalendar={() => setView("calendar")} /> : null}
-        {view === "calendar" && account && account.role !== "viewer" ? <CalendarWorkspace calendarIdentity={`${account.organization_id}:${account.user_id}`} preferredConnectionId={preferredCalendarConnectionId} canSchedule={account.role === "owner" || account.role === "admin"} onChoose={(selection) => { setCalendarSelection(selection); setDialogOpen(true); }} onPrepare={(event) => { setPrepEvent(event); setView("prep"); }} /> : null}
-        {view === "prep" && account && account.role !== "viewer" ? <MeetingPrepWorkspace initialEvent={prepEvent} onOpenCalendar={() => setView("calendar")} onOpenOrganization={() => setView("workspace")} /> : null}
-        {view === "providers" ? providersLoadError ? <section className="page" role="alert"><h1>AI providers are unavailable</h1><p className="intro">{providersLoadError}</p><button className="button secondary" onClick={() => void meetingsService.listProviderProfiles().then((nextProfiles) => { setProfiles(nextProfiles); setProvidersLoadError(null); }).catch(() => undefined)}>Retry</button></section> : <ProviderSettings profiles={profiles} onProfilesChange={setProfiles} /> : null}
-        {view === "knowledge" ? <KnowledgeScreen account={account} onOpenSource={openMeeting} /> : null}
+        {view === "meetings" && identity ? <MeetingsLibrary key={identity} identity={identity} meetings={meetings} onOpen={openMeeting} onNew={() => { setCalendarSelection(null); setDialogOpen(true); }} onCalendar={() => setView("calendar")} /> : null}
+        {view === "calendar" && account && account.role !== "viewer" ? <CalendarWorkspace key={identity} calendarIdentity={`${account.organization_id}:${account.user_id}`} preferredConnectionId={preferredCalendarConnectionId} onPreferredConnectionApplied={() => setPreferredCalendarConnectionId(null)} canSchedule={account.role === "owner" || account.role === "admin"} onChoose={(selection) => { setCalendarSelection(selection); setDialogOpen(true); }} onPrepare={(event) => { setPrepEvent(event); setView("prep"); }} /> : null}
+        {view === "prep" && account && account.role !== "viewer" && identity ? <MeetingPrepWorkspace key={identity} identity={identity} initialEvent={prepEvent} onOpenCalendar={() => setView("calendar")} onOpenOrganization={() => setView("workspace")} /> : null}
+        {view === "providers" ? providersLoadError ? <section className="page" role="alert"><h1>AI providers are unavailable</h1><p className="intro">{providersLoadError}</p><button className="button secondary" onClick={() => void meetingsService.listProviderProfiles().then((nextProfiles) => { setProfiles(nextProfiles); setProvidersLoadError(null); }).catch(() => undefined)}>Retry</button></section> : identity ? <ProviderSettings key={identity} identity={identity} profiles={profiles} onProfilesChange={setProfiles} /> : null : null}
+        {view === "knowledge" && identity ? <KnowledgeScreen key={identity} identity={identity} account={account} onOpenSource={openMeeting} /> : null}
         {view === "observability" && (account?.role === "owner" || account?.role === "admin") ? <ObservabilityScreen /> : null}
         {view === "workspace" ? workspace
           ? <WorkspaceSettings workspace={workspace} workspaces={workspaces} account={account} onWorkspaceChange={setWorkspace} onSwitchWorkspace={switchWorkspace} onCreateWorkspace={createWorkspace} />

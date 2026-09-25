@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight, CheckCircle2, Plus, RefreshCw, Sparkles } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
 import type { CachedCalendarEvent, CalendarConnection, CalendarSchedule, CalendarSnapshot } from "@/lib/types";
@@ -14,7 +14,7 @@ const AUTO_REFRESH_AFTER_MS = 5 * 60_000;
 
 type CalendarPreferences = {
   startDate: string; endDate: string; selectedDay: string; month: string;
-  accountFilter: string; tab: "calendar" | "integrations";
+  accountFilter: string; tab: "calendar" | "integrations"; selectedEventId: string | null;
 };
 
 function validDate(value: unknown): value is string {
@@ -26,7 +26,7 @@ function initialPreferences(storageKey: string): CalendarPreferences {
   const first = currentMonth();
   const fallback: CalendarPreferences = {
     startDate: dayKey(first), endDate: dayKey(new Date(first.getFullYear(), first.getMonth() + 1, 0)),
-    selectedDay: dayKey(new Date()), month: dayKey(first), accountFilter: "all", tab: "calendar",
+    selectedDay: dayKey(new Date()), month: dayKey(first), accountFilter: "all", tab: "calendar", selectedEventId: null,
   };
   if (typeof window === "undefined") return fallback;
   try {
@@ -40,6 +40,7 @@ function initialPreferences(storageKey: string): CalendarPreferences {
       month: validDate(saved.month) ? saved.month : fallback.month,
       accountFilter: typeof saved.accountFilter === "string" ? saved.accountFilter : "all",
       tab: saved.tab === "integrations" ? "integrations" : "calendar",
+      selectedEventId: typeof saved.selectedEventId === "string" ? saved.selectedEventId : null,
     };
   } catch { return fallback; }
 }
@@ -62,9 +63,10 @@ function eventDay(value: string, timezone: string): string {
 
 function currentMonth(): Date { const now = new Date(); return new Date(now.getFullYear(), now.getMonth(), 1); }
 
-export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, canSchedule = true, onChoose, onPrepare }: {
+export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onPreferredConnectionApplied, canSchedule = true, onChoose, onPrepare }: {
   calendarIdentity: string;
   preferredConnectionId?: string | null;
+  onPreferredConnectionApplied?(): void;
   canSchedule?: boolean;
   onChoose(selection: CalendarSelection): void;
   onPrepare(event: CachedCalendarEvent): void;
@@ -85,6 +87,8 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, can
   const [snapshot, setSnapshot] = useState<CalendarSnapshot>({ events: [], syncs: [] });
   const [accountFilter, setAccountFilter] = useState(preferredConnectionId ?? initial.accountFilter);
   const [selectedEvent, setSelectedEvent] = useState<CachedCalendarEvent | null>(null);
+  const restoredEventId = useRef(initial.selectedEventId);
+  const [loaded, setLoaded] = useState(false);
   const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null);
   const [connectProvider, setConnectProvider] = useState<CalendarConnection["provider"] | null>(null);
   const [editTarget, setEditTarget] = useState<string | null>(null);
@@ -96,11 +100,16 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, can
   const rangeValid = Number.isFinite(rangeDays) && rangeDays >= 1 && rangeDays <= 90;
 
   useEffect(() => {
+    if (preferredConnectionId) onPreferredConnectionApplied?.();
+  }, [preferredConnectionId, onPreferredConnectionApplied]);
+
+  useLayoutEffect(() => {
+    if (!loaded) return;
     const preferences: CalendarPreferences = {
-      startDate, endDate, selectedDay, month: dayKey(month), accountFilter, tab,
+      startDate, endDate, selectedDay, month: dayKey(month), accountFilter, tab, selectedEventId: selectedEvent?.id ?? null,
     };
     try { localStorage.setItem(storageKey, JSON.stringify(preferences)); } catch { /* Browsing still works without local storage. */ }
-  }, [accountFilter, endDate, month, selectedDay, startDate, storageKey, tab]);
+  }, [accountFilter, endDate, loaded, month, selectedDay, selectedEvent, startDate, storageKey, tab]);
 
   const load = useCallback(() => {
     return Promise.all([
@@ -116,7 +125,10 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, can
     void load().then(async ([nextConnections, nextSchedules, nextSnapshot]) => {
       if (cancelled) return;
       setConnections(nextConnections); setSchedules(nextSchedules); setSnapshot(nextSnapshot);
-      setSelectedEvent((current) => current ? nextSnapshot.events.find((item) => item.id === current.id) ?? null : null);
+      const restoreId = restoredEventId.current;
+      setSelectedEvent((current) => nextSnapshot.events.find((item) => item.id === (current?.id ?? restoreId)) ?? null);
+      restoredEventId.current = null;
+      setLoaded(true);
       setAccountFilter((current) => current === "all" || nextConnections.some((item) => item.id === current && item.status === "ACTIVE") ? current : "all");
 
       // Show the saved snapshot first. Refresh only previously synced accounts

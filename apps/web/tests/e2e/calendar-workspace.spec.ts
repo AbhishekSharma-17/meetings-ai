@@ -89,6 +89,25 @@ test("multiple calendar accounts stay distinct and the selected account is scann
   await expect.poll(() => scannedAccount).toBe("ca-personal");
 });
 
+test("a later account choice survives navigation and reload after an OAuth callback", async ({ page }) => {
+  await page.route("**/v1/calendar/connections", (route) => route.fulfill({ json: [
+    { id: "ca-work", provider: "googlecalendar", status: "ACTIVE", label: "Work calendar" },
+    { id: "ca-personal", provider: "googlecalendar", status: "ACTIVE", label: "Personal calendar" },
+  ] }));
+  await page.goto("/?calendar=connected&status=success&connected_account_id=ca-personal");
+  const account = page.getByRole("combobox", { name: "Account" });
+  await expect(account).toContainText("Personal calendar");
+  await account.click();
+  await page.getByRole("option", { name: /Work calendar/ }).click();
+  await expect(account).toContainText("Work calendar");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Meetings" }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Calendar" }).click();
+  await expect(page.getByRole("combobox", { name: "Account" })).toContainText("Work calendar");
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("meetings-ai:active-view:00000000-0000-4000-8000-000000000001:00000000-0000-4000-8000-000000000002") ?? "null"))).toBe("calendar");
+  await page.reload();
+  await expect(page.getByRole("combobox", { name: "Account" })).toContainText("Work calendar");
+});
+
 test("disconnect confirms one account and leaves the other integration connected", async ({ page }) => {
   let removed: string | null = null;
   await page.route("**/v1/calendar/connections**", (route) => {
@@ -167,10 +186,14 @@ test("saved calendar range and meetings survive a hard reload without another ma
   await page.getByRole("button", { name: "Next month" }).click();
   await expect(page.locator(".calendar-month-nav h2")).toHaveText(nextMonth.toLocaleString("en-US", { month: "long", year: "numeric" }));
   await expect(page.getByText("Saved client meeting").first()).toBeVisible();
+  await page.locator(".calendar-other-events button", { hasText: "Saved client meeting" }).click();
+  await expect(page.locator(".calendar-event-detail h2")).toHaveText("Saved client meeting");
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("meetings-ai:calendar-view:00000000-0000-4000-8000-000000000001:00000000-0000-4000-8000-000000000002") ?? "null")?.selectedEventId)).toBe("00000000-0000-4000-8000-000000000088");
   await page.reload();
   await expect(page.getByRole("heading", { name: "Calendar", exact: true })).toBeVisible();
   await expect(page.locator(".calendar-month-nav h2")).toHaveText(nextMonth.toLocaleString("en-US", { month: "long", year: "numeric" }));
   await expect(page.getByText("Saved client meeting").first()).toBeVisible();
+  await expect(page.locator(".calendar-event-detail h2")).toHaveText("Saved client meeting");
   expect(syncCalls).toBe(0);
 });
 

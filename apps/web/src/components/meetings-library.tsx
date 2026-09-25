@@ -3,14 +3,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { CalendarClock, Search } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
+import { useUiPreference } from "@/lib/ui-preferences";
 import type { CalendarSchedule, Meeting } from "@/lib/types";
 
 type Filter = "all" | "scheduled" | "live" | "review" | "attention" | "completed";
 
-export function MeetingsLibrary({ meetings, onOpen, onNew, onCalendar }: { meetings: Meeting[]; onOpen(id: string): void; onNew(): void; onCalendar(): void }) {
+const filters: Filter[] = ["all", "scheduled", "live", "review", "attention", "completed"];
+export function MeetingsLibrary({ identity, meetings, onOpen, onNew, onCalendar }: { identity: string; meetings: Meeting[]; onOpen(id: string): void; onNew(): void; onCalendar(): void }) {
   const [schedules, setSchedules] = useState<CalendarSchedule[]>([]);
-  const [filter, setFilter] = useState<Filter>("all");
-  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useUiPreference(`meetings-ai:meeting-filter:${identity}`, "all" as Filter, (value): value is Filter => filters.includes(value as Filter));
+  const [query, setQuery] = useUiPreference(`meetings-ai:meeting-query:${identity}`, "", (value): value is string => typeof value === "string" && value.length <= 120, "session");
   useEffect(() => { void meetingsService.listCalendarSchedules().then(setSchedules).catch(() => setSchedules([])); }, [meetings]);
   const byId = useMemo(() => new Map(schedules.map((item) => [item.meeting_id, item])), [schedules]);
   const counts = { all: meetings.length, scheduled: 0, live: 0, review: 0, attention: 0, completed: 0 };

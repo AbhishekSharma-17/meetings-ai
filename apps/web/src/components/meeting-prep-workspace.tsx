@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CalendarDays, CheckCircle2, ExternalLink, Sparkles } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
+import { useUiPreference } from "@/lib/ui-preferences";
 import type { CachedCalendarEvent, CalendarConnection, CalendarSnapshot, KnowledgeTextProfile, PrepReport } from "@/lib/types";
 import { CalendarBrandIcon } from "./calendar-import-dialog";
 import { UiSelect } from "./ui-select";
@@ -15,13 +16,14 @@ function dateKey(value: Date): string {
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 }
 
-export function MeetingPrepWorkspace({ initialEvent, onOpenCalendar, onOpenOrganization }: {
+export function MeetingPrepWorkspace({ identity, initialEvent, onOpenCalendar, onOpenOrganization }: {
+  identity: string;
   initialEvent?: CachedCalendarEvent | null;
   onOpenCalendar(): void;
   onOpenOrganization(): void;
 }) {
   const [snapshot, setSnapshot] = useState<CalendarSnapshot>({ events: [], syncs: [] });
-  const [selectedId, setSelectedId] = useState(initialEvent?.id ?? "");
+  const [selectedId, setSelectedId] = useUiPreference(`meetings-ai:prep-event:${identity}`, initialEvent?.id ?? "", (value): value is string => typeof value === "string");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [range] = useState(() => {
@@ -30,15 +32,17 @@ export function MeetingPrepWorkspace({ initialEvent, onOpenCalendar, onOpenOrgan
     return { first: dateKey(first), last: dateKey(last), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" };
   });
 
+  useEffect(() => { if (initialEvent) setSelectedId(initialEvent.id); }, [initialEvent, setSelectedId]);
+
   useEffect(() => {
     void meetingsService.getSyncedCalendar(range.first, range.last, range.timezone)
       .then((next) => {
         setSnapshot(next);
-        setSelectedId((current) => current || next.events[0]?.id || "");
+        setSelectedId((current) => next.events.some((event) => event.id === current) ? current : initialEvent?.id || next.events[0]?.id || "");
       })
       .catch((cause) => setError(cause instanceof Error ? cause.message : "Could not load saved meetings."))
       .finally(() => setLoading(false));
-  }, [range]);
+  }, [range, initialEvent, setSelectedId]);
 
   const events = useMemo(() => {
     const items = initialEvent && !snapshot.events.some((event) => event.id === initialEvent.id)

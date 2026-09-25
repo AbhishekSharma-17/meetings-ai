@@ -1,7 +1,8 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { meetingsService } from "@/lib/meetings-service";
+import { readUiPreference, useUiPreference } from "@/lib/ui-preferences";
 import type { Capability, ConnectionState, ProfileKind, ProviderProfile, TextModelCatalog } from "@/lib/types";
 import { UiSelect } from "./ui-select";
 import { AudioLines, BookOpenText, FileText, KeyRound, ShieldCheck, Trash2 } from "lucide-react";
@@ -14,9 +15,36 @@ const profileInfo: Record<ProfileKind, { title: string; description: string; cap
 
 const providerOptions = ["OpenAI", "OpenRouter", "Vexa native / self-hosted", "OpenAI-compatible"];
 const connectionText: Record<ConnectionState, string> = { configured: "Configuration valid", not_configured: "Not configured", checking: "Checking…", failed: "Check failed" };
+type DraftFields = Pick<ProviderProfile, "label" | "provider" | "executionLocation" | "endpoint" | "model" | "capabilities" | "isDefault">;
+type DraftEnvelope = { baseline: string; fields: DraftFields };
+function draftFields(profile: ProviderProfile): DraftFields {
+  return { label: profile.label, provider: profile.provider, executionLocation: profile.executionLocation,
+    endpoint: profile.endpoint, model: profile.model, capabilities: profile.capabilities, isDefault: profile.isDefault };
+}
+function storableDraftFields(draft: ProviderProfile, baseline: ProviderProfile): DraftFields {
+  const fields = draftFields(draft);
+  if (fields.endpoint && fields.endpoint !== baseline.endpoint) {
+    try {
+      const endpoint = new URL(fields.endpoint);
+      if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash) fields.endpoint = baseline.endpoint;
+    } catch { fields.endpoint = baseline.endpoint; }
+  }
+  return fields;
+}
+function isDraftEnvelope(value: unknown): value is DraftEnvelope {
+  if (!value || typeof value !== "object") return false;
+  const envelope = value as Partial<DraftEnvelope>;
+  const fields = envelope.fields;
+  return typeof envelope.baseline === "string" && Boolean(fields)
+    && typeof fields?.label === "string" && typeof fields.provider === "string"
+    && (fields.executionLocation === "local" || fields.executionLocation === "cloud")
+    && typeof fields.endpoint === "string" && typeof fields.model === "string"
+    && Array.isArray(fields.capabilities) && fields.capabilities.every((item) => typeof item === "string")
+    && typeof fields.isDefault === "boolean";
+}
 
-export function ProviderSettings({ profiles, onProfilesChange }: { profiles: ProviderProfile[]; onProfilesChange(profiles: ProviderProfile[]): void }) {
-  const [selectedId, setSelectedId] = useState<string>(profiles[0]?.id ?? "");
+export function ProviderSettings({ identity, profiles, onProfilesChange }: { identity: string; profiles: ProviderProfile[]; onProfilesChange(profiles: ProviderProfile[]): void }) {
+  const [selectedId, setSelectedId] = useUiPreference(`meetings-ai:provider-selection:${identity}`, "", (value): value is string => typeof value === "string");
   const [notice, setNotice] = useState<string | null>(null);
   const activeId = profiles.some((profile) => profile.id === selectedId) ? selectedId : (profiles[0]?.id ?? "");
   const selected = profiles.find((profile) => profile.id === activeId);
@@ -26,6 +54,7 @@ export function ProviderSettings({ profiles, onProfilesChange }: { profiles: Pro
     onProfilesChange(profiles.map((candidate) => candidate.id === profile.id ? saved : candidate.kind === saved.kind && saved.isDefault ? { ...candidate, isDefault: false } : candidate));
     setSelectedId(saved.id);
     setNotice(`${saved.label} saved. API keys are write-only.`);
+    return saved;
   }
 
   async function remove(profile: ProviderProfile) {
@@ -52,7 +81,7 @@ export function ProviderSettings({ profiles, onProfilesChange }: { profiles: Pro
       <div className="profile-groups">
         {(Object.keys(profileInfo) as ProfileKind[]).map((kind) => <ProfileGroup key={kind} kind={kind} profiles={profiles.filter((profile) => profile.kind === kind)} selectedId={activeId} onSelect={setSelectedId} onAdd={() => addProfile(kind)} />)}
       </div>
-      {selected ? <ProfileEditor key={selected.id} profile={selected} onSave={save} onDelete={remove} onChange={(profile) => onProfilesChange(profiles.map((candidate) => candidate.id === selected.id ? profile : candidate))} onNotice={setNotice} /> : <div className="provider-editor provider-empty"><h2>Add your first configuration</h2><p>Choose a + button to configure transcription, MOM generation, or embeddings. Profiles only appear here after you create them.</p></div>}
+      {selected ? <ProfileEditor key={selected.id} identity={identity} profile={selected} onSave={save} onDelete={remove} onChange={(profile) => onProfilesChange(profiles.map((candidate) => candidate.id === selected.id ? profile : candidate))} onNotice={setNotice} /> : <div className="provider-editor provider-empty"><h2>Add your first configuration</h2><p>Choose a + button to configure transcription, MOM generation, or embeddings. Profiles only appear here after you create them.</p></div>}
     </div>
   </section>;
 }
@@ -69,8 +98,12 @@ function ProfileGroup({ kind, profiles, selectedId, onSelect, onAdd }: { kind: P
   </section>;
 }
 
-function ProfileEditor({ profile, onSave, onDelete, onChange, onNotice }: { profile: ProviderProfile; onSave(profile: ProviderProfile, apiKey?: string): Promise<void>; onDelete(profile: ProviderProfile): Promise<void>; onChange(profile: ProviderProfile): void; onNotice(message: string): void }) {
-  const [draft, setDraft] = useState(profile);
+function ProfileEditor({ identity, profile, onSave, onDelete, onChange, onNotice }: { identity: string; profile: ProviderProfile; onSave(profile: ProviderProfile, apiKey?: string): Promise<ProviderProfile>; onDelete(profile: ProviderProfile): Promise<void>; onChange(profile: ProviderProfile): void; onNotice(message: string): void }) {
+  const draftKey = `meetings-ai:provider-draft:${identity}:${profile.id}`;
+  const [draft, setDraft] = useState<ProviderProfile>(() => {
+    const saved = readUiPreference<DraftEnvelope | null>(draftKey, null, (value): value is DraftEnvelope | null => value === null || isDraftEnvelope(value), "session");
+    return saved?.baseline === JSON.stringify(draftFields(profile)) ? { ...profile, ...draftFields({ ...profile, ...saved.fields }) } : profile;
+  });
   const [apiKey, setApiKey] = useState("");
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -85,6 +118,12 @@ function ProfileEditor({ profile, onSave, onDelete, onChange, onNotice }: { prof
     || draft.executionLocation !== profile.executionLocation || draft.endpoint !== profile.endpoint
     || draft.model !== profile.model || draft.isDefault !== profile.isDefault
     || draft.capabilities.join(",") !== profile.capabilities.join(",");
+  useEffect(() => {
+    try {
+      if (JSON.stringify(draftFields(draft)) === JSON.stringify(draftFields(profile))) sessionStorage.removeItem(draftKey);
+      else sessionStorage.setItem(draftKey, JSON.stringify({ baseline: JSON.stringify(draftFields(profile)), fields: storableDraftFields(draft, profile) }));
+    } catch { /* Unsaved non-secret fields remain in memory even if storage is unavailable. */ }
+  }, [draft, draftKey, profile]);
   const update = <K extends keyof ProviderProfile>(key: K, value: ProviderProfile[K]) => setDraft((current) => ({ ...current, [key]: value }));
 
   async function testConnection() {
@@ -104,13 +143,17 @@ function ProfileEditor({ profile, onSave, onDelete, onChange, onNotice }: { prof
   }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setSaving(true);
-    try { await onSave(draft, apiKey || undefined); setApiKey(""); }
+    try {
+      const saved = await onSave(draft, apiKey || undefined);
+      setDraft(saved); setApiKey("");
+      try { sessionStorage.removeItem(draftKey); } catch { /* Optional browser storage. */ }
+    }
     catch (error) { onNotice(error instanceof Error ? error.message : "Could not save profile."); }
     finally { setSaving(false); }
   }
   async function remove() {
     setDeleting(true);
-    try { await onDelete(profile); }
+    try { await onDelete(profile); try { sessionStorage.removeItem(draftKey); } catch { /* Optional browser storage. */ } }
     catch (error) { onNotice(error instanceof Error ? error.message : "Could not delete profile."); setDeleting(false); }
   }
   function setProvider(value: string) {

@@ -3,11 +3,31 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Dialog } from "@base-ui/react/dialog";
 import { meetingsService } from "@/lib/meetings-service";
+import { useUiPreference } from "@/lib/ui-preferences";
 import { UiSelect } from "./ui-select";
 import type { CurrentAccount, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeSource, KnowledgeTextProfile, KnowledgeWikiOverview, ProviderProfile, TextModelCatalog, WorkspaceMember } from "@/lib/types";
 import { ArrowUpRight, BookOpenText, GitBranch, Plus, Search, Sparkles, MessageCircle, Send, ShieldCheck, X } from "lucide-react";
 
 type Exchange = { question: string; response: KnowledgeChatResponse };
+const isString = (value: unknown): value is string => typeof value === "string";
+const isNullableString = (value: unknown): value is string | null => value === null || typeof value === "string";
+const isMode = (value: unknown): value is "search" | "ask" | "wiki" => value === "search" || value === "ask" || value === "wiki";
+
+function conversationExchanges(conversation: Awaited<ReturnType<typeof meetingsService.getKnowledgeConversation>>): Exchange[] {
+  const pairs: Exchange[] = [];
+  for (let index = 0; index < conversation.messages.length - 1; index += 2) {
+    const question = conversation.messages[index];
+    const answer = conversation.messages[index + 1];
+    if (question.role !== "user" || answer.role !== "assistant") continue;
+    pairs.push({ question: question.content, response: {
+      answer: answer.content, citations: answer.citations,
+      provider: answer.provider, model: answer.model,
+      retrieval_mode: "lexical", conversation_id: conversation.id,
+      note: "Verify the cited transcript turn.",
+    } });
+  }
+  return pairs;
+}
 
 function streamedAnswer(raw: string): string {
   const match = /"answer"\s*:\s*"/.exec(raw);
@@ -23,20 +43,21 @@ function streamedAnswer(raw: string): string {
   try { return JSON.parse(`"${literal}"`) as string; } catch { return ""; }
 }
 
-export function KnowledgeScreen({ onOpenSource, account }: {
+export function KnowledgeScreen({ identity, onOpenSource, account }: {
+  identity: string;
   account: CurrentAccount | null;
   onOpenSource(meetingId: string, segmentId: string): void;
 }) {
   const [query, setQuery] = useState("");
   const [tagFilter, setTagFilter] = useState("");
-  const [mode, setMode] = useState<"search" | "ask" | "wiki">("ask");
+  const [mode, setMode] = useUiPreference(`meetings-ai:knowledge-mode:${identity}`, "ask" as "search" | "ask" | "wiki", isMode);
   const [bases, setBases] = useState<KnowledgeBase[]>([]);
-  const [selectedBaseId, setSelectedBaseId] = useState("");
+  const [selectedBaseId, setSelectedBaseId] = useUiPreference(`meetings-ai:knowledge-base:${identity}`, "", isString);
   const [profiles, setProfiles] = useState<ProviderProfile[]>([]);
   const [textProfiles, setTextProfiles] = useState<KnowledgeTextProfile[]>([]);
-  const [chatProfileId, setChatProfileId] = useState("");
+  const [chatProfileId, setChatProfileId] = useUiPreference(`meetings-ai:knowledge-profile:${identity}`, "", isString);
   const [modelCatalog, setModelCatalog] = useState<TextModelCatalog | null>(null);
-  const [selectedModelId, setSelectedModelId] = useState("");
+  const [selectedModelId, setSelectedModelId] = useUiPreference(`meetings-ai:knowledge-model:${identity}`, "", isString);
   const [modelFilter, setModelFilter] = useState("");
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
@@ -47,7 +68,7 @@ export function KnowledgeScreen({ onOpenSource, account }: {
   const [newBaseName, setNewBaseName] = useState("");
   const [creatingBase, setCreatingBase] = useState(false);
   const [conversations, setConversations] = useState<KnowledgeConversation[]>([]);
-  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [conversationId, setConversationId] = useUiPreference(`meetings-ai:knowledge-conversation:${identity}`, null as string | null, isNullableString);
   const [search, setSearch] = useState<KnowledgeSearchResponse | null>(null);
   const [overview, setOverview] = useState<KnowledgeWikiOverview | null>(null);
   const [evidenceMap, setEvidenceMap] = useState<KnowledgeMap | null>(null);
@@ -61,46 +82,62 @@ export function KnowledgeScreen({ onOpenSource, account }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const selectedBase = bases.find((item) => item.id === selectedBaseId);
-  const effectiveProfileId = chatProfileId || selectedBase?.text_profile_id || textProfiles[0]?.id || "";
+  const effectiveProfileId = textProfiles.some((profile) => profile.id === chatProfileId) ? chatProfileId : selectedBase?.text_profile_id || textProfiles[0]?.id || "";
   const selectedModel = modelCatalog?.models.find((item) => item.id === selectedModelId);
   const canManageBase = selectedBase && (account?.role === "owner" || account?.role === "admin" || selectedBase.created_by === account?.user_id);
 
   useEffect(() => {
     void meetingsService.listKnowledgeBases().then((items) => {
       setBases(items);
-      if (items.length) {
-        setSelectedBaseId((current) => current || items[0].id);
-        setShareVisibility(items[0].visibility);
-        setShareUserIds(items[0].shared_user_ids);
-      }
+      setSelectedBaseId((current) => {
+        if (current && items.some((item) => item.id === current)) return current;
+        return items[0]?.id ?? "";
+      });
+      const chosen = items.find((item) => item.id === selectedBaseId) ?? items[0];
+      if (chosen) { setShareVisibility(chosen.visibility); setShareUserIds(chosen.shared_user_ids); }
     }).catch(() => setError("Could not load knowledge bases."));
     if (account?.role === "owner" || account?.role === "admin") {
       void meetingsService.listProviderProfiles().then(setProfiles).catch(() => undefined);
     }
-    void meetingsService.listKnowledgeTextProfiles().then(setTextProfiles).catch(() => setModelError("Could not load text providers."));
+    void meetingsService.listKnowledgeTextProfiles().then((items) => {
+      setTextProfiles(items);
+      setChatProfileId((current) => current && !items.some((item) => item.id === current) ? "" : current);
+    }).catch(() => setModelError("Could not load text providers."));
     void meetingsService.listWorkspaceMembers().then(setMembers).catch(() => undefined);
-  }, [account]);
+  }, [account, selectedBaseId, setChatProfileId, setSelectedBaseId]);
 
   useEffect(() => {
     if (!selectedBaseId) return;
-    void meetingsService.listKnowledgeConversations(selectedBaseId).then(setConversations).catch(() => setError("Could not load conversations."));
+    let active = true;
+    void meetingsService.listKnowledgeConversations(selectedBaseId).then((items) => {
+      if (!active) return;
+      setConversations(items);
+      if (conversationId) {
+        if (items.some((item) => item.id === conversationId)) {
+          void meetingsService.getKnowledgeConversation(selectedBaseId, conversationId)
+            .then((conversation) => { if (active) setExchanges(conversationExchanges(conversation)); })
+            .catch(() => { if (active) { setConversationId(null); setExchanges([]); } });
+        } else { setConversationId(null); setExchanges([]); }
+      }
+    }).catch(() => { if (active) setError("Could not load conversations."); });
     void meetingsService.getKnowledgeOverview(selectedBaseId).then(setOverview).catch(() => setOverview(null));
     void meetingsService.getKnowledgeMap(selectedBaseId).then(setEvidenceMap).catch(() => setEvidenceMap(null));
     void meetingsService.getKnowledgeIndex(selectedBaseId).then(setIndexStatus).catch(() => setIndexStatus(null));
-  }, [selectedBaseId]);
+    return () => { active = false; };
+  }, [selectedBaseId, conversationId, setConversationId]);
 
   useEffect(() => {
     if (!effectiveProfileId) return;
     let active = true;
-    queueMicrotask(() => { if (active) { setModelCatalog(null); setModelError(null); setSelectedModelId(""); } });
+    queueMicrotask(() => { if (active) { setModelCatalog(null); setModelError(null); } });
     void meetingsService.listKnowledgeModels(effectiveProfileId).then((catalog) => {
       if (!active) return;
       setModelCatalog(catalog);
       // A cost-conscious default for OpenAI, without changing the saved workspace MOM route.
-      setSelectedModelId(catalog.provider === "openai" && catalog.models.some((item) => item.id === "gpt-6-luna") ? "gpt-6-luna" : catalog.configured_model);
+      setSelectedModelId((current) => catalog.models.some((item) => item.id === current) ? current : catalog.provider === "openai" && catalog.models.some((item) => item.id === "gpt-6-luna") ? "gpt-6-luna" : catalog.configured_model);
     }).catch((cause) => { if (active) setModelError(cause instanceof Error ? cause.message : "Could not load the model catalog."); });
     return () => { active = false; };
-  }, [effectiveProfileId]);
+  }, [effectiveProfileId, setSelectedModelId]);
 
   useEffect(() => {
     if (!selectedBaseId) return;
@@ -136,19 +173,7 @@ export function KnowledgeScreen({ onOpenSource, account }: {
     setBusy(true); setError(null);
     try {
       const conversation = await meetingsService.getKnowledgeConversation(selectedBaseId, id);
-      const pairs: Exchange[] = [];
-      for (let index = 0; index < conversation.messages.length - 1; index += 2) {
-        const question = conversation.messages[index];
-        const answer = conversation.messages[index + 1];
-        if (question.role !== "user" || answer.role !== "assistant") continue;
-        pairs.push({ question: question.content, response: {
-          answer: answer.content, citations: answer.citations,
-          provider: answer.provider, model: answer.model,
-          retrieval_mode: "lexical", conversation_id: conversation.id,
-          note: "Verify the cited transcript turn.",
-        } });
-      }
-      setExchanges(pairs); setConversationId(id); setMode("ask"); setConfirmDeleteConversation(false); setNotice(null);
+      setExchanges(conversationExchanges(conversation)); setConversationId(id); setMode("ask"); setConfirmDeleteConversation(false); setNotice(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not open conversation.");
     } finally { setBusy(false); }
