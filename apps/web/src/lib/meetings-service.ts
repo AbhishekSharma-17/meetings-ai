@@ -1,4 +1,4 @@
-import type { AuditEvent, Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeSearchResponse, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, PostMeetingJob, ProfileKind, ProviderProfile, ResendStatus, SpeakerIdentity, TranscriptSegment, TranscriptionRoute, Workspace, WorkspaceMember, WorkspaceOption } from "./types";
+import type { AuditEvent, Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeSearchResponse, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, PostMeetingJob, ProfileKind, ProviderProfile, ResendStatus, SpeakerIdentity, TranscriptSegment, TranscriptionRoute, Workspace, WorkspaceMember, WorkspaceOption } from "./types";
 
 export interface MeetingsService {
   getSession(): Promise<boolean>;
@@ -19,6 +19,8 @@ export interface MeetingsService {
   listWorkspaceAudit(): Promise<AuditEvent[]>;
   listKnowledgeBases(): Promise<KnowledgeBase[]>;
   getKnowledgeOverview(baseId: string): Promise<KnowledgeWikiOverview>;
+  getKnowledgeIndex(baseId: string): Promise<KnowledgeIndexStatus>;
+  reindexKnowledge(baseId: string): Promise<KnowledgeIndexStatus>;
   createKnowledgeBase(name: string, description?: string): Promise<KnowledgeBase>;
   updateKnowledgeBase(id: string, patch: { name?: string; description?: string | null; text_profile_id?: string | null }): Promise<KnowledgeBase>;
   shareKnowledgeBase(id: string, visibility: "private" | "organization" | "specific", userIds: string[]): Promise<KnowledgeBase>;
@@ -333,6 +335,14 @@ class HttpMeetingsService implements MeetingsService {
 
   async getKnowledgeOverview(baseId: string): Promise<KnowledgeWikiOverview> {
     return api<KnowledgeWikiOverview>(`/v1/knowledge-bases/${baseId}/overview`);
+  }
+
+  async getKnowledgeIndex(baseId: string): Promise<KnowledgeIndexStatus> {
+    return api<KnowledgeIndexStatus>(`/v1/knowledge-bases/${baseId}/index`);
+  }
+
+  async reindexKnowledge(baseId: string): Promise<KnowledgeIndexStatus> {
+    return api<KnowledgeIndexStatus>(`/v1/knowledge-bases/${baseId}/reindex`, { method: "POST" });
   }
 
   async createKnowledgeBase(name: string, description?: string): Promise<KnowledgeBase> {

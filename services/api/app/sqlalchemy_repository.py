@@ -4,7 +4,7 @@ from hashlib import sha256
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from meetings_contracts import (
     ActionItem,
@@ -34,6 +34,7 @@ from .database import (
     MeetingTranscriptionRouteRow,
     MeetingKnowledgeSettingsRow,
     MeetingKnowledgeBaseRow,
+    KnowledgeEmbeddingRow,
     KnowledgeBaseRow,
     MeetingDeliverySettingsRow,
     MeetingMinutesRow,
@@ -87,6 +88,13 @@ class SQLAlchemyRepository:
     def __init__(self, database: Database, cipher: CredentialCipher) -> None:
         self.database = database
         self.cipher = cipher
+
+    @staticmethod
+    def _purge_knowledge_embeddings(session: object, meeting_id: UUID) -> None:
+        session.execute(delete(KnowledgeEmbeddingRow).where(
+            KnowledgeEmbeddingRow.meeting_id == str(meeting_id),
+            KnowledgeEmbeddingRow.organization_id == str(current_organization_id()),
+        ))
 
     def list_profiles(self) -> list[ProviderProfile]:
         with self.database.session_factory() as session:
@@ -319,6 +327,7 @@ class SQLAlchemyRepository:
             for item in normalized
         ], ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
         with self.database.session_factory.begin() as session:
+            self._purge_knowledge_embeddings(session, meeting_id)
             session.query(TranscriptSegmentRow).filter_by(
                 meeting_id=str(meeting_id)
             ).delete()
@@ -434,6 +443,7 @@ class SQLAlchemyRepository:
                     existing.reviewed_at = datetime.now(UTC)
                     changed = True
             if changed:
+                self._purge_knowledge_embeddings(session, meeting_id)
                 state = session.get(TranscriptReviewStateRow, str(meeting_id))
                 if state is None:
                     state = TranscriptReviewStateRow(meeting_id=str(meeting_id), revision=0, fingerprint="")
@@ -524,6 +534,7 @@ class SQLAlchemyRepository:
     def save_minutes(self, minutes: MeetingMinutes) -> MeetingMinutes:
         self.get_meeting(minutes.meeting_id)
         with self.database.session_factory.begin() as session:
+            self._purge_knowledge_embeddings(session, minutes.meeting_id)
             row = session.get(MeetingMinutesRow, str(minutes.meeting_id))
             if row is None:
                 row = MeetingMinutesRow(meeting_id=str(minutes.meeting_id))
@@ -612,6 +623,7 @@ class SQLAlchemyRepository:
     ) -> None:
         self.get_meeting(meeting_id)
         with self.database.session_factory.begin() as session:
+            self._purge_knowledge_embeddings(session, meeting_id)
             row = session.get(MeetingKnowledgeSettingsRow, str(meeting_id))
             if row is None:
                 row = MeetingKnowledgeSettingsRow(

@@ -25,7 +25,7 @@ The current local capture slice establishes:
 - named knowledge bases, per-base AI model choice, source-linked saved chats,
   and private/organization/specific-teammate sharing;
 - provider profiles for transcription, text generation and embeddings;
-- meeting tags and opt-in AI knowledge with source-linked lexical search and
+- meeting tags and opt-in AI knowledge with source-linked hybrid search and
   draft Q&A through the configured text-generation provider;
 - Vexa-native, OpenAI and OpenAI-compatible provider boundaries;
 - write-only credential handling and capability validation;
@@ -60,8 +60,10 @@ runtime integration, UI/UX work, and later SaaS features.
 Provider selection is exposed in the product. Text generation uses the selected
 provider for MOM drafts and knowledge answers. A selected transcription profile
 is signed into the next Vexa bot run; existing bots retain their prior route.
-Embeddings are configurable and the OpenAI/OpenAI-compatible batch runtime is
-wired, but knowledge retrieval does not yet build or query an embedding index.
+Embeddings are configurable, and the OpenAI/OpenAI-compatible batch runtime can
+build a manually refreshed index for each named knowledge base. Without an index,
+search remains lexical. Indexed results are checked against current meeting
+records before use; this is not yet a background or large-scale vector service.
 
 - Transcription, text generation and embeddings have separate provider profiles.
 - Profiles declare capabilities such as streaming, timestamps, diarization, structured output and tool calling.
@@ -167,9 +169,11 @@ transcript turns and approved/sent MOM facts; Ask AI drafts source-linked
 answers through either a per-base text profile or the workspace default.
 Chats inside a named base are saved per user. A creator or admin can keep a
 base private, share it with this organization, or choose specific teammates.
-The meeting page can edit tags, assignment, and opt-in. Retrieval is still
-lexical; semantic/vector indexing, a topic graph, and a planning agent remain
-to build. See the [knowledge flow and limits](docs/knowledge/architecture.md).
+The meeting page can edit tags, assignment, and opt-in. A base creator or admin
+can manually reindex for hybrid lexical/semantic search; changes to canonical
+records purge that meeting's stored vectors until reindexed. A topic graph,
+planning agent, background indexing, and measured retrieval quality remain to
+build. See the [knowledge flow and limits](docs/knowledge/architecture.md).
 Do not expose this as a public multi-customer SaaS before hosted database
 policies, account lifecycle, and security hardening are complete.
 

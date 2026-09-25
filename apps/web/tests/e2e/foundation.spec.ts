@@ -438,10 +438,20 @@ test("AI knowledge links tagged evidence to the exact transcript turn", async ({
     evidence_segment_ids: ["segment-1"],
   };
   let searchPayload: Record<string, unknown> | null = null;
+  let indexedSources = 0;
   await page.route("**/v1/knowledge-bases**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === "/v1/knowledge-bases") return route.fulfill({ json: [base] });
     if (pathname === `/v1/knowledge-bases/${baseId}/conversations`) return route.fulfill({ json: [] });
+    if (pathname === `/v1/knowledge-bases/${baseId}/reindex`) indexedSources = 1;
+    if (pathname === `/v1/knowledge-bases/${baseId}/index` || pathname === `/v1/knowledge-bases/${baseId}/reindex`) {
+      return route.fulfill({ json: {
+        knowledge_base_id: baseId, indexed_sources: indexedSources,
+        profile_id: indexedSources ? "00000000-0000-4000-8000-000000000099" : null,
+        model: indexedSources ? "test-embedding" : null,
+        last_indexed_at: indexedSources ? "2026-09-25T10:00:00Z" : null,
+      } });
+    }
     return route.fallback();
   });
   await page.route("**/v1/knowledge/**", async (route) => {
@@ -485,6 +495,9 @@ test("AI knowledge links tagged evidence to the exact transcript turn", async ({
   await expect(page.locator("#transcript-segment-1")).toHaveClass(/focused-source/);
   await page.getByRole("button", { name: /All meetings/ }).first().click();
   await page.getByRole("button", { name: /Acme client/ }).click();
+  await expect(page.getByText("No sources indexed yet")).toBeVisible();
+  await page.getByRole("button", { name: "Reindex knowledge" }).click();
+  await expect(page.getByText("1 source indexed · test-embedding")).toBeVisible();
   await page.getByRole("button", { name: "Ask AI" }).first().click();
   await page.getByLabel("Ask a question").fill("Who owns the roadmap?");
   await page.getByRole("button", { name: "Ask AI", exact: true }).last().click();

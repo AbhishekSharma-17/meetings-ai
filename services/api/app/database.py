@@ -143,6 +143,23 @@ class KnowledgeBaseAccessRow(Base):
     access: Mapped[str] = mapped_column(String(20), nullable=False)
 
 
+class KnowledgeEmbeddingRow(Base):
+    __tablename__ = "knowledge_embeddings"
+    __table_args__ = (UniqueConstraint("organization_id", "knowledge_base_id", "source_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+    knowledge_base_id: Mapped[str] = mapped_column(String(36), ForeignKey("knowledge_bases.id"), nullable=False, index=True)
+    meeting_id: Mapped[str] = mapped_column(String(36), ForeignKey("meetings.id"), nullable=False, index=True)
+    source_id: Mapped[str] = mapped_column(String(40), nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    profile_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    model: Mapped[str] = mapped_column(String(200), nullable=False)
+    dimensions: Mapped[int] = mapped_column(Integer, nullable=False)
+    vector: Mapped[list[float]] = mapped_column(JSON, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class MeetingKnowledgeBaseRow(Base):
     __tablename__ = "meeting_knowledge_bases"
 
@@ -377,7 +394,7 @@ class SchemaMigrationError(RuntimeError):
 
 
 # Version 3 is the last schema in the original checked-in application. Versions
-# 4–13 add only tables, so they can be applied to an existing version-3 database
+# 4–14 add only tables, so they can be applied to an existing version-3 database
 # without rewriting its meeting or credential rows. Keep this manifest frozen:
 # adding a model column requires a new version and an explicit migration.
 SCHEMA_TABLES_BY_VERSION: dict[int, tuple[str, ...]] = {
@@ -398,6 +415,7 @@ SCHEMA_TABLES_BY_VERSION: dict[int, tuple[str, ...]] = {
     11: ("user_credentials",),
     12: ("auth_rate_limit_buckets", "audit_events"),
     13: ("provider_tenants", "meeting_tenants", "organization_provider_defaults"),
+    14: ("knowledge_embeddings",),
 }
 
 SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
@@ -427,6 +445,7 @@ SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
     "meeting_knowledge_settings": ("meeting_id", "organization_id", "tags", "knowledge_enabled", "updated_at"),
     "knowledge_bases": ("id", "organization_id", "name", "description", "created_by", "visibility", "text_profile_id", "created_at", "updated_at"),
     "knowledge_base_access": ("knowledge_base_id", "user_id", "access"),
+    "knowledge_embeddings": ("id", "organization_id", "knowledge_base_id", "meeting_id", "source_id", "fingerprint", "profile_id", "model", "dimensions", "vector", "updated_at"),
     "meeting_knowledge_bases": ("meeting_id", "knowledge_base_id"),
     "knowledge_conversations": ("id", "knowledge_base_id", "user_id", "title", "created_at", "updated_at"),
     "knowledge_messages": ("id", "conversation_id", "position", "role", "content", "citations", "provider", "model", "created_at"),
@@ -474,7 +493,7 @@ def _validate_database_schema(connection, version: int) -> None:
 class Database:
     """Upgrades known schemas and rejects unknown or incomplete ones."""
 
-    SCHEMA_VERSION = 13
+    SCHEMA_VERSION = 14
 
     def __init__(self, url: str) -> None:
         engine_options: dict[str, object] = {"pool_pre_ping": True}

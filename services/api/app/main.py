@@ -46,6 +46,7 @@ from .database import Database, SchemaVersionRow, LEGACY_ADMIN_USER_ID, LEGACY_O
 from .accounts import AccountError, AccountPublic, AccountService, Actor, ChangePasswordRequest, InviteRequest, InviteResult, MemberRolePatch, OrganizationCreateRequest, OrganizationOption
 from .meeting_service import MeetingConflictError, MeetingService, MeetingValidationError
 from .knowledge_service import KnowledgeAccessError, KnowledgeAnswerError, KnowledgeChatResponse, KnowledgeQuery, KnowledgeSearchResponse, KnowledgeService
+from .knowledge_index import KnowledgeIndexError, KnowledgeIndexService, KnowledgeIndexStatus
 from .knowledge_bases import KnowledgeBaseConflictError, KnowledgeBaseCreate, KnowledgeBaseNotFoundError, KnowledgeBasePatch, KnowledgeBasePublic, KnowledgeBaseService, KnowledgeConversationPublic, KnowledgeShareRequest, KnowledgeWikiOverview
 from .minutes_service import MinutesConflictError, MinutesGenerationError, MinutesService
 from .post_meeting_worker import PostMeetingJobConflictError, PostMeetingWorker
@@ -118,6 +119,8 @@ def create_app(
         knowledge_bases=knowledge_bases,
     )
     knowledge_service = KnowledgeService(repository, service, knowledge_bases)
+    knowledge_index = KnowledgeIndexService(database, knowledge_service, knowledge_bases, service)
+    knowledge_service.index = knowledge_index
     resend_from = os.getenv("RESEND_FROM_EMAIL", "").strip()
     resend_name = os.getenv("RESEND_FROM_NAME") or "Meetings AI"
     resend = resend_adapter or ResendAdapter(
@@ -162,6 +165,7 @@ def create_app(
     app.state.profile_service = service
     app.state.meeting_service = meeting_service
     app.state.knowledge_service = knowledge_service
+    app.state.knowledge_index = knowledge_index
     app.state.knowledge_bases = knowledge_bases
     app.state.minutes_service = minutes_service
     app.state.post_meeting_worker = worker
@@ -398,6 +402,22 @@ def create_app(
         except KnowledgeBaseNotFoundError as exc:
             raise HTTPException(status_code=404, detail="knowledge base not found") from exc
 
+    @app.get("/v1/knowledge-bases/{base_id}/index", response_model=KnowledgeIndexStatus)
+    def get_knowledge_index(base_id: UUID, request: Request) -> KnowledgeIndexStatus:
+        try:
+            return knowledge_index.status(base_id, request.state.actor)
+        except KnowledgeBaseNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="knowledge base not found") from exc
+
+    @app.post("/v1/knowledge-bases/{base_id}/reindex", response_model=KnowledgeIndexStatus)
+    async def reindex_knowledge(base_id: UUID, request: Request) -> KnowledgeIndexStatus:
+        try:
+            return await knowledge_index.reindex(base_id, request.state.actor)
+        except KnowledgeBaseNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="knowledge base not found") from exc
+        except KnowledgeIndexError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     @app.patch("/v1/knowledge-bases/{base_id}", response_model=KnowledgeBasePublic)
     def update_knowledge_base(base_id: UUID, payload: KnowledgeBasePatch, request: Request) -> KnowledgeBasePublic:
         try:
@@ -431,9 +451,9 @@ def create_app(
             raise HTTPException(status_code=404, detail="conversation not found") from exc
 
     @app.post("/v1/knowledge/search", response_model=KnowledgeSearchResponse)
-    def search_knowledge(payload: KnowledgeQuery, request: Request) -> KnowledgeSearchResponse:
+    async def search_knowledge(payload: KnowledgeQuery, request: Request) -> KnowledgeSearchResponse:
         try:
-            return knowledge_service.search(payload, request.state.actor)
+            return await knowledge_service.hybrid_search(payload, request.state.actor)
         except KnowledgeBaseNotFoundError as exc:
             raise HTTPException(status_code=404, detail="knowledge base not found") from exc
         except KnowledgeAccessError as exc:

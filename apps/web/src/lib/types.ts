@@ -104,8 +104,16 @@ export type KnowledgeSource = {
 export type KnowledgeSearchResponse = {
   sources: KnowledgeSource[];
   count: number;
-  retrieval_mode: "lexical";
+  retrieval_mode: "lexical" | "hybrid";
   truncated_meeting_scope: boolean;
+};
+
+export type KnowledgeIndexStatus = {
+  knowledge_base_id: string;
+  indexed_sources: number;
+  profile_id: string | null;
+  model: string | null;
+  last_indexed_at: string | null;
 };
 
 export type KnowledgeChatResponse = {
@@ -114,7 +122,7 @@ export type KnowledgeChatResponse = {
   conversation_id: string | null;
   provider: string | null;
   model: string | null;
-  retrieval_mode: "lexical";
+  retrieval_mode: "lexical" | "hybrid";
   note: string;
 };
 

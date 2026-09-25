@@ -1,10 +1,4 @@
-"""Opt-in, source-linked meeting knowledge.
-
-This first retrieval slice reads the canonical transcript/MOM at query time, so
-speaker corrections and opt-out take effect immediately. It is lexical, not an
-embedding index; future tenant-scoped vector indexing can replace retrieval
-without changing the citation contract.
-"""
+"""Opt-in, source-linked meeting knowledge with canonical evidence validation."""
 
 import json
 import re
@@ -62,7 +56,7 @@ class KnowledgeSource(BaseModel):
 class KnowledgeSearchResponse(BaseModel):
     sources: list[KnowledgeSource]
     count: int
-    retrieval_mode: Literal["lexical"] = "lexical"
+    retrieval_mode: Literal["lexical", "hybrid"] = "lexical"
     truncated_meeting_scope: bool = False
 
 
@@ -72,7 +66,7 @@ class KnowledgeChatResponse(BaseModel):
     conversation_id: UUID | None = None
     provider: str | None = None
     model: str | None = None
-    retrieval_mode: Literal["lexical"] = "lexical"
+    retrieval_mode: Literal["lexical", "hybrid"] = "lexical"
     note: str = "AI answers are drafts. Verify each cited transcript turn before relying on a person-specific claim."
 
 
@@ -92,16 +86,33 @@ _STOPWORDS = {
 
 
 class KnowledgeService:
-    def __init__(self, repository: object, providers: ProviderProfileService, bases: object | None = None) -> None:
+    def __init__(self, repository: object, providers: ProviderProfileService, bases: object | None = None, index: object | None = None) -> None:
         self.repository = repository
         self.providers = providers
         self.bases = bases
+        self.index = index
 
     def search(self, request: KnowledgeQuery, actor: Actor | None = None) -> KnowledgeSearchResponse:
         terms = [word for word in re.findall(r"\w+", request.query.lower())
                  if len(word) >= 2 and word not in _STOPWORDS]
         if not terms:
             terms = [request.query.lower()]
+        sources, truncated = self.candidate_sources(request, actor)
+        ranked: list[tuple[int, KnowledgeSource]] = []
+        for source in sources:
+            score = _score(source, terms)
+            if score:
+                ranked.append((score + (2 if source.kind != "transcript" else 0), source))
+        ranked.sort(key=lambda item: (item[0], item[1].meeting_created_at), reverse=True)
+        matches = [source for _, source in ranked[:request.limit]]
+        return KnowledgeSearchResponse(
+            sources=matches, count=len(matches), truncated_meeting_scope=truncated,
+        )
+
+    def candidate_sources(
+        self, request: KnowledgeQuery, actor: Actor | None = None,
+    ) -> tuple[list[KnowledgeSource], bool]:
+        """Read canonical, permission-checked evidence; never trust an index copy."""
         if actor is not None and not actor.is_admin and request.knowledge_base_id is None:
             raise KnowledgeAccessError("select a shared knowledge base to search")
         allowed_ids = self.bases.meeting_ids(request.knowledge_base_id, actor) if request.knowledge_base_id and self.bases else None
@@ -110,16 +121,13 @@ class KnowledgeService:
                     and (allowed_ids is None or meeting.id in allowed_ids)
                     and all(tag in meeting.tags for tag in request.tags)]
         truncated = len(meetings) > 200
-        ranked: list[tuple[int, KnowledgeSource]] = []
+        sources: list[KnowledgeSource] = []
         for meeting in meetings[:200]:
             segments = [segment for segment in self.repository.get_transcript(meeting.id)
                         if segment.completed and segment.text.strip() and segment.segment_id]
             by_id = {segment.segment_id: segment for segment in segments}
             for segment in segments:
-                source = self._source(meeting, segment, "transcript", segment.text, [segment.segment_id])
-                score = _score(source, terms)
-                if score:
-                    ranked.append((score, source))
+                sources.append(self._source(meeting, segment, "transcript", segment.text, [segment.segment_id]))
             try:
                 minutes = self.repository.get_minutes(meeting.id)
             except MinutesNotFoundError:
@@ -144,13 +152,28 @@ class KnowledgeService:
                     meeting, evidence[0], kind, value,
                     [item for item in evidence_ids if item in by_id],
                 )
-                score = _score(source, terms)
-                if score:
-                    ranked.append((score + 2, source))
-        ranked.sort(key=lambda item: (item[0], item[1].meeting_created_at), reverse=True)
-        sources = [source for _, source in ranked[:request.limit]]
+                sources.append(source)
+        return sources, truncated
+
+    async def hybrid_search(self, request: KnowledgeQuery, actor: Actor | None = None) -> KnowledgeSearchResponse:
+        lexical = self.search(request, actor)
+        if self.index is None or request.knowledge_base_id is None:
+            return lexical
+        candidates, truncated = self.candidate_sources(request, actor)
+        semantic = await self.index.rank(request, candidates, actor)
+        if not semantic:
+            return lexical
+        lexical_rank = {source.source_id: rank for rank, source in enumerate(lexical.sources)}
+        semantic_rank = {source.source_id: rank for rank, source in enumerate(semantic)}
+        by_id = {source.source_id: source for source in [*lexical.sources, *semantic]}
+        ordered = sorted(by_id.values(), key=lambda source: (
+            (1 / (60 + lexical_rank[source.source_id]) if source.source_id in lexical_rank else 0)
+            + (1 / (60 + semantic_rank[source.source_id]) if source.source_id in semantic_rank else 0),
+            source.meeting_created_at,
+        ), reverse=True)[:request.limit]
         return KnowledgeSearchResponse(
-            sources=sources, count=len(sources), truncated_meeting_scope=truncated,
+            sources=ordered, count=len(ordered), retrieval_mode="hybrid",
+            truncated_meeting_scope=truncated,
         )
 
     async def chat(self, request: KnowledgeQuery, actor: Actor | None = None) -> KnowledgeChatResponse:
@@ -161,7 +184,7 @@ class KnowledgeService:
             history = self.bases.get_conversation(request.knowledge_base_id, request.conversation_id, actor).messages[-6:]
         previous_question = next((item.content for item in reversed(history) if item.role == "user"), "")
         retrieval_query = f"{previous_question} {request.query}" if previous_question else request.query
-        search = self.search(request.model_copy(update={
+        search = await self.hybrid_search(request.model_copy(update={
             "query": retrieval_query[:500], "limit": min(request.limit, 8),
         }), actor)
         if not search.sources:
@@ -174,6 +197,7 @@ class KnowledgeService:
                 )
             return KnowledgeChatResponse(
                 answer=answer, citations=[], conversation_id=conversation_id,
+                retrieval_mode=search.retrieval_mode,
             )
         labels = {f"K{index + 1}": source for index, source in enumerate(search.sources)}
         context = "\n".join(
@@ -237,6 +261,7 @@ class KnowledgeService:
         return KnowledgeChatResponse(
             answer=answer.strip(), citations=citations, conversation_id=conversation_id,
             provider=result.provider, model=result.model,
+            retrieval_mode=search.retrieval_mode,
         )
 
     @staticmethod

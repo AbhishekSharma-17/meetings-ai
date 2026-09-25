@@ -65,10 +65,10 @@ invitations, named knowledge bases, and scoped sharing are built in code.
 Hosted RLS, complete organization lifecycle, and production identity are still
 needed. See [SaaS build sequence](saas/roadmap.md).
 
-1. **Agentic knowledge base:** move beyond current lexical retrieval and saved
-   source-linked chats to semantic/vector retrieval, evidence-backed entity
-   links, query planning, deletion and re-indexing. Preserve provider-agnostic
-   text and embedding adapters.
+1. **Agentic knowledge base:** extend current source-linked chats and manually
+   refreshed hybrid index with background change-driven indexing, evidence-backed
+   entity links, query planning, retention/deletion of saved answers, and
+   retrieval evaluations. Preserve provider-agnostic text and embedding adapters.
 2. **Operational scale:** durable workflow queue, versioned migrations,
    observability, S3-compatible storage where necessary, deployment hardening,
    cost and rate controls, and backup/restore.

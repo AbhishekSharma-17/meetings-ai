@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, func, select
 
 from .database import (
-    Database, KnowledgeBaseAccessRow, KnowledgeBaseRow, KnowledgeConversationRow, KnowledgeMessageRow,
+    Database, KnowledgeBaseAccessRow, KnowledgeBaseRow, KnowledgeConversationRow, KnowledgeMessageRow, KnowledgeEmbeddingRow,
     LEGACY_ADMIN_USER_ID, MeetingKnowledgeBaseRow, MeetingTenantRow,
     MeetingKnowledgeSettingsRow, MeetingMinutesRow, MeetingRow,
     OrganizationMembershipRow,
@@ -232,6 +232,11 @@ class KnowledgeBaseService:
         self.repository.get_meeting(meeting_id)
         with self.database.session_factory.begin() as session:
             association = session.get(MeetingKnowledgeBaseRow, str(meeting_id))
+            if association is not None and association.knowledge_base_id != (str(base_id) if base_id else None):
+                session.execute(delete(KnowledgeEmbeddingRow).where(
+                    KnowledgeEmbeddingRow.meeting_id == str(meeting_id),
+                    KnowledgeEmbeddingRow.organization_id == str(current_organization_id()),
+                ))
             if base_id is None:
                 if association:
                     session.delete(association)
