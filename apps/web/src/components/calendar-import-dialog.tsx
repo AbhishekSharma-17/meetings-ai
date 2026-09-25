@@ -7,7 +7,7 @@ import { meetingsService } from "@/lib/meetings-service";
 import type { CalendarConnection, CalendarEvent, CalendarPeriod, CalendarSchedule } from "@/lib/types";
 import { UiSelect } from "./ui-select";
 
-export type CalendarSelection = { event: CalendarEvent; period: CalendarPeriod; timezone: string; willSchedule: boolean };
+export type CalendarSelection = { event: CalendarEvent; period: CalendarPeriod; timezone: string; willSchedule: boolean; eventDate?: string };
 
 const periods: { value: CalendarPeriod; label: string }[] = [
   { value: "today", label: "Today" }, { value: "tomorrow", label: "Tomorrow" },
@@ -101,7 +101,7 @@ export function CalendarImportDialog({ open, preferredConnectionId, onClose, onC
   return <Dialog.Root open={open} onOpenChange={(next) => { if (!next) onClose(); }}><Dialog.Portal><Dialog.Backdrop className="dialog-backdrop" /><Dialog.Popup className="dialog calendar-dialog" aria-labelledby={titleId}>{content}</Dialog.Popup></Dialog.Portal></Dialog.Root>;
 }
 
-function CalendarBrandIcon({ provider }: { provider: CalendarConnection["provider"] }) {
+export function CalendarBrandIcon({ provider }: { provider: CalendarConnection["provider"] }) {
   if (provider === "calendly") return <span className="calendar-brand-icon calendar-letter calendly">C</span>;
   if (provider === "zoom") return <span className="calendar-brand-icon calendar-letter zoom">Z</span>;
   if (provider === "googlecalendar") return <svg className="calendar-brand-icon" viewBox="0 0 48 48" aria-hidden="true"><rect x="5" y="7" width="38" height="36" rx="5" fill="#fff" /><path d="M5 13a6 6 0 0 1 6-6h10v8H5z" fill="#4285F4" /><path d="M21 7h16a6 6 0 0 1 6 6v2H21z" fill="#34A853" /><path d="M43 15v22a6 6 0 0 1-6 6h-2V15z" fill="#FBBC04" /><path d="M35 43H11a6 6 0 0 1-6-6v-2h30z" fill="#EA4335" /><path d="M5 15h8v20H5z" fill="#4285F4" /><path d="M20 24h4c2 0 3 1 3 3 0 1-.5 2-1.6 2.5 1.4.5 2 1.5 2 3 0 2.5-2 4-5 4-2 0-3.4-.4-4.8-1.3l1.2-2.5c1 .6 2 .9 3.2.9 1.1 0 1.7-.4 1.7-1.2 0-.8-.6-1.2-1.8-1.2h-1.7v-2.5h1.6c1.1 0 1.6-.4 1.6-1.1 0-.7-.5-1.1-1.4-1.1-1 0-2 .3-2.9.9l-1.2-2.5c1.4-.9 2.8-1.3 4.5-1.3Zm10 0h3v13h-3z" fill="#4285F4" /></svg>;

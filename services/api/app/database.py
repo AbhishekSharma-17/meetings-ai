@@ -381,6 +381,71 @@ class OrganizationRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class CalendarEventCacheRow(Base):
+    __tablename__ = "calendar_event_cache"
+    __table_args__ = (UniqueConstraint("organization_id", "user_id", "connection_id", "event_id", "starts_at", name="uq_calendar_event_occurrence"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    connection_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    provider: Mapped[str] = mapped_column(String(40), nullable=False)
+    event_id: Mapped[str] = mapped_column(String(500), nullable=False)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CalendarSyncStateRow(Base):
+    __tablename__ = "calendar_sync_state"
+
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), primary_key=True)
+    connection_id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    last_synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    range_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    range_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    truncated: Mapped[bool] = mapped_column(Boolean, nullable=False)
+
+
+class OrganizationBriefRow(Base):
+    __tablename__ = "organization_briefs"
+
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), primary_key=True)
+    website: Mapped[str | None] = mapped_column(String(500))
+    overview: Mapped[str] = mapped_column(Text, nullable=False)
+    services: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    products: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    differentiators: Mapped[str] = mapped_column(Text, nullable=False)
+    positioning: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class OrganizationBriefDocumentRow(Base):
+    __tablename__ = "organization_brief_documents"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    extracted_text: Mapped[str] = mapped_column(Text, nullable=False)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class MeetingPrepRow(Base):
+    __tablename__ = "meeting_preps"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    calendar_event_id: Mapped[str] = mapped_column(String(36), ForeignKey("calendar_event_cache.id"), nullable=False, index=True)
+    context: Mapped[str] = mapped_column(Text, nullable=False)
+    profile_urls: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    report: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class WorkspaceRetentionRow(Base):
     __tablename__ = "workspace_retention"
 
@@ -511,6 +576,7 @@ SCHEMA_TABLES_BY_VERSION: dict[int, tuple[str, ...]] = {
     18: ("model_usage",),
     19: ("meeting_mom_guidance",),
     20: ("meeting_sources",),
+    21: ("calendar_event_cache", "calendar_sync_state", "organization_briefs", "organization_brief_documents", "meeting_preps"),
 }
 
 SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
@@ -552,6 +618,11 @@ SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
     "audit_events": ("id", "organization_id", "actor_user_id", "action", "resource_path", "resource_id", "status_code", "created_at"),
     "model_usage": ("id", "organization_id", "meeting_id", "knowledge_base_id", "purpose", "provider", "model", "input_tokens", "output_tokens", "estimated_usd", "created_at"),
     "meeting_mom_guidance": ("meeting_id", "template", "instructions", "focus_fields", "updated_at"),
+    "calendar_event_cache": ("id", "organization_id", "user_id", "connection_id", "provider", "event_id", "starts_at", "ends_at", "payload", "synced_at"),
+    "calendar_sync_state": ("organization_id", "user_id", "connection_id", "last_synced_at", "range_start", "range_end", "truncated"),
+    "organization_briefs": ("organization_id", "website", "overview", "services", "products", "differentiators", "positioning", "updated_at"),
+    "organization_brief_documents": ("id", "organization_id", "filename", "content_type", "extracted_text", "uploaded_at"),
+    "meeting_preps": ("id", "organization_id", "user_id", "calendar_event_id", "context", "profile_urls", "report", "created_at"),
 }
 
 
@@ -594,7 +665,7 @@ def _validate_database_schema(connection, version: int) -> None:
 class Database:
     """Upgrades known schemas and rejects unknown or incomplete ones."""
 
-    SCHEMA_VERSION = 20
+    SCHEMA_VERSION = 21
 
     def __init__(self, url: str) -> None:
         engine_options: dict[str, object] = {"pool_pre_ping": True}

@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { meetingsService } from "@/lib/meetings-service";
-import type { AuditEvent, CurrentAccount, InviteResult, RetentionPolicy, UsageSummary, Workspace, WorkspaceMember, WorkspaceOperations, WorkspaceOption } from "@/lib/types";
+import type { AuditEvent, BriefDocument, CurrentAccount, InviteResult, OrganizationBrief, RetentionPolicy, UsageSummary, Workspace, WorkspaceMember, WorkspaceOperations, WorkspaceOption } from "@/lib/types";
 import { UiSelect } from "./ui-select";
 
 export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceChange, onSwitchWorkspace, onCreateWorkspace }: {
@@ -37,8 +37,46 @@ export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceC
   const [inviting, setInviting] = useState(false);
   const [memberBusy, setMemberBusy] = useState<string | null>(null);
   const [pendingRemovalId, setPendingRemovalId] = useState<string | null>(null);
+  const [brief, setBrief] = useState<OrganizationBrief | null>(null);
+  const [briefDocuments, setBriefDocuments] = useState<BriefDocument[]>([]);
+  const [briefBusy, setBriefBusy] = useState(false);
+  const [briefError, setBriefError] = useState<string | null>(null);
+  const [briefMessage, setBriefMessage] = useState<string | null>(null);
   const canManage = account?.role === "owner" || account?.role === "admin";
   const ownerCount = members.filter((member) => member.role === "owner").length;
+
+  useEffect(() => {
+    void Promise.all([meetingsService.getOrganizationBrief(), meetingsService.listBriefDocuments()])
+      .then(([nextBrief, nextDocuments]) => { setBrief(nextBrief); setBriefDocuments(nextDocuments); })
+      .catch(() => setBriefError("Could not load the organization briefing profile."));
+  }, [workspace.id]);
+
+  async function saveBrief(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!brief) return;
+    setBriefBusy(true); setBriefError(null); setBriefMessage(null);
+    try { setBrief(await meetingsService.saveOrganizationBrief(brief)); setBriefMessage("Company context saved for meeting prep."); }
+    catch (cause) { setBriefError(cause instanceof Error ? cause.message : "Could not save company context."); }
+    finally { setBriefBusy(false); }
+  }
+
+  async function uploadBrief(file: File | undefined) {
+    if (!file) return;
+    setBriefBusy(true); setBriefError(null); setBriefMessage(null);
+    try {
+      const document = await meetingsService.uploadBriefDocument(file);
+      setBriefDocuments((current) => [document, ...current]);
+      setBriefMessage(`${file.name} added to private organization context.`);
+    } catch (cause) { setBriefError(cause instanceof Error ? cause.message : "Could not upload document."); }
+    finally { setBriefBusy(false); }
+  }
+
+  async function deleteBriefDocument(id: string) {
+    setBriefBusy(true); setBriefError(null);
+    try { await meetingsService.deleteBriefDocument(id); setBriefDocuments((current) => current.filter((item) => item.id !== id)); }
+    catch (cause) { setBriefError(cause instanceof Error ? cause.message : "Could not remove document."); }
+    finally { setBriefBusy(false); }
+  }
 
   useEffect(() => {
     void meetingsService.listWorkspaceMembers().then(setMembers).catch(() => {
@@ -174,6 +212,21 @@ export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceC
       <div className="workspace-directory-list">{workspaces.map((item) => <div className={item.id === account?.organization_id ? "workspace-directory-item current" : "workspace-directory-item"} key={item.id}><span className="workspace-avatar" aria-hidden="true">{item.display_name[0]}</span><div><b>{item.display_name}</b><small>{item.role === "owner" ? "Owner" : item.role}</small></div>{item.id === account?.organization_id ? <span className="workspace-current-pill">Current workspace</span> : <button className="button secondary" type="button" disabled={workspaceAction} onClick={() => void switchWorkspace(item.id)}>Switch</button>}</div>)}</div>
       {canManage ? <form className="workspace-create-form" onSubmit={(event) => void createWorkspace(event)}><div><h3>Create another workspace</h3><p>Start a separate organization with its own meetings and knowledge. You can add teammates below after switching to it.</p></div><label className="sr-only" htmlFor="new-workspace-name">New workspace name</label><input id="new-workspace-name" value={newWorkspaceName} onChange={(event) => setNewWorkspaceName(event.target.value)} minLength={2} maxLength={120} required placeholder="e.g. Novaala" disabled={workspaceAction} /><button className="button secondary" type="submit" disabled={workspaceAction}>{workspaceAction ? "Creating…" : "Create workspace"}</button></form> : null}
       {workspaceActionError ? <p className="form-error" role="alert">{workspaceActionError}</p> : null}
+    </section>
+    <section className="workspace-card organization-brief" aria-labelledby="organization-brief-title">
+      <div className="section-heading"><div><p className="eyebrow">MEETING PREP CONTEXT</p><h2 id="organization-brief-title">Your company profile</h2><p>Give the prep assistant a reliable view of what your organization offers. Only workspace members can read this context; administrators can edit it.</p></div></div>
+      {briefError ? <p className="form-error" role="alert">{briefError}</p> : null}
+      {briefMessage ? <p role="status" className="workspace-success">{briefMessage}</p> : null}
+      {brief ? <form className="organization-brief-form" onSubmit={(event) => void saveBrief(event)}>
+        <label htmlFor="brief-website">Company website</label><input id="brief-website" type="url" value={brief.website ?? ""} onChange={(event) => setBrief({ ...brief, website: event.target.value || null })} placeholder="https://yourcompany.com" disabled={!canManage || briefBusy} />
+        <label htmlFor="brief-overview">What your company does</label><textarea id="brief-overview" rows={4} value={brief.overview} onChange={(event) => setBrief({ ...brief, overview: event.target.value })} placeholder="Who you serve, the problems you solve, and how you work." disabled={!canManage || briefBusy} />
+        <div className="organization-brief-columns"><div><label htmlFor="brief-services">Services · one per line</label><textarea id="brief-services" rows={4} value={brief.services.join("\n")} onChange={(event) => setBrief({ ...brief, services: event.target.value.split("\n") })} placeholder="AI strategy\nWorkflow automation" disabled={!canManage || briefBusy} /></div><div><label htmlFor="brief-products">Products · one per line</label><textarea id="brief-products" rows={4} value={brief.products.join("\n")} onChange={(event) => setBrief({ ...brief, products: event.target.value.split("\n") })} placeholder="Product name — short description" disabled={!canManage || briefBusy} /></div></div>
+        <label htmlFor="brief-differentiators">What makes you different</label><textarea id="brief-differentiators" rows={3} value={brief.differentiators} onChange={(event) => setBrief({ ...brief, differentiators: event.target.value })} disabled={!canManage || briefBusy} />
+        <label htmlFor="brief-positioning">Preferred positioning and boundaries</label><textarea id="brief-positioning" rows={3} value={brief.positioning} onChange={(event) => setBrief({ ...brief, positioning: event.target.value })} placeholder="How to describe your offering; claims or pitches to avoid." disabled={!canManage || briefBusy} />
+        {canManage ? <button className="button primary" disabled={briefBusy}>{briefBusy ? "Saving…" : "Save company profile"}</button> : null}
+      </form> : <p>Loading company context…</p>}
+      <div className="organization-documents"><div><h3>Reference documents</h3><p>PDF, DOCX, Markdown or text, up to 8 MB. Extracted text is used as private context in meeting prep; scanned PDFs need OCR first.</p></div>{canManage ? <label className="button secondary organization-upload">Add document<input type="file" accept=".pdf,.docx,.md,.txt" disabled={briefBusy} onChange={(event) => { void uploadBrief(event.target.files?.[0]); event.target.value = ""; }} /></label> : null}</div>
+      {briefDocuments.length ? <ul className="organization-document-list">{briefDocuments.map((item) => <li key={item.id}><span><b>{item.filename}</b><small>{item.character_count.toLocaleString()} readable characters · {new Date(item.uploaded_at).toLocaleDateString()}</small></span>{canManage ? <button type="button" className="text-button destructive" disabled={briefBusy} onClick={() => void deleteBriefDocument(item.id)}>Remove</button> : null}</li>)}</ul> : <p className="field-hint">No company documents uploaded yet.</p>}
     </section>
     <div className="workspace-layout">
       {canManage ? <form className="workspace-card" onSubmit={(event) => void save(event)}>

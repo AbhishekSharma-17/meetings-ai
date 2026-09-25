@@ -9,8 +9,8 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import delete, select
 
 from .database import (
-    AuditEventRow, Database, KnowledgeBaseRow, KnowledgeConversationRow,
-    KnowledgeMessageRow, MeetingRow, MeetingTenantRow, WorkspaceRetentionRow,
+    AuditEventRow, CalendarEventCacheRow, Database, KnowledgeBaseRow, KnowledgeConversationRow,
+    KnowledgeMessageRow, MeetingPrepRow, MeetingRow, MeetingTenantRow, WorkspaceRetentionRow,
 )
 from .tenant import tenant_scope
 
@@ -70,6 +70,22 @@ class RetentionService:
                 now = datetime.now(UTC)
                 if policy.meeting_days is not None:
                     cutoff = now - timedelta(days=policy.meeting_days)
+                    # Calendar snapshots and their research briefings contain
+                    # the same attendee data as captured meeting records.
+                    # Delete reports first because they reference cached events.
+                    with self.database.session_factory.begin() as session:
+                        expired_events = select(CalendarEventCacheRow.id).where(
+                            CalendarEventCacheRow.organization_id == policy.organization_id,
+                            CalendarEventCacheRow.ends_at < cutoff,
+                        )
+                        session.execute(delete(MeetingPrepRow).where(
+                            MeetingPrepRow.organization_id == policy.organization_id,
+                            MeetingPrepRow.calendar_event_id.in_(expired_events),
+                        ))
+                        session.execute(delete(CalendarEventCacheRow).where(
+                            CalendarEventCacheRow.organization_id == policy.organization_id,
+                            CalendarEventCacheRow.ends_at < cutoff,
+                        ))
                     with self.database.session_factory() as session:
                         meeting_ids = session.execute(select(MeetingRow.id).join(
                             MeetingTenantRow, MeetingTenantRow.meeting_id == MeetingRow.id,

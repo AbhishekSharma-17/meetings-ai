@@ -367,6 +367,22 @@ export type CalendarEvent = {
   title: string; starts_at: string; ends_at: string; meeting_url: string; platform: string;
   agenda?: string | null; organizer?: string | null; invitees?: CalendarInvitee[];
 };
+export type CachedCalendarEvent = CalendarEvent & { id: string; synced_at: string };
+export type CalendarSyncState = { connection_id: string; last_synced_at: string; range_start: string; range_end: string; truncated: boolean };
+export type CalendarSnapshot = { events: CachedCalendarEvent[]; syncs: CalendarSyncState[]; errors?: Record<string, string> };
+export type OrganizationBrief = {
+  website: string | null; overview: string; services: string[]; products: string[];
+  differentiators: string; positioning: string; updated_at: string | null;
+};
+export type BriefDocument = { id: string; filename: string; content_type: string; character_count: number; uploaded_at: string };
+export type PrepSource = { id: string; title: string; url: string };
+export type PrepReport = {
+  id: string; calendar_event_id: string; target_company: string | null;
+  executive_brief: string; findings: { statement: string; source_ids: string[] }[];
+  relevant_offerings: string[]; talking_points: string[]; questions_to_ask: string[];
+  watchouts: string[]; people_notes: string[]; sources: PrepSource[];
+  public_research_performed: boolean; generated_at: string; provider: string; model: string;
+};
 export type CalendarSchedule = {
   meeting_id: string; connection_id: string; event_id: string; starts_at: string; ends_at: string;
   provider?: string;

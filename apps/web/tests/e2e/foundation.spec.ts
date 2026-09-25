@@ -65,6 +65,10 @@ test("workspace profile can be edited", async ({ page }) => {
   await page.route("**/v1/workspace**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === "/v1/workspaces") return route.fulfill({ json: [{ id: workspace.id, slug: workspace.slug, display_name: workspace.display_name, role: "owner" }] });
+    if (pathname === "/v1/workspace/brief") return route.fulfill({ json: {
+      website: null, overview: "", services: [], products: [], differentiators: "", positioning: "", updated_at: null,
+    } });
+    if (pathname === "/v1/workspace/brief/documents") return route.fulfill({ json: [] });
     if (pathname === "/v1/workspace/usage") return route.fulfill({ json: { total_requests: 0, input_tokens: 0, output_tokens: 0, estimated_usd: 0, unpriced_requests: 0, recent: [], by_meeting: [], by_purpose: [], by_provider: [] } });
     if (pathname === "/v1/workspace/operations") return route.fulfill({ json: { people: 1, meetings_captured: 0, completed_meetings: 0, saved_chats: 0, active_captures: 0, failed_captures: 0, failed_mom_jobs: 0, pending_index_jobs: 0, failed_index_jobs: 0, failed_email_deliveries: 0, latest_audit_at: null } });
     if (pathname === "/v1/workspace/audit") return route.fulfill({ json: [{

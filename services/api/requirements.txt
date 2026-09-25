@@ -5,6 +5,9 @@ SQLAlchemy>=2.0,<3
 psycopg[binary]>=3.3,<4
 cryptography>=46,<47
 tzdata>=2026.4,<2027
+pypdf>=6,<7
+python-docx>=1.2,<2
+python-multipart>=0.0.20,<1
 
 # Test-only
 httpx>=0.28,<1

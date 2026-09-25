@@ -71,6 +71,8 @@ def test_version_twelve_upgrade_backfills_meeting_and_provider_owners(tmp_path) 
             "meeting_url": "https://meet.google.com/abc-defg-hij",
         }).json()
     with app.state.database.engine.begin() as connection:
+        for name in SCHEMA_TABLES_BY_VERSION[21]:
+            connection.execute(text(f"DROP TABLE {name}"))
         connection.execute(text("DROP TABLE workspace_retention"))
         connection.execute(text("DROP TABLE knowledge_index_jobs"))
         connection.execute(text("DROP TABLE knowledge_embeddings"))
@@ -81,14 +83,7 @@ def test_version_twelve_upgrade_backfills_meeting_and_provider_owners(tmp_path) 
         connection.execute(text("DROP TABLE organization_provider_defaults"))
         connection.execute(text("DROP TABLE meeting_tenants"))
         connection.execute(text("DROP TABLE provider_tenants"))
-        connection.execute(text("DELETE FROM schema_version WHERE version = 13"))
-        connection.execute(text("DELETE FROM schema_version WHERE version = 14"))
-        connection.execute(text("DELETE FROM schema_version WHERE version = 15"))
-        connection.execute(text("DELETE FROM schema_version WHERE version = 16"))
-        connection.execute(text("DELETE FROM schema_version WHERE version = 17"))
-        connection.execute(text("DELETE FROM schema_version WHERE version = 18"))
-        connection.execute(text("DELETE FROM schema_version WHERE version = 19"))
-        connection.execute(text("DELETE FROM schema_version WHERE version = 20"))
+        connection.execute(text("DELETE FROM schema_version WHERE version >= 13"))
         connection.execute(text(
             "INSERT INTO provider_defaults (capability, policy, cloud_profile_id) "
             "VALUES ('text_generation', 'cloud_only', :profile_id)"
@@ -153,7 +148,7 @@ def test_readiness_requires_current_schema(tmp_path) -> None:
         assert client.get("/health").status_code == 200
         assert client.get("/ready").json() == {"status": "ready", "schema_version": Database.SCHEMA_VERSION}
         with app.state.database.engine.begin() as connection:
-                connection.execute(text("DELETE FROM schema_version WHERE version = 20"))
+                connection.execute(text("DELETE FROM schema_version WHERE version = :version"), {"version": Database.SCHEMA_VERSION})
         response = client.get("/ready")
         assert response.status_code == 503
         assert response.json()["detail"] == "database schema is not current"

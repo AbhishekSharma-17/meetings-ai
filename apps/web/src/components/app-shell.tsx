@@ -7,6 +7,7 @@ import type { CurrentAccount, Meeting, ProviderProfile, Workspace, WorkspaceOpti
 import { Dashboard } from "./dashboard";
 import { NewMeetingDialog } from "./new-meeting-dialog";
 import { CalendarImportDialog, type CalendarSelection } from "./calendar-import-dialog";
+import { CalendarWorkspace } from "./calendar-workspace";
 import { MeetingsLibrary } from "./meetings-library";
 import { MeetingDetailScreen } from "./meeting-detail-screen";
 import { ProviderSettings } from "./provider-settings";
@@ -144,7 +145,7 @@ export function AppShell() {
       <main id="main-content">
         {view === "dashboard" ? <Dashboard meetings={meetings} onNewMeeting={() => { setCalendarSelection(null); setDialogOpen(true); }} onOpenCalendar={() => setView("calendar")} onOpenProviders={() => setView("providers")} onOpenMeeting={openMeeting} /> : null}
         {view === "meetings" ? <MeetingsLibrary meetings={meetings} onOpen={openMeeting} onNew={() => { setCalendarSelection(null); setDialogOpen(true); }} onCalendar={() => setView("calendar")} /> : null}
-        {view === "calendar" && (account?.role === "owner" || account?.role === "admin") ? <CalendarImportDialog open embedded preferredConnectionId={preferredCalendarConnectionId} onClose={() => setView("dashboard")} onChoose={(selection) => { setCalendarSelection(selection); setDialogOpen(true); }} /> : null}
+        {view === "calendar" && (account?.role === "owner" || account?.role === "admin") ? <CalendarWorkspace preferredConnectionId={preferredCalendarConnectionId} onChoose={(selection) => { setCalendarSelection(selection); setDialogOpen(true); }} /> : null}
         {view === "providers" ? providersLoadError ? <section className="page" role="alert"><h1>AI providers are unavailable</h1><p className="intro">{providersLoadError}</p><button className="button secondary" onClick={() => void meetingsService.listProviderProfiles().then((nextProfiles) => { setProfiles(nextProfiles); setProvidersLoadError(null); }).catch(() => undefined)}>Retry</button></section> : <ProviderSettings profiles={profiles} onProfilesChange={setProfiles} /> : null}
         {view === "knowledge" ? <KnowledgeScreen account={account} onOpenSource={openMeeting} /> : null}
         {view === "observability" && (account?.role === "owner" || account?.role === "admin") ? <ObservabilityScreen /> : null}

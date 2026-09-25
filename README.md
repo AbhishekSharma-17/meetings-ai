@@ -49,6 +49,12 @@ The current local capture slice establishes:
 - scheduled assistant joins for selected future calendar events, with durable
   status and cancellation. The local scheduler runs in one API process; it
   does not auto-send a recap or enroll everyone on a calendar invitation.
+- persisted per-user calendar snapshots across multiple Google, Outlook,
+  Calendly, and Zoom accounts, with a month view, source labels, custom 1–90
+  day syncs, attendee details, and manual resync;
+- an organization briefing profile and PDF, DOCX, Markdown, or text documents
+  as private meeting-prep context, combined with optionally cited public
+  research and a configurable synthesis provider.
 
 The Vexa capture and OpenAI MOM paths are active locally. Resend delivery is wired
 to the approved-MOM workflow. The API exposes `GET /v1/integrations/resend/status`
@@ -143,9 +149,10 @@ PostgreSQL owner account only if it has no credential; changing the password
 in the UI does not make an older `.env.local` value valid again. On this host
 the existing password is in the ignored `.env.local`; do not paste it into
 chat. Open `http://localhost:3020` and sign in with the admin email and that
-password. In Workspace, an admin can add teammates, receive a temporary
-password once, and share it privately. Invited users must change it before
-accessing the app. There is no automatic invitation email in this slice.
+password. In Workspace, an admin can add teammates. When Resend is configured,
+an invitation email contains a one-time temporary password and sign-in link;
+otherwise the password is shown to the admin once for private sharing. New
+users must change it before accessing the app.
 After a meeting finishes, a background
 poller finalizes the transcript and drafts the MOM. It never sends an email
 automatically: review, approve, and click **Send recap** to deliver. The worker
@@ -174,7 +181,7 @@ identity information.
 The report measures turn-level speaker attribution—not audio diarization error
 rate—and should be reviewed alongside the audio and MOM evidence links.
 
-Database startup applies additive schema steps 3 → 17 and preserves existing
+Database startup applies additive schema steps 3 → 21 and preserves existing
 rows. It refuses an unversioned, future, or incomplete schema instead of
 silently stamping it current. `/health` is process liveness; `/ready` verifies
 the database and current schema and is used by Compose. Back up PostgreSQL
@@ -214,14 +221,31 @@ scopes and restrict tools to event listing. Set `APP_BASE_URL` to the deployed
 HTTPS app origin in production. In local development the connect action uses
 the browser-visible `localhost` port, including a forwarded port on another
 device, instead of assuming the DGX's `localhost:3020` is reachable from that
-browser. Run `make compose-up`, sign in, and click **Find in
-calendar** on Meetings. Each user connects their own calendar and explicitly
-chooses an event. The app skips cancelled, ended, and unsupported-link events.
-Future events create a scheduled record; the single-process worker joins about
-one minute before the start, unless the join is cancelled. It marks meetings
-missed instead of joining after a long outage. Meetings starting immediately
-use the existing manual join flow. A real Google/Outlook consent and event scan
-still need a human account to validate the live provider response.
+browser. Run `make compose-up`, sign in, and open **Calendar**. Its
+**Integrations** tab shows connected accounts; the calendar displays the last
+saved snapshot and supports manual sync for a custom range of up to 90 days.
+Multiple accounts can be synced together, and overlapping events retain
+separate source labels. Each user connects their own account and explicitly
+chooses an event. Discovery skips cancelled and unsupported-link events.
+Outlook Calendar supplies Teams join links in event data; a separate Teams
+connection is not needed for those calendar events. Zoom scans currently
+return upcoming hosted meetings only, not historical ones. Future events
+create a scheduled record; the single-process worker joins about one minute
+before the start, unless the join is cancelled. It marks meetings missed
+instead of joining after a long outage. Meetings starting immediately use the
+existing manual join flow. Live provider consent and event scans still need
+validation with real connected accounts.
+
+In **Organization & people**, admins can save company overview, services,
+products, positioning, website, and documents. **Prepare for meeting** adds
+target-company hints, public profile links, and a manual objective. With
+public research enabled, a configured OpenAI text profile uses the Responses
+web-search tool; final synthesis may use any configured text provider. Private
+company documents are sent only to the synthesis provider, never to web
+search. Saved briefings link public claims to source URLs. Scanned PDFs need
+OCR before upload. Meeting retention also removes old calendar snapshots and
+their prep reports; company documents require manual deletion. Web-search
+tool charges are not included in token-only cost estimates.
 
 The calendar integration has no mailbox access, Gmail inbox scanning, or
 automatic attendee-email delivery. The selected calendar event is re-read by

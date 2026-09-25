@@ -97,12 +97,12 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
       };
       const shouldSchedule = calendarSelection && new Date(calendarSelection.event.starts_at).getTime() > Date.now() + 60_000;
       if (shouldSchedule) {
-        const scheduled = await meetingsService.scheduleCalendarEvent(calendarSelection.event, calendarSelection.period, calendarSelection.timezone, input);
+        const scheduled = await meetingsService.scheduleCalendarEvent(calendarSelection.event, calendarSelection.period, calendarSelection.timezone, input, calendarSelection.eventDate);
         onMeetingJoined(scheduled);
         return;
       }
       if (calendarSelection) {
-        const joined = await meetingsService.joinCalendarEvent(calendarSelection.event, calendarSelection.period, calendarSelection.timezone, input);
+        const joined = await meetingsService.joinCalendarEvent(calendarSelection.event, calendarSelection.period, calendarSelection.timezone, input, calendarSelection.eventDate);
         onMeetingJoined(joined);
         return;
       }

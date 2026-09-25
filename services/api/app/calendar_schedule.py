@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
 from meetings_contracts import MeetingCreate, MeetingPublic
@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, update
 
 from .accounts import Actor
-from .composio_calendar import CalendarError, CalendarEvent, CalendarRange, ComposioCalendar
+from .composio_calendar import CalendarError, CalendarEvent, CalendarRange, ComposioCalendar, calendar_date_window
 from .database import CalendarScheduleRow, Database, MeetingSourceRow
 from .adapters.vexa import VexaAPIError
 from .meeting_service import MeetingService
@@ -24,7 +24,8 @@ logger = logging.getLogger(__name__)
 class ScheduleCreate(BaseModel):
     connection_id: str
     event_id: str
-    period: CalendarRange
+    period: CalendarRange | None = None
+    event_date: date | None = None
     timezone: str = "UTC"
     meeting: MeetingCreate
 
@@ -99,7 +100,13 @@ class CalendarScheduleService:
             ))
 
     async def _verified_event(self, actor: Actor, payload: ScheduleCreate) -> CalendarEvent:
-        scan = await self.calendar.events(actor, payload.connection_id, payload.period, payload.timezone)
+        if payload.event_date:
+            start, end = calendar_date_window(payload.event_date, payload.event_date, payload.timezone)
+            scan = await self.calendar.events_for_window(actor, payload.connection_id, start, end, payload.timezone)
+        elif payload.period:
+            scan = await self.calendar.events(actor, payload.connection_id, payload.period, payload.timezone)
+        else:
+            raise CalendarScheduleError("choose the event date or a calendar range")
         event = next((item for item in scan.events if item.event_id == payload.event_id), None)
         if event is None:
             raise CalendarScheduleError("selected event is no longer available; scan the source again")

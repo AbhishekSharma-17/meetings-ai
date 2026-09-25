@@ -6,7 +6,7 @@ import html
 import logging
 import os
 import re
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Literal
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -105,6 +105,17 @@ def calendar_window(preset: CalendarRange, timezone: str, now: datetime | None =
         first = today - timedelta(days=today.weekday()) + timedelta(days=7)
         last = first + timedelta(days=7)
     return datetime.combine(first, time.min, zone), datetime.combine(last, time.min, zone)
+
+
+def calendar_date_window(first: date, last: date, timezone: str) -> tuple[datetime, datetime]:
+    timezone = _TIMEZONE_ALIASES.get(timezone, timezone)
+    try:
+        zone = ZoneInfo(timezone)
+    except ZoneInfoNotFoundError as exc:
+        raise CalendarError("choose a valid IANA time zone") from exc
+    if last < first or (last - first).days > 89:
+        raise CalendarError("choose a date range of 1 to 90 days")
+    return datetime.combine(first, time.min, zone), datetime.combine(last + timedelta(days=1), time.min, zone)
 
 
 def _user_id(actor: Actor) -> str:
@@ -333,6 +344,13 @@ class ComposioCalendar:
     async def events(self, actor: Actor, connection_id: str, preset: CalendarRange, timezone: str) -> CalendarEventsResponse:
         timezone = _TIMEZONE_ALIASES.get(timezone, timezone)
         start, end = calendar_window(preset, timezone)
+        return await self.events_for_window(actor, connection_id, start, end, timezone, upcoming_only=True)
+
+    async def events_for_window(
+        self, actor: Actor, connection_id: str, start: datetime, end: datetime,
+        timezone: str, *, upcoming_only: bool = False,
+    ) -> CalendarEventsResponse:
+        timezone = _TIMEZONE_ALIASES.get(timezone, timezone)
         connection = next((item for item in await self.connections(actor) if item.id == connection_id), None)
         if connection is None or connection.status != "ACTIVE":
             raise CalendarError("choose an active calendar connection owned by your account")
@@ -363,7 +381,7 @@ class ComposioCalendar:
                 raise CalendarError("calendar provider returned an invalid event list")
             for item in items:
                 event = _event(item, connection, timezone) if isinstance(item, dict) else None
-                if event and event.ends_at.astimezone(UTC) > datetime.now(UTC) and start <= event.starts_at.astimezone(start.tzinfo) < end:
+                if event and (not upcoming_only or event.ends_at.astimezone(UTC) > datetime.now(UTC)) and start <= event.starts_at.astimezone(start.tzinfo) < end:
                     records.append(event)
             token = data.get("nextPageToken") or data.get("next_page_token") or (data.get("pagination") or {}).get("next_page_token")
             if not token:

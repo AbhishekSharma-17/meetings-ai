@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 import re
+from datetime import date
 from dataclasses import replace
 from html import escape
 from urllib.parse import quote
@@ -10,7 +11,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID
 
-from fastapi import FastAPI, HTTPException, Request, Response, status
+from fastapi import FastAPI, HTTPException, Request, Response, UploadFile, File, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -50,6 +51,8 @@ from .adapters.resend import EmailDeliveryError, ResendAdapter
 from .adapters.base import ProviderExecutionError
 from .composio_calendar import CalendarConnection, WorkspaceCalendarConnection, CalendarConnectRequest, CalendarConnectResponse, CalendarEvent, CalendarEventsResponse, CalendarError, CalendarProvider, CalendarRange, ComposioCalendar, calendar_callback_url
 from .calendar_schedule import CalendarScheduleError, CalendarSchedulePublic, CalendarScheduleService, ManualScheduleCreate, ScheduleCreate
+from .calendar_cache import CalendarCacheService, CalendarSyncRequest, CalendarSyncResponse, CachedCalendarResponse
+from .meeting_prep import OrganizationBriefService, OrganizationBrief, BriefDocument, MeetingPrepService, PrepRequest, PrepReport, PrepError
 from .database import Database, SchemaVersionRow, LEGACY_ADMIN_USER_ID, LEGACY_ORGANIZATION_ID
 from .accounts import AccountError, AccountPublic, AccountService, Actor, ChangePasswordRequest, InviteRequest, InviteResult, MemberRolePatch, OrganizationCreateRequest, OrganizationOption, ProfilePatch
 from .meeting_service import MeetingConflictError, MeetingService, MeetingValidationError
@@ -146,6 +149,9 @@ def create_app(
     worker = PostMeetingWorker(repository, meeting_service, minutes_service)
     retention = RetentionService(database, meeting_service, audit)
     calendar = calendar_adapter or ComposioCalendar()
+    calendar_cache = CalendarCacheService(database, calendar)
+    organization_brief = OrganizationBriefService(database)
+    meeting_prep = MeetingPrepService(database, calendar_cache, organization_brief, service)
     calendar_schedule = CalendarScheduleService(database, calendar, meeting_service)
     if bool(admin_password) != bool(session_secret):
         raise RuntimeError("admin password and session secret must both be configured")
@@ -192,6 +198,9 @@ def create_app(
     app.state.post_meeting_worker = worker
     app.state.retention = retention
     app.state.calendar = calendar
+    app.state.calendar_cache = calendar_cache
+    app.state.organization_brief = organization_brief
+    app.state.meeting_prep = meeting_prep
     app.state.calendar_schedule = calendar_schedule
 
     @app.middleware("http")
@@ -233,6 +242,10 @@ def create_app(
                         or (path == "/v1/calendar/connections" and method == "GET")
                         or (re.fullmatch(r"/v1/calendar/connect/(googlecalendar|outlook|calendly|zoom)", path) and method == "POST")
                         or (path == "/v1/calendar/events" and method == "GET")
+                        or (path == "/v1/calendar/synced" and method == "GET")
+                        or (path == "/v1/calendar/sync" and method == "POST")
+                        or (method in {"GET", "POST"} and re.fullmatch(r"/v1/calendar/events/[0-9a-f-]+/prep", path))
+                        or (method == "GET" and path in {"/v1/workspace/brief", "/v1/workspace/brief/documents"})
                         or (method == "GET" and re.fullmatch(r"/v1/meetings/[0-9a-f-]+(?:/transcript)?", path))
                     )
                     if not allowed:
@@ -846,6 +859,37 @@ def create_app(
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         return [connection for batch in batches for connection in batch]
 
+    @app.get("/v1/workspace/brief", response_model=OrganizationBrief)
+    def get_organization_brief(request: Request) -> OrganizationBrief:
+        return organization_brief.get(request.state.actor)
+
+    @app.put("/v1/workspace/brief", response_model=OrganizationBrief)
+    def save_organization_brief(payload: OrganizationBrief, request: Request) -> OrganizationBrief:
+        try:
+            return organization_brief.save(request.state.actor, payload)
+        except PrepError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    @app.get("/v1/workspace/brief/documents", response_model=list[BriefDocument])
+    def list_organization_documents(request: Request) -> list[BriefDocument]:
+        return organization_brief.documents(request.state.actor)
+
+    @app.post("/v1/workspace/brief/documents", response_model=BriefDocument, status_code=201)
+    async def upload_organization_document(request: Request, file: UploadFile = File(...)) -> BriefDocument:
+        try:
+            contents = await file.read(8 * 1024 * 1024 + 1)
+            return organization_brief.upload(request.state.actor, file.filename or "document", contents)
+        except PrepError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.delete("/v1/workspace/brief/documents/{document_id}", status_code=204)
+    def delete_organization_document(document_id: UUID, request: Request) -> Response:
+        try:
+            organization_brief.delete_document(request.state.actor, document_id)
+            return Response(status_code=204)
+        except PrepError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     @app.post("/v1/calendar/connect/{provider}", response_model=CalendarConnectResponse)
     async def calendar_connect(provider: CalendarProvider, request: Request, payload: CalendarConnectRequest | None = None) -> CalendarConnectResponse:
         try:
@@ -864,6 +908,36 @@ def create_app(
             return await calendar.events(request.state.actor, connection_id, period, timezone)
         except CalendarError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/v1/calendar/synced", response_model=CachedCalendarResponse)
+    def saved_calendar_events(request: Request, start_date: date, end_date: date, timezone: str = "UTC") -> CachedCalendarResponse:
+        try:
+            return calendar_cache.list(request.state.actor, start_date, end_date, timezone)
+        except CalendarError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/v1/calendar/sync", response_model=CalendarSyncResponse)
+    async def sync_calendar_events(payload: CalendarSyncRequest, request: Request) -> CalendarSyncResponse:
+        try:
+            return await calendar_cache.sync(request.state.actor, payload)
+        except CalendarError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/v1/calendar/events/{event_id}/prep", response_model=PrepReport | None)
+    def latest_meeting_prep(event_id: UUID, request: Request) -> PrepReport | None:
+        try:
+            return meeting_prep.latest(request.state.actor, event_id)
+        except CalendarError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/v1/calendar/events/{event_id}/prep", response_model=PrepReport)
+    async def generate_meeting_prep(event_id: UUID, payload: PrepRequest, request: Request) -> PrepReport:
+        try:
+            return await meeting_prep.generate(request.state.actor, event_id, payload)
+        except CalendarError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except PrepError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     @app.get("/v1/calendar/schedules", response_model=list[CalendarSchedulePublic])
     def calendar_schedules(request: Request) -> list[CalendarSchedulePublic]:
