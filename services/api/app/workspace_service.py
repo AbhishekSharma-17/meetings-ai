@@ -1,4 +1,4 @@
-"""Single legacy workspace profile; multi-tenant access is not enabled yet."""
+"""Organization-scoped workspace profile and membership listings."""
 
 import re
 from datetime import datetime
@@ -9,11 +9,11 @@ from sqlalchemy import select
 
 from .database import (
     Database,
-    LEGACY_ORGANIZATION_ID,
     OrganizationMembershipRow,
     OrganizationRow,
     UserRow,
 )
+from .tenant import current_organization_id
 
 
 class WorkspacePublic(BaseModel):
@@ -24,7 +24,7 @@ class WorkspacePublic(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
-    tenant_isolation_enabled: bool = False
+    tenant_isolation_enabled: bool = True
 
 
 class WorkspacePatch(BaseModel):
@@ -68,16 +68,16 @@ class WorkspaceService:
 
     def get(self) -> WorkspacePublic:
         with self.database.session_factory() as session:
-            row = session.get(OrganizationRow, str(LEGACY_ORGANIZATION_ID))
+            row = session.get(OrganizationRow, str(current_organization_id()))
             if row is None:
-                raise RuntimeError("legacy workspace is missing")
+                raise RuntimeError("workspace is missing")
             return self._public(row)
 
     def update(self, patch: WorkspacePatch) -> WorkspacePublic:
         with self.database.session_factory.begin() as session:
-            row = session.get(OrganizationRow, str(LEGACY_ORGANIZATION_ID))
+            row = session.get(OrganizationRow, str(current_organization_id()))
             if row is None:
-                raise RuntimeError("legacy workspace is missing")
+                raise RuntimeError("workspace is missing")
             if "display_name" in patch.model_fields_set:
                 if patch.display_name is None:
                     raise ValueError("workspace name cannot be empty")
@@ -95,7 +95,7 @@ class WorkspaceService:
             rows = session.execute(
                 select(OrganizationMembershipRow, UserRow)
                 .join(UserRow, UserRow.id == OrganizationMembershipRow.user_id)
-                .where(OrganizationMembershipRow.organization_id == str(LEGACY_ORGANIZATION_ID))
+                .where(OrganizationMembershipRow.organization_id == str(current_organization_id()))
                 .order_by(UserRow.display_name)
             ).all()
             return [WorkspaceMemberPublic(

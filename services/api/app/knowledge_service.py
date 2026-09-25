@@ -1,4 +1,4 @@
-"""Opt-in, source-linked meeting knowledge for the single-workspace pilot.
+"""Opt-in, source-linked meeting knowledge.
 
 This first retrieval slice reads the canonical transcript/MOM at query time, so
 speaker corrections and opt-out take effect immediately. It is lexical, not an

@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateTable
 
-from app.database import Base, Database, MeetingRow, ProviderProfileRow, SchemaVersionRow
+from app.database import Base, Database, MeetingRow, MeetingTenantRow, ProviderProfileRow, SchemaVersionRow
 from app.security import CredentialCipher
 from app.sqlalchemy_repository import SQLAlchemyRepository
 from meetings_contracts import (
@@ -102,6 +102,7 @@ def test_repository_round_trip_on_configured_postgresql() -> None:
     finally:
         # Keep the developer dashboard free of witness fixtures.
         with database.session_factory.begin() as session:
+            session.query(MeetingTenantRow).filter_by(meeting_id=str(meeting.id)).delete()
             session.query(MeetingRow).filter_by(id=str(meeting.id)).delete()
         database.engine.dispose()
 

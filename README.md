@@ -17,7 +17,11 @@ The current local capture slice establishes:
 - persisted human review, explicit approval, and sent-version locking;
 - per-meeting internal recipients, optional participant opt-in, and recap delivery through Resend;
 - local owner and teammate email/password accounts, admin-generated one-time
-  temporary passwords, first-login rotation, and knowledge-specific access;
+  temporary passwords, first-login rotation, workspace creation/switching,
+  and knowledge-specific access;
+- application-level organization isolation for meetings, providers, knowledge,
+  workspace settings, and background MOM processing; hosted database RLS and
+  production identity lifecycle are not yet complete;
 - named knowledge bases, per-base AI model choice, source-linked saved chats,
   and private/organization/specific-teammate sharing;
 - provider profiles for transcription, text generation and embeddings;
@@ -46,9 +50,9 @@ record, which should be fixed before relying on click tracking.
 All provider credentials belong in the ignored local secret file and must be rotated
 if they have appeared in a chat or task transcript.
 
-See the [local capture MVP verification record](docs/status/2026-09-09-capture-mvp.md)
+See the [local capture verification record](docs/status/2026-09-09-capture-mvp.md)
 for the exact checks already passed and the next incomplete slices.
-The [build roadmap](docs/roadmap.md) tracks the remaining MVP validation,
+The [build roadmap](docs/roadmap.md) tracks the remaining live validation,
 runtime integration, UI/UX work, and later SaaS features.
 
 ## Provider model
@@ -75,7 +79,7 @@ See [ADR 0001](docs/adr/0001-provider-agnostic-ai.md).
 - A host capable of reaching the selected meeting and AI providers
 
 This development host is ARM64. The standard Vexa bot image is AMD64-only; the initial witness uses Vexa Lite, which supports ARM64 and is best limited to one browser bot at a time.
-For this local MVP, `make vexa-up` uses the local
+For local development, `make vexa-up` uses the local
 `Systran/faster-whisper-small.en` CPU model by default. Set
 `VEXA_STT_MODE=remote` in the ignored `.env.local` file to instead use the
 `TRANSCRIPTION_SERVICE_URL`, `_TOKEN`, and `TRANSCRIPTION_MODEL` values in the
@@ -97,7 +101,7 @@ Existing bots keep their invocation route. Set one random
 to Vexa Lite and Compose passes it to the product API. Without it, a selected
 profile blocks joining rather than silently falling back. No selected profile
 still uses Vexa's deployment STT default. This route has automated coverage,
-but needs a real meeting witness. See [MVP acceptance](docs/validation/mvp-acceptance.md).
+but needs a real meeting witness. See [capture acceptance](docs/validation/mvp-acceptance.md).
 
 ## Secrets
 
@@ -117,7 +121,7 @@ After a meeting finishes, a background
 poller finalizes the transcript and drafts the MOM. It never sends an email
 automatically: review, approve, and click **Send recap** to deliver. The worker
 only auto-processes meetings created after this feature was enabled; older records
-retain manual MOM generation. It is single-process for this MVP;
+retain manual MOM generation. It is currently single-process;
 multi-replica deployment requires a queued worker.
 If automatic drafting fails, the meeting screen shows the error and offers an
 immediate retry after capture completes. A sent recap is locked; a future
@@ -141,19 +145,20 @@ identity information.
 The report measures turn-level speaker attribution—not audio diarization error
 rate—and should be reviewed alongside the audio and MOM evidence links.
 
-Database startup applies additive schema steps 3 → 11 and preserves existing
+Database startup applies additive schema steps 3 → 13 and preserves existing
 rows. It refuses an unversioned, future, or incomplete schema instead of
 silently stamping it current. `/health` is process liveness; `/ready` verifies
 the database and current schema and is used by Compose. Back up PostgreSQL
 before any future schema upgrade. In `APP_ENV=production`, startup also rejects
 development credentials, SQLite, an HTTP web origin, and missing Vexa/STT
 secrets; see [non-live readiness](docs/validation/nonlive-readiness.md).
-The **Workspace** screen stores the pilot organization's profile and shows
+The **Workspace** screen stores the current organization's profile and shows
 members, roles, and account status. Admins can create or reset temporary
 passwords. Members can see only shared knowledge bases and completed cited
-transcripts; provider and meeting management remain admin-only. This is one
-organization, not multi-tenant isolation or public signup; see the
-[SaaS build sequence](docs/saas/roadmap.md).
+transcripts; provider and meeting management remain admin-only. API records are
+scoped to the signed-in organization, with a two-organization denial test.
+Self-serve organization creation, switching, hosted RLS, and public signup are
+not built; see the [SaaS build sequence](docs/saas/roadmap.md).
 
 The **AI knowledge** screen supports named client/project knowledge bases,
 meeting assignment, tags, and explicit opt-in. Search reads finalized
@@ -164,15 +169,15 @@ base private, share it with this organization, or choose specific teammates.
 The meeting page can edit tags, assignment, and opt-in. Retrieval is still
 lexical; semantic/vector indexing, a topic graph, and a planning agent remain
 to build. See the [knowledge flow and limits](docs/knowledge/architecture.md).
-Do not expose this single-organization app as a multi-customer SaaS before
-tenant isolation and security hardening.
+Do not expose this as a public multi-customer SaaS before hosted database
+policies, account lifecycle, and security hardening are complete.
 
 ## Source layout
 
 ```text
 apps/web/                 Next.js product UI
 services/api/             FastAPI product API
-services/api/app/post_meeting_worker.py  single-process MVP draft reconciler
+services/api/app/post_meeting_worker.py  single-process draft reconciler
 services/worker/          queued workflows (production slice)
 services/stt-bridge/      provider-normalized audio boundary (next slice)
 packages/contracts/       application-owned provider and meeting schemas

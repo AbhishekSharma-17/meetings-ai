@@ -41,7 +41,14 @@ export type Workspace = {
   status: "active" | string;
   created_at: string;
   updated_at: string;
-  tenant_isolation_enabled: false;
+  tenant_isolation_enabled: boolean;
+};
+
+export type WorkspaceOption = {
+  id: string;
+  slug: string;
+  display_name: string;
+  role: CurrentAccount["role"];
 };
 
 export type WorkspaceMember = {
@@ -73,7 +80,7 @@ export type CurrentAccount = {
 
 export type InviteResult = {
   account: CurrentAccount;
-  temporary_password: string;
+  temporary_password: string | null;
   note: string;
 };
 

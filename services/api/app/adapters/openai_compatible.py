@@ -39,7 +39,7 @@ class OpenAICompatibleAdapter:
         self, profile: ProviderProfile, request: TranscriptionRequest
     ) -> TranscriptionResult:
         raise RuntimeAdapterNotImplementedError(
-            "OpenAI-compatible transcription is not wired in this MVP"
+            "OpenAI-compatible transcription runtime is not wired yet"
         )
 
     async def generate_text(
@@ -117,7 +117,7 @@ class OpenAICompatibleAdapter:
         self, profile: ProviderProfile, request: EmbeddingRequest
     ) -> EmbeddingResult:
         raise RuntimeAdapterNotImplementedError(
-            "OpenAI-compatible embeddings are not wired in this MVP"
+            "OpenAI-compatible embeddings runtime is not wired yet"
         )
 
 

@@ -1,6 +1,6 @@
 """Provider contracts used by orchestration code.
 
-The MVP adapters expose configuration checks only. Runtime methods deliberately
+The provider adapters expose configuration checks. Some runtime methods deliberately
 raise until the corresponding workflow is wired, preventing accidental API calls.
 """
 
@@ -43,7 +43,7 @@ class ProviderAdapter(
 
 
 class RuntimeAdapterNotImplementedError(NotImplementedError):
-    """Raised when an MVP adapter is invoked for inference."""
+    """Raised when an unimplemented adapter method is invoked for inference."""
 
 
 class ProviderExecutionError(RuntimeError):

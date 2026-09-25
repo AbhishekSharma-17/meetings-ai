@@ -43,7 +43,7 @@ from .adapters.vexa import VexaAPIError, VexaCaptureAdapter
 from .adapters.resend import EmailDeliveryError, ResendAdapter
 from .adapters.base import ProviderExecutionError
 from .database import Database, SchemaVersionRow, LEGACY_ADMIN_USER_ID, LEGACY_ORGANIZATION_ID
-from .accounts import AccountError, AccountService, Actor, ChangePasswordRequest, InviteRequest, InviteResult
+from .accounts import AccountError, AccountPublic, AccountService, Actor, ChangePasswordRequest, InviteRequest, InviteResult, OrganizationCreateRequest, OrganizationOption
 from .meeting_service import MeetingConflictError, MeetingService, MeetingValidationError
 from .knowledge_service import KnowledgeAccessError, KnowledgeAnswerError, KnowledgeChatResponse, KnowledgeQuery, KnowledgeSearchResponse, KnowledgeService
 from .knowledge_bases import KnowledgeBaseConflictError, KnowledgeBaseCreate, KnowledgeBaseNotFoundError, KnowledgeBasePatch, KnowledgeBasePublic, KnowledgeBaseService, KnowledgeConversationPublic, KnowledgeShareRequest, KnowledgeWikiOverview
@@ -56,6 +56,7 @@ from .runtime_config import validate_runtime_config
 from .security import CredentialCipher
 from .service import ProfileValidationError, ProviderProfileService, ProviderSelectionError
 from .stt_route import STTRouteError
+from .tenant import tenant_scope
 from .workspace_service import WorkspacePatch, WorkspacePublic, WorkspaceMemberPublic, WorkspaceService
 from .sqlalchemy_repository import SQLAlchemyRepository, TranscriptSegmentNotFoundError, TranscriptReviewConflictError, SpeakerIdentityConflictError
 
@@ -179,49 +180,59 @@ def create_app(
             )
         request.state.actor = actor
         path = request.url.path
-        if path.startswith("/v1/") and path not in {
-            "/v1/auth/login", "/v1/auth/session", "/v1/auth/logout",
-        }:
-            if actor is None:
-                return JSONResponse(status_code=401, content={"detail": "sign in required"})
-            if actor.must_change_password and path not in {"/v1/auth/change-password", "/v1/auth/me"}:
-                return JSONResponse(status_code=403, content={"detail": "change your temporary password first"})
-            if not actor.is_admin:
-                method = request.method
-                allowed = (
-                    path == "/v1/auth/change-password"
-                    or (method == "GET" and path in {"/v1/workspace", "/v1/workspace/members"})
-                    or (path.startswith("/v1/knowledge-bases") and method in {"GET", "POST", "PATCH"})
-                    or (method == "PUT" and re.fullmatch(r"/v1/knowledge-bases/[0-9a-f-]+/sharing", path))
-                    or (path in {"/v1/knowledge/search", "/v1/knowledge/chat"} and method == "POST")
-                    or path == "/v1/auth/me"
-                    or (method == "GET" and re.fullmatch(r"/v1/meetings/[0-9a-f-]+(?:/transcript)?", path))
-                )
-                if not allowed:
-                    return JSONResponse(status_code=403, content={"detail": "workspace role does not permit this action"})
-                if actor.role == "viewer" and path == "/v1/knowledge-bases" and method == "POST":
-                    return JSONResponse(status_code=403, content={"detail": "viewers cannot create knowledge bases"})
-                match = re.fullmatch(r"/v1/meetings/([0-9a-f-]+)(?:/transcript)?", path)
-                if match:
+        with tenant_scope(actor.organization_id if actor else LEGACY_ORGANIZATION_ID):
+            if path.startswith("/v1/") and path not in {
+                "/v1/auth/login", "/v1/auth/session", "/v1/auth/logout",
+            }:
+                if actor is None:
+                    return JSONResponse(status_code=401, content={"detail": "sign in required"})
+                if actor.must_change_password and path not in {"/v1/auth/change-password", "/v1/auth/me"}:
+                    return JSONResponse(status_code=403, content={"detail": "change your temporary password first"})
+                if not actor.is_admin:
+                    method = request.method
+                    allowed = (
+                        path == "/v1/auth/change-password"
+                        or (method == "GET" and path in {"/v1/workspace", "/v1/workspace/members", "/v1/workspaces"})
+                        or (method == "POST" and (path == "/v1/workspaces" or re.fullmatch(r"/v1/workspaces/[0-9a-f-]+/switch", path)))
+                        or (path.startswith("/v1/knowledge-bases") and method in {"GET", "POST", "PATCH"})
+                        or (method == "PUT" and re.fullmatch(r"/v1/knowledge-bases/[0-9a-f-]+/sharing", path))
+                        or (path in {"/v1/knowledge/search", "/v1/knowledge/chat"} and method == "POST")
+                        or path == "/v1/auth/me"
+                        or (method == "GET" and re.fullmatch(r"/v1/meetings/[0-9a-f-]+(?:/transcript)?", path))
+                    )
+                    if not allowed:
+                        return JSONResponse(status_code=403, content={"detail": "workspace role does not permit this action"})
+                    if actor.role == "viewer" and path == "/v1/knowledge-bases" and method == "POST":
+                        return JSONResponse(status_code=403, content={"detail": "viewers cannot create knowledge bases"})
+                    match = re.fullmatch(r"/v1/meetings/([0-9a-f-]+)(?:/transcript)?", path)
+                    if match:
+                        try:
+                            meeting = repository.get_meeting(UUID(match.group(1)))
+                            if meeting.status is not MeetingStatus.COMPLETED or not meeting.knowledge_enabled or not meeting.knowledge_base_id:
+                                raise ValueError("meeting is not shared")
+                            knowledge_bases.get(meeting.knowledge_base_id, actor)
+                        except (ValueError, MeetingNotFoundError, KnowledgeBaseNotFoundError):
+                            return JSONResponse(status_code=404, content={"detail": "meeting not found"})
+                # Every resource endpoint, including exports and delivery, first
+                # resolves the product meeting inside the authenticated tenant.
+                meeting_path = re.match(r"^/v1/meetings/([0-9a-f-]{36})(?:/|$)", path)
+                if meeting_path:
                     try:
-                        meeting = repository.get_meeting(UUID(match.group(1)))
-                        if meeting.status is not MeetingStatus.COMPLETED or not meeting.knowledge_enabled or not meeting.knowledge_base_id:
-                            raise ValueError("meeting is not shared")
-                        knowledge_bases.get(meeting.knowledge_base_id, actor)
-                    except (ValueError, MeetingNotFoundError, KnowledgeBaseNotFoundError):
+                        repository.get_meeting(UUID(meeting_path.group(1)))
+                    except (ValueError, MeetingNotFoundError):
                         return JSONResponse(status_code=404, content={"detail": "meeting not found"})
-        response = await call_next(request)
-        if request.method in {"POST", "PUT", "PATCH", "DELETE"} and path.startswith("/v1/") \
-                and path not in {"/v1/auth/login", "/v1/auth/logout"} and response.status_code < 400:
-            route = request.scope.get("route")
-            template = getattr(route, "path", path)
-            match = re.search(r"/([0-9a-f]{8}-[0-9a-f-]{27,})", path)
-            resource_id = UUID(match.group(1)) if match else None
-            try:
-                audit.append(actor, f"{request.method} {template}", template, response.status_code, resource_id)
-            except SQLAlchemyError:
-                logging.getLogger(__name__).exception("could not record workspace audit event")
-        return response
+            response = await call_next(request)
+            if request.method in {"POST", "PUT", "PATCH", "DELETE"} and path.startswith("/v1/") \
+                    and path not in {"/v1/auth/login", "/v1/auth/logout"} and response.status_code < 400:
+                route = request.scope.get("route")
+                template = getattr(route, "path", path)
+                match = re.search(r"/([0-9a-f]{8}-[0-9a-f-]{27,})", path)
+                resource_id = UUID(match.group(1)) if match else None
+                try:
+                    audit.append(actor, f"{request.method} {template}", template, response.status_code, resource_id)
+                except SQLAlchemyError:
+                    logging.getLogger(__name__).exception("could not record workspace audit event")
+            return response
 
     class LoginPayload(BaseModel):
         password: str
@@ -246,7 +257,7 @@ def create_app(
         login_limiter.succeeded(payload.email)
         audit.append(actor, "auth.login.succeeded", "/v1/auth/login", 200)
         response.set_cookie(
-            "meetings_ai_session", admin.issue(actor.user_id, actor.session_version), httponly=True,
+            "meetings_ai_session", admin.issue(actor.user_id, actor.organization_id, actor.session_version), httponly=True,
             secure=os.getenv("APP_ENV") == "production", samesite="strict",
             max_age=60 * 60 * 12, path="/",
         )
@@ -276,7 +287,7 @@ def create_app(
         except AccountError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         response.set_cookie(
-            "meetings_ai_session", admin.issue(updated.user_id, updated.session_version),
+            "meetings_ai_session", admin.issue(updated.user_id, updated.organization_id, updated.session_version),
             httponly=True, secure=os.getenv("APP_ENV") == "production",
             samesite="strict", max_age=60 * 60 * 12, path="/",
         )
@@ -288,6 +299,38 @@ def create_app(
             return accounts.invite(request.state.actor, payload)
         except AccountError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    def set_workspace_session(response: Response, actor: Actor) -> None:
+        if not admin:
+            return
+        response.set_cookie(
+            "meetings_ai_session", admin.issue(actor.user_id, actor.organization_id, actor.session_version),
+            httponly=True, secure=os.getenv("APP_ENV") == "production",
+            samesite="strict", max_age=60 * 60 * 12, path="/",
+        )
+
+    @app.get("/v1/workspaces", response_model=list[OrganizationOption])
+    def list_workspaces(request: Request) -> list[OrganizationOption]:
+        return accounts.list_organizations(request.state.actor)
+
+    @app.post("/v1/workspaces", response_model=AccountPublic, status_code=201)
+    def create_workspace(payload: OrganizationCreateRequest, request: Request, response: Response) -> AccountPublic:
+        if not admin:
+            raise HTTPException(status_code=409, detail="account login is not configured")
+        actor = accounts.create_organization(request.state.actor, payload)
+        set_workspace_session(response, actor)
+        return accounts.public(actor)
+
+    @app.post("/v1/workspaces/{organization_id}/switch", response_model=AccountPublic)
+    def switch_workspace(organization_id: UUID, request: Request, response: Response) -> AccountPublic:
+        if not admin:
+            raise HTTPException(status_code=409, detail="account login is not configured")
+        try:
+            actor = accounts.select_organization(request.state.actor, organization_id)
+        except AccountError as exc:
+            raise HTTPException(status_code=404, detail="workspace not found") from exc
+        set_workspace_session(response, actor)
+        return accounts.public(actor)
 
     @app.post("/v1/workspace/members/{user_id}/temporary-password", response_model=InviteResult)
     def reset_member_password(user_id: UUID, request: Request) -> InviteResult:

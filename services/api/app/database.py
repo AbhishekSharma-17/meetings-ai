@@ -1,4 +1,4 @@
-"""SQLAlchemy database and additive, versioned MVP schema migrations."""
+"""SQLAlchemy database and additive, versioned product schema migrations."""
 
 from datetime import UTC, datetime
 from uuid import UUID
@@ -52,6 +52,23 @@ class ProviderDefaultRow(Base):
     cloud_profile_id: Mapped[str | None] = mapped_column(String(36))
 
 
+class ProviderTenantRow(Base):
+    __tablename__ = "provider_tenants"
+
+    provider_id: Mapped[str] = mapped_column(String(36), ForeignKey("provider_profiles.id"), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+
+
+class OrganizationProviderDefaultRow(Base):
+    __tablename__ = "organization_provider_defaults"
+
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), primary_key=True)
+    capability: Mapped[str] = mapped_column(String(40), primary_key=True)
+    policy: Mapped[str] = mapped_column(String(40), nullable=False)
+    local_profile_id: Mapped[str | None] = mapped_column(String(36))
+    cloud_profile_id: Mapped[str | None] = mapped_column(String(36))
+
+
 class MeetingRow(Base):
     __tablename__ = "meetings"
 
@@ -72,6 +89,13 @@ class MeetingRow(Base):
     joined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_refreshed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class MeetingTenantRow(Base):
+    __tablename__ = "meeting_tenants"
+
+    meeting_id: Mapped[str] = mapped_column(String(36), ForeignKey("meetings.id"), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
 
 
 class MeetingTranscriptionRouteRow(Base):
@@ -353,7 +377,7 @@ class SchemaMigrationError(RuntimeError):
 
 
 # Version 3 is the last schema in the original checked-in application. Versions
-# 4–12 add only tables, so they can be applied to an existing version-3 database
+# 4–13 add only tables, so they can be applied to an existing version-3 database
 # without rewriting its meeting or credential rows. Keep this manifest frozen:
 # adding a model column requires a new version and an explicit migration.
 SCHEMA_TABLES_BY_VERSION: dict[int, tuple[str, ...]] = {
@@ -373,12 +397,16 @@ SCHEMA_TABLES_BY_VERSION: dict[int, tuple[str, ...]] = {
     10: ("knowledge_bases", "knowledge_base_access", "meeting_knowledge_bases", "knowledge_conversations", "knowledge_messages"),
     11: ("user_credentials",),
     12: ("auth_rate_limit_buckets", "audit_events"),
+    13: ("provider_tenants", "meeting_tenants", "organization_provider_defaults"),
 }
 
 SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
     "provider_profiles": ("id", "name", "provider_type", "execution_location", "base_url", "capabilities", "credential_ciphertext", "created_at", "updated_at"),
     "provider_defaults": ("capability", "policy", "local_profile_id", "cloud_profile_id"),
+    "provider_tenants": ("provider_id", "organization_id"),
+    "organization_provider_defaults": ("organization_id", "capability", "policy", "local_profile_id", "cloud_profile_id"),
     "meetings": ("id", "meeting_url", "title", "bot_name", "language", "transcribe_enabled", "recording_enabled", "platform", "native_meeting_id", "status", "vexa_meeting_id", "last_error", "created_at", "updated_at", "joined_at", "stopped_at", "last_refreshed_at"),
+    "meeting_tenants": ("meeting_id", "organization_id"),
     "transcript_segments": ("id", "meeting_id", "position", "start_seconds", "end_seconds", "text", "speaker", "language", "completed"),
     "meeting_minutes": ("meeting_id", "status", "title", "executive_summary", "discussion_points", "decisions", "action_items", "open_questions", "provider_profile_id", "provider", "model", "last_error", "created_at", "updated_at", "approved_at", "sent_at"),
     "email_deliveries": ("id", "meeting_id", "recipients", "status", "provider_message_id", "error", "created_at"),
@@ -446,7 +474,7 @@ def _validate_database_schema(connection, version: int) -> None:
 class Database:
     """Upgrades known schemas and rejects unknown or incomplete ones."""
 
-    SCHEMA_VERSION = 12
+    SCHEMA_VERSION = 13
 
     def __init__(self, url: str) -> None:
         engine_options: dict[str, object] = {"pool_pre_ping": True}
@@ -507,6 +535,23 @@ class Database:
                     connection.execute(insert(OrganizationMembershipRow).values(
                         organization_id=str(LEGACY_ORGANIZATION_ID),
                         user_id=str(LEGACY_ADMIN_USER_ID), role="owner", created_at=now,
+                    ))
+                if version == 13:
+                    # Existing rows were created in the original workspace. New
+                    # writes must add their ownership record in the same transaction.
+                    connection.execute(insert(ProviderTenantRow).from_select(
+                        ["provider_id", "organization_id"],
+                        select(ProviderProfileRow.id, text(f"'{LEGACY_ORGANIZATION_ID}'")),
+                    ))
+                    connection.execute(insert(MeetingTenantRow).from_select(
+                        ["meeting_id", "organization_id"],
+                        select(MeetingRow.id, text(f"'{LEGACY_ORGANIZATION_ID}'")),
+                    ))
+                    connection.execute(insert(OrganizationProviderDefaultRow).from_select(
+                        ["organization_id", "capability", "policy", "local_profile_id", "cloud_profile_id"],
+                        select(text(f"'{LEGACY_ORGANIZATION_ID}'"), ProviderDefaultRow.capability,
+                               ProviderDefaultRow.policy, ProviderDefaultRow.local_profile_id,
+                               ProviderDefaultRow.cloud_profile_id),
                     ))
                 _validate_database_schema(connection, version)
                 connection.execute(insert(SchemaVersionRow).values(

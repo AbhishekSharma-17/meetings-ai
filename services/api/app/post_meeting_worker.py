@@ -1,4 +1,4 @@
-"""Single-process MVP reconciler; replace with a queued worker before scaling replicas."""
+"""Single-process reconciler; replace with a queued worker before scaling replicas."""
 
 import asyncio
 import logging
@@ -8,6 +8,7 @@ from uuid import UUID
 from meetings_contracts import MeetingStatus
 
 from .repository import MinutesNotFoundError
+from .tenant import tenant_scope
 
 logger = logging.getLogger(__name__)
 ACTIVE = {
@@ -37,10 +38,9 @@ class PostMeetingWorker:
             await asyncio.sleep(self.interval_seconds)
 
     async def tick(self) -> None:
-        for meeting in self.repository.list_meetings():
-            if self.repository.get_post_meeting_job(meeting.id) is None:
-                continue
-            await self.process_meeting(meeting.id)
+        for organization_id, meeting_id in self.repository.list_worker_scopes():
+            with tenant_scope(organization_id):
+                await self.process_meeting(meeting_id)
 
     async def process_meeting(self, meeting_id: UUID) -> None:
         async with self._locks.setdefault(meeting_id, asyncio.Lock()):

@@ -6,7 +6,7 @@ deferred at the owner's request.
 
 ## Current baseline
 
-The local MVP can create and dispatch a Vexa bot, persist meeting state and
+The local application can create and dispatch a Vexa bot, persist meeting state and
 transcript segments, correct speaker labels, produce an evidence-linked MOM
 draft, require review/approval, and manually send the approved recap through
 Resend. The local owner and invited teammates use email/password accounts;
@@ -14,11 +14,11 @@ members are restricted to knowledge bases shared with them. PostgreSQL stores pr
 Automated API and mocked-browser coverage exists; a previous live Google Meet
 capture and a separate delivered email are the live witnesses so far.
 The owner has deferred additional live testing. The non-live hardening slice is
-implemented: schema steps 3–11, database-backed readiness, production startup
+implemented: schema steps 3–13, database-backed readiness, production startup
 configuration checks, API CI, and a local-only Vexa fork commit. See
 `docs/validation/nonlive-readiness.md` for the explicitly unvalidated outcomes.
 
-## Now — complete the internal-validation MVP
+## Now — validate the core meeting workflow
 
 1. **Runtime transcription-provider selection.** Connect the selected product
    transcription profile to Vexa's per-user or platform transcription settings
@@ -41,7 +41,7 @@ configuration checks, API CI, and a local-only Vexa fork commit. See
    retry for failed drafts, reconciles manually-created drafts, and rejects
    regeneration of an already-sent recap. These are automated-test witnesses,
    not a substitute for a real post-meeting acceptance run. Email remains
-   approval-gated in the MVP.
+   approval-gated in the current product.
 4. **End-to-end acceptance.** Witness Google Meet, Zoom, and Teams separately;
    lobby/admission, audio, speaker labels, completion, MOM, recipients, and
    Resend delivery. Follow `docs/validation/mvp-acceptance.md`. Check
@@ -57,12 +57,13 @@ misleading buttons, and honest distinctions between configured profiles and
 active runtime routes. The first visual/system pass is in the product UI; it
 still needs browser/a11y review with real content and user feedback.
 
-## After the MVP is witnessed
+## Production-scale product work
 
 The owner has asked to start SaaS work while live testing remains deferred.
-The single-organization profile, local accounts, invitations, named knowledge
-bases, and scoped sharing are built in code. These do not provide public
-multi-tenant isolation. See [SaaS build sequence](saas/roadmap.md).
+Organization-scoped API access, local accounts, workspace creation/switching,
+invitations, named knowledge bases, and scoped sharing are built in code.
+Hosted RLS, complete organization lifecycle, and production identity are still
+needed. See [SaaS build sequence](saas/roadmap.md).
 
 1. **Agentic knowledge base:** move beyond current lexical retrieval and saved
    source-linked chats to semantic/vector retrieval, evidence-backed entity
@@ -71,7 +72,7 @@ multi-tenant isolation. See [SaaS build sequence](saas/roadmap.md).
 2. **Operational scale:** durable workflow queue, versioned migrations,
    observability, S3-compatible storage where necessary, deployment hardening,
    cost and rate controls, and backup/restore.
-3. **SaaS layer:** organization isolation, multiple roles, policy controls,
+3. **SaaS layer:** hosted RLS, organization lifecycle, multiple roles, policy controls,
    invitations, audit trail, calendar scheduling, billing, and self-serve setup.
 
 ## Release gate

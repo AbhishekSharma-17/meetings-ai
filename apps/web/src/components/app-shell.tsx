@@ -3,7 +3,7 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { meetingsService } from "@/lib/meetings-service";
-import type { CurrentAccount, Meeting, ProviderProfile, Workspace } from "@/lib/types";
+import type { CurrentAccount, Meeting, ProviderProfile, Workspace, WorkspaceOption } from "@/lib/types";
 import { Dashboard } from "./dashboard";
 import { NewMeetingDialog } from "./new-meeting-dialog";
 import { MeetingDetailScreen } from "./meeting-detail-screen";
@@ -25,6 +25,7 @@ export function AppShell() {
   const [profiles, setProfiles] = useState<ProviderProfile[]>([]);
   const [providersLoadError, setProvidersLoadError] = useState<string | null>(null);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
+  const [workspaces, setWorkspaces] = useState<WorkspaceOption[]>([]);
   const [workspaceLoading, setWorkspaceLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -60,6 +61,7 @@ export function AppShell() {
       void meetingsService.listProviderProfiles().then((nextProfiles) => { setProfiles(nextProfiles); setProvidersLoadError(null); }).catch(() => setProvidersLoadError("Could not load provider configurations. Check the API connection and retry."));
     }
     void meetingsService.getWorkspace().then(setWorkspace).catch(() => setWorkspace(null)).finally(() => setWorkspaceLoading(false));
+    void meetingsService.listWorkspaces().then(setWorkspaces).catch(() => setWorkspaces([]));
   }, [authenticated, account]);
 
   async function signIn(event: FormEvent<HTMLFormElement>) {
@@ -93,6 +95,14 @@ export function AppShell() {
     setMeetings((current) => current.some((candidate) => candidate.id === meeting.id) ? current.map((candidate) => candidate.id === meeting.id ? meeting : candidate) : [meeting, ...current]);
   }, []);
   const signOut = useCallback(() => { void meetingsService.logout().finally(() => { setAuthenticated(false); setAccount(null); }); }, []);
+  const switchWorkspace = useCallback(async (id: string) => {
+    await meetingsService.switchWorkspace(id);
+    window.location.reload();
+  }, []);
+  const createWorkspace = useCallback(async (name: string) => {
+    await meetingsService.createWorkspace(name);
+    window.location.reload();
+  }, []);
 
   if (!authenticated) return <main className="login-page">
     <form className="login-card" onSubmit={(event) => void signIn(event)}>
@@ -111,7 +121,7 @@ export function AppShell() {
   return (
     <div className="app-frame">
       <a className="skip-link" href="#main-content">Skip to content</a>
-      <SidebarPanel view={view} onNavigate={setView} workspace={workspace} account={account} onSignOut={signOut} className="desktop-sidebar" />
+      <SidebarPanel view={view} onNavigate={setView} workspace={workspace} workspaces={workspaces} account={account} onSignOut={signOut} onSwitchWorkspace={switchWorkspace} onCreateWorkspace={createWorkspace} className="desktop-sidebar" />
       <div className="workspace-main">
       <header className="topbar">
         <button className="mobile-nav-trigger" aria-label="Open navigation" onClick={() => setMobileNavOpen(true)}><Menu /></button>
@@ -138,7 +148,7 @@ export function AppShell() {
           <Dialog.Popup className="mobile-nav-sheet">
             <Dialog.Title className="sr-only">Workspace navigation</Dialog.Title>
             <Dialog.Close className="mobile-nav-close" aria-label="Close navigation"><X /></Dialog.Close>
-            <SidebarPanel view={view} onNavigate={(next) => { setView(next); setMobileNavOpen(false); }} workspace={workspace} account={account} onSignOut={signOut} className="drawer-sidebar" />
+            <SidebarPanel view={view} onNavigate={(next) => { setView(next); setMobileNavOpen(false); }} workspace={workspace} workspaces={workspaces} account={account} onSignOut={signOut} onSwitchWorkspace={switchWorkspace} onCreateWorkspace={createWorkspace} className="drawer-sidebar" />
           </Dialog.Popup>
         </Dialog.Portal>
       </Dialog.Root>
@@ -151,9 +161,12 @@ export function AppShell() {
   );
 }
 
-function SidebarPanel({ view, onNavigate, workspace, account, onSignOut, className }: { view: View; onNavigate(view: View): void; workspace: Workspace | null; account: CurrentAccount | null; onSignOut(): void; className: string }) {
+function SidebarPanel({ view, onNavigate, workspace, workspaces, account, onSignOut, onSwitchWorkspace, onCreateWorkspace, className }: { view: View; onNavigate(view: View): void; workspace: Workspace | null; workspaces: WorkspaceOption[]; account: CurrentAccount | null; onSignOut(): void; onSwitchWorkspace(id: string): Promise<void>; onCreateWorkspace(name: string): Promise<void>; className: string }) {
   const canManageMeetings = account?.role === "owner" || account?.role === "admin";
   const [menuOpen, setMenuOpen] = useState(false);
+  const [workspaceName, setWorkspaceName] = useState("");
+  const [workspaceBusy, setWorkspaceBusy] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!menuOpen) return;
@@ -164,6 +177,16 @@ function SidebarPanel({ view, onNavigate, workspace, account, onSignOut, classNa
     return () => { document.removeEventListener("pointerdown", onPointerDown); document.removeEventListener("keydown", onKeyDown); };
   }, [menuOpen]);
   const navigate = (next: View) => { setMenuOpen(false); onNavigate(next); };
+  const changeWorkspace = async (id: string) => {
+    setWorkspaceBusy(true); setWorkspaceError(null);
+    try { await onSwitchWorkspace(id); }
+    catch (error) { setWorkspaceError(error instanceof Error ? error.message : "Could not switch workspace."); setWorkspaceBusy(false); }
+  };
+  const addWorkspace = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); setWorkspaceBusy(true); setWorkspaceError(null);
+    try { await onCreateWorkspace(workspaceName.trim()); }
+    catch (error) { setWorkspaceError(error instanceof Error ? error.message : "Could not create workspace."); setWorkspaceBusy(false); }
+  };
   return <aside className={`workspace-sidebar ${className}`} aria-label="Workspace navigation">
     <button className="brand" onClick={() => navigate("dashboard")} aria-label="Meetings AI home"><span className="brand-mark" aria-hidden="true"><Image src="/icon.svg" width={28} height={28} alt="" /></span><span>Meetings <b>AI</b></span></button>
     <button className="workspace-switcher" onClick={() => navigate("workspace")} aria-label={`Open ${workspace?.display_name ?? "organization"} settings`}><span className="workspace-avatar" aria-hidden="true">{(workspace?.display_name ?? "W")[0]}</span><span><b>{workspace?.display_name ?? "Organization"}</b><small>{workspace?.contact_email ?? "Organization workspace"}</small></span></button>
@@ -175,7 +198,7 @@ function SidebarPanel({ view, onNavigate, workspace, account, onSignOut, classNa
       <button aria-current={view === "workspace" ? "page" : undefined} className={view === "workspace" ? "nav-link active" : "nav-link"} onClick={() => onNavigate("workspace")}><Building2 /> Workspace</button>
     </nav>
     <div className="sidebar-foot" ref={menuRef}>
-      {menuOpen ? <div className="profile-popover" role="menu" aria-label="Account menu"><div className="profile-popover-heading"><b>{account?.display_name ?? "Account"}</b><small>{account?.email ?? "Local account"}</small></div><button role="menuitem" onClick={() => navigate("profile")}><UserRound /> My profile & password</button><button role="menuitem" onClick={() => navigate("workspace")}><Building2 /> Organization & people</button><div className="profile-popover-theme"><span>Appearance</span><ThemeSwitcher /></div><button role="menuitem" className="profile-signout" onClick={() => { setMenuOpen(false); onSignOut(); }}><LogOut /> Sign out</button></div> : null}
+      {menuOpen ? <div className="profile-popover" aria-label="Account menu"><div className="profile-popover-heading"><b>{account?.display_name ?? "Account"}</b><small>{account?.email ?? "Local account"}</small></div><div className="profile-workspaces"><span className="profile-workspaces-label">YOUR WORKSPACES</span>{workspaces.map((item) => <button key={item.id} type="button" className={item.id === account?.organization_id ? "profile-workspace current" : "profile-workspace"} disabled={workspaceBusy || item.id === account?.organization_id} onClick={() => void changeWorkspace(item.id)}><Building2 size={15} /><span>{item.display_name}</span><small>{item.role}</small></button>)}<form className="profile-create-workspace" onSubmit={(event) => void addWorkspace(event)}><label className="sr-only" htmlFor={`new-workspace-${className}`}>New workspace name</label><input id={`new-workspace-${className}`} value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} placeholder="New workspace name" minLength={2} maxLength={120} required /><button type="submit" disabled={workspaceBusy}>Create</button></form>{workspaceError ? <p role="alert" className="form-error">{workspaceError}</p> : null}</div><button onClick={() => navigate("profile")}><UserRound /> My profile & password</button><button onClick={() => navigate("workspace")}><Building2 /> Organization & people</button><div className="profile-popover-theme"><span>Appearance</span><ThemeSwitcher /></div><button className="profile-signout" onClick={() => { setMenuOpen(false); onSignOut(); }}><LogOut /> Sign out</button></div> : null}
       <button className="profile-trigger" aria-expanded={menuOpen} aria-haspopup="menu" onClick={() => setMenuOpen((value) => !value)}><span className="profile-trigger-avatar" aria-hidden="true">{account?.display_name[0]?.toUpperCase() ?? "U"}</span><span className="profile-trigger-copy"><b>{account?.display_name ?? "Account"}</b><small>{account?.email ?? account?.role ?? "User"}</small></span><ChevronUp className={menuOpen ? "profile-chevron open" : "profile-chevron"} /></button>
     </div>
   </aside>;

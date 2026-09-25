@@ -4,6 +4,8 @@ from hashlib import sha256
 from datetime import UTC, datetime
 from uuid import UUID
 
+from sqlalchemy import select
+
 from meetings_contracts import (
     ActionItem,
     AttributedQuestion,
@@ -33,13 +35,14 @@ from .database import (
     MeetingKnowledgeSettingsRow,
     MeetingKnowledgeBaseRow,
     KnowledgeBaseRow,
-    LEGACY_ORGANIZATION_ID,
     MeetingDeliverySettingsRow,
     MeetingMinutesRow,
     MeetingMinutesEvidenceRow,
     MeetingSpeakerIdentityRow,
     PostMeetingJobRow,
-    ProviderDefaultRow,
+    ProviderTenantRow,
+    OrganizationProviderDefaultRow,
+    MeetingTenantRow,
     ProviderProfileRow,
     TranscriptSegmentRow,
     TranscriptSegmentMetadataRow,
@@ -49,6 +52,7 @@ from .database import (
 )
 from .repository import MeetingNotFoundError, MinutesNotFoundError, ProfileNotFoundError
 from .security import CredentialCipher
+from .tenant import current_organization_id
 
 
 class TranscriptSegmentNotFoundError(LookupError):
@@ -86,22 +90,31 @@ class SQLAlchemyRepository:
 
     def list_profiles(self) -> list[ProviderProfile]:
         with self.database.session_factory() as session:
-            rows = session.query(ProviderProfileRow).order_by(ProviderProfileRow.created_at).all()
+            rows = session.query(ProviderProfileRow).join(
+                ProviderTenantRow, ProviderTenantRow.provider_id == ProviderProfileRow.id
+            ).filter(ProviderTenantRow.organization_id == str(current_organization_id())).order_by(ProviderProfileRow.created_at).all()
             return [self._profile_from_row(row) for row in rows]
 
     def get_profile(self, profile_id: UUID) -> ProviderProfile:
         with self.database.session_factory() as session:
             row = session.get(ProviderProfileRow, str(profile_id))
-            if row is None:
+            owner = session.get(ProviderTenantRow, str(profile_id))
+            if row is None or owner is None or owner.organization_id != str(current_organization_id()):
                 raise ProfileNotFoundError(profile_id)
             return self._profile_from_row(row)
 
     def save_profile(self, profile: ProviderProfile) -> ProviderProfile:
         with self.database.session_factory.begin() as session:
             row = session.get(ProviderProfileRow, str(profile.id))
+            owner = session.get(ProviderTenantRow, str(profile.id))
             if row is None:
                 row = ProviderProfileRow(id=str(profile.id))
                 session.add(row)
+                session.add(ProviderTenantRow(
+                    provider_id=str(profile.id), organization_id=str(current_organization_id()),
+                ))
+            elif owner is None or owner.organization_id != str(current_organization_id()):
+                raise ProfileNotFoundError(profile.id)
             row.name = profile.name
             row.provider_type = profile.provider_type.value
             row.execution_location = profile.execution_location.value
@@ -118,9 +131,12 @@ class SQLAlchemyRepository:
         """Remove a configuration; preserve historical meeting/model snapshots."""
         with self.database.session_factory.begin() as session:
             row = session.get(ProviderProfileRow, str(profile_id))
-            if row is None:
+            owner = session.get(ProviderTenantRow, str(profile_id))
+            if row is None or owner is None or owner.organization_id != str(current_organization_id()):
                 raise ProfileNotFoundError(profile_id)
-            for default in session.query(ProviderDefaultRow).all():
+            for default in session.query(OrganizationProviderDefaultRow).filter_by(
+                organization_id=str(current_organization_id())
+            ).all():
                 if default.local_profile_id == str(profile_id):
                     default.local_profile_id = None
                 if default.cloud_profile_id == str(profile_id):
@@ -131,8 +147,11 @@ class SQLAlchemyRepository:
                     default.policy = FallbackPolicy.CLOUD_ONLY.value
                 elif not default.cloud_profile_id:
                     default.policy = FallbackPolicy.LOCAL_ONLY.value
-            for base in session.query(KnowledgeBaseRow).filter_by(text_profile_id=str(profile_id)).all():
+            for base in session.query(KnowledgeBaseRow).filter_by(
+                text_profile_id=str(profile_id), organization_id=str(current_organization_id())
+            ).all():
                 base.text_profile_id = None
+            session.delete(owner)
             session.delete(row)
 
     def _profile_from_row(self, row: ProviderProfileRow) -> ProviderProfile:
@@ -149,10 +168,15 @@ class SQLAlchemyRepository:
         )
 
     def save_default(self, selection: DefaultSelection) -> DefaultSelection:
+        for profile_id in selection.ordered_profile_ids():
+            self.get_profile(profile_id)
         with self.database.session_factory.begin() as session:
-            row = session.get(ProviderDefaultRow, selection.capability.value)
+            key = (str(current_organization_id()), selection.capability.value)
+            row = session.get(OrganizationProviderDefaultRow, key)
             if row is None:
-                row = ProviderDefaultRow(capability=selection.capability.value)
+                row = OrganizationProviderDefaultRow(
+                    organization_id=key[0], capability=key[1],
+                )
                 session.add(row)
             row.policy = selection.policy.value
             row.local_profile_id = (
@@ -165,16 +189,18 @@ class SQLAlchemyRepository:
 
     def list_defaults(self) -> list[DefaultSelection]:
         with self.database.session_factory() as session:
-            rows = session.query(ProviderDefaultRow).order_by(ProviderDefaultRow.capability).all()
+            rows = session.query(OrganizationProviderDefaultRow).filter_by(
+                organization_id=str(current_organization_id())
+            ).order_by(OrganizationProviderDefaultRow.capability).all()
             return [self._default_from_row(row) for row in rows]
 
     def get_default(self, capability: Capability) -> DefaultSelection | None:
         with self.database.session_factory() as session:
-            row = session.get(ProviderDefaultRow, capability.value)
+            row = session.get(OrganizationProviderDefaultRow, (str(current_organization_id()), capability.value))
             return self._default_from_row(row) if row else None
 
     @staticmethod
-    def _default_from_row(row: ProviderDefaultRow) -> DefaultSelection:
+    def _default_from_row(row: OrganizationProviderDefaultRow) -> DefaultSelection:
         return DefaultSelection(
             capability=Capability(row.capability),
             policy=FallbackPolicy(row.policy),
@@ -184,7 +210,9 @@ class SQLAlchemyRepository:
 
     def list_meetings(self) -> list[Meeting]:
         with self.database.session_factory() as session:
-            rows = session.query(MeetingRow).order_by(MeetingRow.created_at.desc()).all()
+            rows = session.query(MeetingRow).join(
+                MeetingTenantRow, MeetingTenantRow.meeting_id == MeetingRow.id
+            ).filter(MeetingTenantRow.organization_id == str(current_organization_id())).order_by(MeetingRow.created_at.desc()).all()
             settings = {
                 row.meeting_id: row for row in session.query(MeetingKnowledgeSettingsRow)
                 .filter(MeetingKnowledgeSettingsRow.meeting_id.in_([item.id for item in rows])).all()
@@ -198,11 +226,19 @@ class SQLAlchemyRepository:
     def get_meeting(self, meeting_id: UUID) -> Meeting:
         with self.database.session_factory() as session:
             row = session.get(MeetingRow, str(meeting_id))
-            if row is None:
+            owner = session.get(MeetingTenantRow, str(meeting_id))
+            if row is None or owner is None or owner.organization_id != str(current_organization_id()):
                 raise MeetingNotFoundError(meeting_id)
             knowledge = session.get(MeetingKnowledgeSettingsRow, str(meeting_id))
             base = session.get(MeetingKnowledgeBaseRow, str(meeting_id))
             return self._meeting_from_row(row, knowledge, base)
+
+    def list_worker_scopes(self) -> list[tuple[UUID, UUID]]:
+        """Enumerate jobs for the worker; processing still runs in tenant scope."""
+        with self.database.session_factory() as session:
+            rows = session.execute(select(MeetingTenantRow.organization_id, MeetingTenantRow.meeting_id)
+                                   .join(PostMeetingJobRow, PostMeetingJobRow.meeting_id == MeetingTenantRow.meeting_id)).all()
+            return [(UUID(org_id), UUID(meeting_id)) for org_id, meeting_id in rows]
 
     def get_delivery_settings(self, meeting_id: UUID) -> MeetingDeliverySettings:
         self.get_meeting(meeting_id)
@@ -233,6 +269,7 @@ class SQLAlchemyRepository:
         return settings
 
     def get_post_meeting_job(self, meeting_id: UUID) -> PostMeetingJobRow | None:
+        self.get_meeting(meeting_id)
         with self.database.session_factory() as session:
             row = session.get(PostMeetingJobRow, str(meeting_id))
             if row is None:
@@ -241,6 +278,7 @@ class SQLAlchemyRepository:
             return row
 
     def initialize_post_meeting_job(self, meeting_id: UUID) -> None:
+        self.get_meeting(meeting_id)
         with self.database.session_factory.begin() as session:
             if session.get(PostMeetingJobRow, str(meeting_id)) is None:
                 session.add(PostMeetingJobRow(
@@ -252,6 +290,7 @@ class SQLAlchemyRepository:
         self, meeting_id: UUID, *, attempts: int, next_retry_at: datetime | None,
         last_error: str | None, completed_at: datetime | None,
     ) -> None:
+        self.get_meeting(meeting_id)
         with self.database.session_factory.begin() as session:
             row = session.get(PostMeetingJobRow, str(meeting_id))
             if row is None:
@@ -265,6 +304,7 @@ class SQLAlchemyRepository:
     def replace_transcript(
         self, meeting_id: UUID, segments: list[MeetingTranscriptSegment]
     ) -> None:
+        self.get_meeting(meeting_id)
         normalized = []
         for position, segment in enumerate(segments):
             if not segment.segment_id:
@@ -317,6 +357,7 @@ class SQLAlchemyRepository:
                 self._invalidate_approved_minutes(session, meeting_id)
 
     def get_transcript(self, meeting_id: UUID) -> list[MeetingTranscriptSegment]:
+        self.get_meeting(meeting_id)
         with self.database.session_factory() as session:
             rows = (
                 session.query(TranscriptSegmentRow)
@@ -355,6 +396,7 @@ class SQLAlchemyRepository:
         self, meeting_id: UUID, segment_id: str, display_name: str | None,
         apply_to_raw_label: bool = False,
     ) -> None:
+        self.get_meeting(meeting_id)
         with self.database.session_factory.begin() as session:
             metadata = session.get(TranscriptSegmentMetadataRow, (str(meeting_id), segment_id))
             if metadata is None:
@@ -409,6 +451,7 @@ class SQLAlchemyRepository:
             minutes.updated_at = datetime.now(UTC)
 
     def get_transcript_revision(self, meeting_id: UUID) -> int:
+        self.get_meeting(meeting_id)
         with self.database.session_factory() as session:
             state = session.get(TranscriptReviewStateRow, str(meeting_id))
             return state.revision if state else 0
@@ -445,6 +488,7 @@ class SQLAlchemyRepository:
         return self.list_speaker_identities(meeting_id)
 
     def save_minutes_source_revision(self, meeting_id: UUID, revision: int) -> None:
+        self.get_meeting(meeting_id)
         with self.database.session_factory.begin() as session:
             row = session.get(MinutesSourceRow, str(meeting_id))
             if row is None:
@@ -453,11 +497,13 @@ class SQLAlchemyRepository:
             row.transcript_revision = revision
 
     def get_minutes_source_revision(self, meeting_id: UUID) -> int | None:
+        self.get_meeting(meeting_id)
         with self.database.session_factory() as session:
             row = session.get(MinutesSourceRow, str(meeting_id))
             return row.transcript_revision if row else None
 
     def get_minutes(self, meeting_id: UUID) -> MeetingMinutes:
+        self.get_meeting(meeting_id)
         with self.database.session_factory() as session:
             row = session.get(MeetingMinutesRow, str(meeting_id))
             if row is None:
@@ -476,6 +522,7 @@ class SQLAlchemyRepository:
             return minutes
 
     def save_minutes(self, minutes: MeetingMinutes) -> MeetingMinutes:
+        self.get_meeting(minutes.meeting_id)
         with self.database.session_factory.begin() as session:
             row = session.get(MeetingMinutesRow, str(minutes.meeting_id))
             if row is None:
@@ -507,6 +554,7 @@ class SQLAlchemyRepository:
         return minutes
 
     def save_email_delivery(self, delivery: EmailDelivery) -> EmailDelivery:
+        self.get_meeting(delivery.meeting_id)
         with self.database.session_factory.begin() as session:
             session.add(
                 EmailDeliveryRow(
@@ -524,9 +572,15 @@ class SQLAlchemyRepository:
     def save_meeting(self, meeting: Meeting) -> Meeting:
         with self.database.session_factory.begin() as session:
             row = session.get(MeetingRow, str(meeting.id))
+            owner = session.get(MeetingTenantRow, str(meeting.id))
             if row is None:
                 row = MeetingRow(id=str(meeting.id))
                 session.add(row)
+                session.add(MeetingTenantRow(
+                    meeting_id=str(meeting.id), organization_id=str(current_organization_id()),
+                ))
+            elif owner is None or owner.organization_id != str(current_organization_id()):
+                raise MeetingNotFoundError(meeting.id)
             row.meeting_url = meeting.meeting_url
             row.title = meeting.title
             row.bot_name = meeting.bot_name
@@ -546,7 +600,7 @@ class SQLAlchemyRepository:
             knowledge = session.get(MeetingKnowledgeSettingsRow, str(meeting.id))
             if knowledge is None:
                 knowledge = MeetingKnowledgeSettingsRow(
-                    meeting_id=str(meeting.id), organization_id=str(LEGACY_ORGANIZATION_ID),
+                    meeting_id=str(meeting.id), organization_id=str(current_organization_id()),
                     tags=meeting.tags, knowledge_enabled=meeting.knowledge_enabled,
                     updated_at=datetime.now(UTC),
                 )
@@ -556,13 +610,16 @@ class SQLAlchemyRepository:
     def save_knowledge_settings(
         self, meeting_id: UUID, *, tags: list[str], knowledge_enabled: bool,
     ) -> None:
+        self.get_meeting(meeting_id)
         with self.database.session_factory.begin() as session:
             row = session.get(MeetingKnowledgeSettingsRow, str(meeting_id))
             if row is None:
                 row = MeetingKnowledgeSettingsRow(
-                    meeting_id=str(meeting_id), organization_id=str(LEGACY_ORGANIZATION_ID)
+                    meeting_id=str(meeting_id), organization_id=str(current_organization_id())
                 )
                 session.add(row)
+            elif row.organization_id != str(current_organization_id()):
+                raise MeetingNotFoundError(meeting_id)
             row.tags = tags
             row.knowledge_enabled = knowledge_enabled
             row.updated_at = datetime.now(UTC)
@@ -570,6 +627,8 @@ class SQLAlchemyRepository:
     def save_transcription_route(
         self, meeting_id: UUID, profile: ProviderProfile, endpoint_host: str,
     ) -> None:
+        self.get_meeting(meeting_id)
+        self.get_profile(profile.id)
         with self.database.session_factory.begin() as session:
             row = session.get(MeetingTranscriptionRouteRow, str(meeting_id))
             if row is None:
@@ -583,6 +642,7 @@ class SQLAlchemyRepository:
             row.selected_at = datetime.now(UTC)
 
     def get_transcription_route(self, meeting_id: UUID) -> dict[str, object] | None:
+        self.get_meeting(meeting_id)
         with self.database.session_factory() as session:
             row = session.get(MeetingTranscriptionRouteRow, str(meeting_id))
             if row is None:
@@ -597,6 +657,7 @@ class SQLAlchemyRepository:
             }
 
     def clear_transcription_route(self, meeting_id: UUID) -> None:
+        self.get_meeting(meeting_id)
         with self.database.session_factory.begin() as session:
             row = session.get(MeetingTranscriptionRouteRow, str(meeting_id))
             if row is not None:

@@ -1,7 +1,6 @@
 import asyncio
 import json
 import re
-from types import SimpleNamespace
 
 import httpx
 from fastapi.testclient import TestClient
@@ -218,11 +217,8 @@ def test_participant_opt_in_validation():
 
 def test_worker_does_not_poll_historical_meetings():
     class HistoricalRepository:
-        def list_meetings(self):
-            return [SimpleNamespace(id="historical", vexa_meeting_id=42, status=MeetingStatus.ACTIVE)]
-
-        def get_post_meeting_job(self, _meeting_id):
-            return None
+        def list_worker_scopes(self):
+            return []
 
     class UnexpectedCall:
         async def refresh(self, _meeting_id):

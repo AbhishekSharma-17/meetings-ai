@@ -19,7 +19,7 @@ def test_legacy_workspace_is_private_editable_and_persistent(tmp_path, monkeypat
 
         workspace = client.get("/v1/workspace").json()
         assert workspace["display_name"] == "GenAI Protos"
-        assert workspace["tenant_isolation_enabled"] is False
+        assert workspace["tenant_isolation_enabled"] is True
         assert workspace["slug"] == "legacy-workspace"
 
         changed = client.patch("/v1/workspace", json={

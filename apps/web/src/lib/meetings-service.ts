@@ -1,4 +1,4 @@
-import type { AuditEvent, Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeSearchResponse, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, PostMeetingJob, ProfileKind, ProviderProfile, ResendStatus, SpeakerIdentity, TranscriptSegment, TranscriptionRoute, Workspace, WorkspaceMember } from "./types";
+import type { AuditEvent, Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeSearchResponse, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, PostMeetingJob, ProfileKind, ProviderProfile, ResendStatus, SpeakerIdentity, TranscriptSegment, TranscriptionRoute, Workspace, WorkspaceMember, WorkspaceOption } from "./types";
 
 export interface MeetingsService {
   getSession(): Promise<boolean>;
@@ -9,6 +9,9 @@ export interface MeetingsService {
   resetMemberPassword(userId: string): Promise<InviteResult>;
   logout(): Promise<void>;
   getWorkspace(): Promise<Workspace>;
+  listWorkspaces(): Promise<WorkspaceOption[]>;
+  createWorkspace(displayName: string): Promise<CurrentAccount>;
+  switchWorkspace(id: string): Promise<CurrentAccount>;
   updateWorkspace(patch: { display_name: string; contact_email: string | null }): Promise<Workspace>;
   listWorkspaceMembers(): Promise<WorkspaceMember[]>;
   listWorkspaceAudit(): Promise<AuditEvent[]>;
@@ -286,6 +289,18 @@ class HttpMeetingsService implements MeetingsService {
 
   async getWorkspace(): Promise<Workspace> {
     return api<Workspace>("/v1/workspace");
+  }
+
+  async listWorkspaces(): Promise<WorkspaceOption[]> {
+    return api<WorkspaceOption[]>("/v1/workspaces");
+  }
+
+  async createWorkspace(displayName: string): Promise<CurrentAccount> {
+    return api<CurrentAccount>("/v1/workspaces", { method: "POST", body: JSON.stringify({ display_name: displayName }) });
+  }
+
+  async switchWorkspace(id: string): Promise<CurrentAccount> {
+    return api<CurrentAccount>(`/v1/workspaces/${id}/switch`, { method: "POST" });
   }
 
   async updateWorkspace(patch: { display_name: string; contact_email: string | null }): Promise<Workspace> {

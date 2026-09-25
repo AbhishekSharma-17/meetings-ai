@@ -1,39 +1,40 @@
 # Meetings AI SaaS build sequence
 
-This separates a real multi-tenant product from the current internal pilot.
+This separates built product capabilities from the remaining production gates.
 Live capture, speaker quality, and email delivery remain **unvalidated** while
 testing is deferred. Billing or signup must not be enabled before isolation.
 
 | Stage | User-visible capability | Required backend boundary | Status |
 | --- | --- | --- | --- |
-| 0. Internal pilot | One admin, meetings, providers, reviewed MOM, manual delivery | One shared database workspace | Built; live outcomes unvalidated |
-| 1. Workspace foundation | Edit organization profile, see people and roles | Organization, user, membership and credential records | Built locally; **one organization only** |
-| 2. Tenant isolation | Multiple private workspaces | Organization IDs on every meeting, transcript, MOM, delivery, provider profile/default, job, and knowledge item; scoped queries and workers; cross-tenant denial tests | Next build slice |
-| 3. Accounts and roles | Email/password login, admin-generated temporary passwords, first-login rotation and owner/admin/member/viewer boundaries | Local sessions, database-backed sign-in throttling and payload-free workspace audit are built; external OIDC, workspace switching and full lifecycle controls remain | Partial |
+| 0. Core meeting workflow | Bot dispatch, transcript, reviewed MOM, manual delivery | Persisted meeting and credential records | Built locally; live outcomes still need validation |
+| 1. Workspace foundation | Edit organization profile, see people and roles | Organization, user, membership and credential records | Built locally |
+| 2. Tenant isolation | Private organization data | Ownership records for meetings/providers, organization defaults, scoped API/worker and knowledge queries, cross-tenant denial tests | Application API boundary and workspace create/switch built; hosted RLS remains |
+| 3. Accounts and roles | Email/password login, admin-generated temporary passwords, first-login rotation and owner/admin/member/viewer boundaries | Local sessions, database-backed sign-in throttling and payload-free workspace audit are built; external OIDC and full lifecycle controls remain | Partial |
 | 4. Team operations | Calendar scheduling, shared templates, delivery policies, retention controls | Durable queue, policy enforcement, deletion/export, observability and backups | Planned |
-| 5. Agentic knowledge | Named bases, meeting assignment, private/org/specific sharing, saved chats, selectable text model, source-linked Q&A | Current pilot retrieves directly from canonical records; organization-scoped semantic indexing, re-index/delete, query planning and linked topic pages remain | Expanded lexical pilot built; semantic agent planned |
+| 5. Agentic knowledge | Named bases, meeting assignment, private/org/specific sharing, saved chats, selectable text model, source-linked Q&A | Current retrieval reads canonical records; semantic indexing, re-index/delete, query planning and linked topic pages remain | Source-linked lexical workflow built; deeper agent planned |
 | 6. Commercial SaaS | Plans, usage visibility, billing, self-serve setup | Metered usage, quotas, payment webhooks, dunning, tax/invoicing choices | Planned; no gateway selected |
 
-## Isolation rule for the next slice
+## Isolation boundary and remaining work
 
-The current API holds one singleton repository and one local organization.
-Accounts can join only that organization; no account may select or create
-another organization yet. First, migrate the
-existing records into the legacy organization. Then require an organization
-context on all repository reads and writes, including background jobs and
-provider defaults. Return 404 for another organization's resource ID so its
-existence is not disclosed. Verify two-organization fixtures cannot read,
-modify, send, export, or search each other's data. Only after these tests pass
-should signup, invitations, or switching become visible in the UI.
+The API now resolves an organization from the signed-in account and scopes
+meetings, transcripts, MOM, delivery, provider profiles/defaults, knowledge,
+workspace listings, and worker processing to that organization. Schema v13
+backfills ownership for historical records. Foreign resource IDs return 404;
+two-organization API tests cover reads, mutations, search, and delivery gates.
+This is an application boundary, not hosted Supabase RLS. The browser has no
+direct table access or service-role key.
 
 The workspace contact email is metadata only. It does not alter the Resend
-sender or recipients. Local account roles now gate admin routes and knowledge
-sharing within this one organization; that is not a substitute for complete
-tenant-scoped repository queries or a production identity service.
+sender or recipients. Local account roles gate admin routes and knowledge
+sharing inside their organization. Users can create/switch workspaces from the
+profile menu, and an existing account can be added to another workspace without
+replacing its password. The local password system still needs a production
+identity lifecycle, membership removal/role editing, and hosted RLS tests before
+public customer onboarding.
 
-Do not open the AI knowledge screen to multiple customer organizations until
-stage 2 isolates every search and chat source by authenticated organization,
-including provider configuration and background workers.
+Do not connect a public Supabase project or expose its tables until grants and
+RLS policies are written and tested for two tenants. Keep the FastAPI policy
+boundary in place even when PostgreSQL is hosted by Supabase.
 
 ## Provider and assistant-branding slice
 
@@ -60,4 +61,4 @@ silently fail or break joining.
 - Identity provider and sign-in methods (OIDC/SSO, passwordless, or both).
 - Billing provider, billing currency/region, unit of usage, and free-trial
   policy. These choices affect customer-facing behavior and should not be
-  guessed from the internal pilot.
+  guessed from local development.

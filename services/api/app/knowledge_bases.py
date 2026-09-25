@@ -1,8 +1,4 @@
-"""Named knowledge spaces for the single-admin pilot.
-
-The tables carry organization and owner IDs now, but member sharing must remain
-disabled until account sessions and repository-wide tenant isolation exist.
-"""
+"""Named and shareable organization knowledge bases."""
 
 from __future__ import annotations
 
@@ -15,12 +11,13 @@ from sqlalchemy import delete, func, select
 
 from .database import (
     Database, KnowledgeBaseAccessRow, KnowledgeBaseRow, KnowledgeConversationRow, KnowledgeMessageRow,
-    LEGACY_ADMIN_USER_ID, LEGACY_ORGANIZATION_ID, MeetingKnowledgeBaseRow,
+    LEGACY_ADMIN_USER_ID, MeetingKnowledgeBaseRow, MeetingTenantRow,
     MeetingKnowledgeSettingsRow, MeetingMinutesRow, MeetingRow,
     OrganizationMembershipRow,
 )
 from .accounts import Actor
 from .repository import ProfileNotFoundError
+from .tenant import current_organization_id
 
 
 class KnowledgeBaseNotFoundError(LookupError):
@@ -126,7 +123,7 @@ class KnowledgeBaseService:
     def list(self, actor: Actor | None = None) -> list[KnowledgeBasePublic]:
         with self.database.session_factory() as session:
             rows = session.execute(select(KnowledgeBaseRow).where(
-                KnowledgeBaseRow.organization_id == str(LEGACY_ORGANIZATION_ID)
+                KnowledgeBaseRow.organization_id == str(self._organization(actor))
             ).order_by(KnowledgeBaseRow.name)).scalars().all()
             return [self._public(session, row) for row in rows if self._can_read(session, row, actor)]
 
@@ -140,11 +137,13 @@ class KnowledgeBaseService:
             base = self._row(session, base_id, actor)
             rows = session.execute(
                 select(MeetingRow, MeetingKnowledgeSettingsRow, MeetingMinutesRow)
+                .join(MeetingTenantRow, MeetingTenantRow.meeting_id == MeetingRow.id)
                 .join(MeetingKnowledgeBaseRow, MeetingKnowledgeBaseRow.meeting_id == MeetingRow.id)
                 .join(MeetingKnowledgeSettingsRow, MeetingKnowledgeSettingsRow.meeting_id == MeetingRow.id)
                 .outerjoin(MeetingMinutesRow, MeetingMinutesRow.meeting_id == MeetingRow.id)
                 .where(
                     MeetingKnowledgeBaseRow.knowledge_base_id == base.id,
+                    MeetingTenantRow.organization_id == base.organization_id,
                     MeetingKnowledgeSettingsRow.organization_id == base.organization_id,
                     MeetingKnowledgeSettingsRow.knowledge_enabled.is_(True),
                     MeetingRow.status == MeetingStatus.COMPLETED.value,
@@ -174,10 +173,11 @@ class KnowledgeBaseService:
             raise KnowledgeBaseConflictError("only admins can select an AI provider")
         self._validate_profile(data.text_profile_id)
         now = datetime.now(UTC)
+        organization_id = self._organization(actor)
         with self.database.session_factory.begin() as session:
-            self._unique_name(session, data.name)
+            self._unique_name(session, data.name, organization_id)
             row = KnowledgeBaseRow(
-                id=str(uuid4()), organization_id=str(LEGACY_ORGANIZATION_ID),
+                id=str(uuid4()), organization_id=str(organization_id),
                 name=data.name, description=data.description,
                 created_by=str(actor.user_id if actor else LEGACY_ADMIN_USER_ID), visibility="private",
                 text_profile_id=str(data.text_profile_id) if data.text_profile_id else None,
@@ -198,7 +198,7 @@ class KnowledgeBaseService:
             if "name" in data.model_fields_set:
                 if data.name is None:
                     raise KnowledgeBaseConflictError("knowledge base name cannot be empty")
-                self._unique_name(session, data.name, except_id=row.id)
+                self._unique_name(session, data.name, self._organization(actor), except_id=row.id)
                 row.name = data.name
             if "description" in data.model_fields_set:
                 row.description = data.description
@@ -229,6 +229,7 @@ class KnowledgeBaseService:
             return self._public(session, row)
 
     def assign_meeting(self, meeting_id: UUID, base_id: UUID | None) -> None:
+        self.repository.get_meeting(meeting_id)
         with self.database.session_factory.begin() as session:
             association = session.get(MeetingKnowledgeBaseRow, str(meeting_id))
             if base_id is None:
@@ -242,6 +243,7 @@ class KnowledgeBaseService:
             association.knowledge_base_id = str(base_id)
 
     def meeting_base_id(self, meeting_id: UUID) -> UUID | None:
+        self.repository.get_meeting(meeting_id)
         with self.database.session_factory() as session:
             row = session.get(MeetingKnowledgeBaseRow, str(meeting_id))
             return UUID(row.knowledge_base_id) if row else None
@@ -324,9 +326,13 @@ class KnowledgeBaseService:
     @staticmethod
     def _row(session, base_id: UUID, actor: Actor | None = None) -> KnowledgeBaseRow:
         row = session.get(KnowledgeBaseRow, str(base_id))
-        if row is None or row.organization_id != str(LEGACY_ORGANIZATION_ID) or not KnowledgeBaseService._can_read(session, row, actor):
+        if row is None or row.organization_id != str(KnowledgeBaseService._organization(actor)) or not KnowledgeBaseService._can_read(session, row, actor):
             raise KnowledgeBaseNotFoundError(base_id)
         return row
+
+    @staticmethod
+    def _organization(actor: Actor | None) -> UUID:
+        return actor.organization_id if actor is not None else current_organization_id()
 
     @staticmethod
     def _can_read(session, row: KnowledgeBaseRow, actor: Actor | None) -> bool:
@@ -363,9 +369,9 @@ class KnowledgeBaseService:
         )
 
     @staticmethod
-    def _unique_name(session, name: str, except_id: str | None = None) -> None:
+    def _unique_name(session, name: str, organization_id: UUID, except_id: str | None = None) -> None:
         existing = session.execute(select(KnowledgeBaseRow.id).where(
-            KnowledgeBaseRow.organization_id == str(LEGACY_ORGANIZATION_ID),
+            KnowledgeBaseRow.organization_id == str(organization_id),
             func.lower(KnowledgeBaseRow.name) == name.lower(),
         )).scalar_one_or_none()
         if existing and existing != except_id:

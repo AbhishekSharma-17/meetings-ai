@@ -1,4 +1,4 @@
-# Non-live MVP readiness — 2026-09-24
+# Non-live readiness — updated 2026-09-25
 
 Live meeting joins, speaker-quality measurement, and real email delivery are
 deferred by the owner. They remain **unvalidated**. Do not treat automated tests
@@ -13,7 +13,7 @@ or healthy containers as proof of those outcomes.
 - Transcript review, evidence-linked MOM edits, approval, retries, and Resend
   delivery controls have API and mocked-browser tests. No real email is sent
   by these tests.
-- Schema steps 3–11 preserve prior rows; startup refuses missing, unknown, or
+- Schema steps 3–13 preserve prior rows; startup refuses missing, unknown, or
   future schema states. Compose health checks use `/ready`, which queries the
   database and its current schema version.
 - A vector logo, meeting tags, opt-in AI knowledge settings, source-linked
@@ -44,7 +44,7 @@ or healthy containers as proof of those outcomes.
 - Separate-organization isolation, external identity/SSO, account recovery,
   login rate limiting, audit logs, organization switching, and billing.
 
-Follow [MVP acceptance](mvp-acceptance.md) only when live testing resumes.
+Follow [capture acceptance](mvp-acceptance.md) only when live testing resumes.
 Rotate all API keys previously pasted into chat before that witness.
 
 ## Source and database handoff
@@ -55,7 +55,7 @@ at `1a8084e9a7f57a79902ed9bad9ae3b5c11c01e10`. The parent project pins
 that commit as a submodule. A remote checkout must initialize submodules.
 
 Back up the database before applying a future migration. Migrations are
-additive and forward-only in this MVP; there is no automated rollback. The
+additive and forward-only at present; there is no automated rollback. The
 version manifest in `services/api/app/database.py` is frozen to the model
 columns: a new table or column requires a new numbered migration, not a silent
 `create_all` at application startup.
