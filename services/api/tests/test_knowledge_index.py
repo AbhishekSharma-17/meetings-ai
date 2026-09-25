@@ -116,3 +116,5 @@ def test_index_fingerprint_rejects_edited_transcript_and_missing_provider(tmp_pa
         assert stale["retrieval_mode"] == "lexical"
         assert client.post(f"/v1/knowledge-bases/{base_id}/reindex").status_code == 200
         assert client.get(f"/v1/knowledge-bases/{base_id}/index").json()["indexed_sources"] == 1
+        assert client.delete(f"/v1/provider-profiles/{profile['id']}").status_code == 204
+        assert client.get(f"/v1/knowledge-bases/{base_id}/index").json()["indexed_sources"] == 0

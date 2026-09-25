@@ -159,6 +159,10 @@ class SQLAlchemyRepository:
                 text_profile_id=str(profile_id), organization_id=str(current_organization_id())
             ).all():
                 base.text_profile_id = None
+            session.execute(delete(KnowledgeEmbeddingRow).where(
+                KnowledgeEmbeddingRow.organization_id == str(current_organization_id()),
+                KnowledgeEmbeddingRow.profile_id == str(profile_id),
+            ))
             session.delete(owner)
             session.delete(row)
 

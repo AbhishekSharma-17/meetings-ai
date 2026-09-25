@@ -34,7 +34,8 @@ synchronous implementation using JSON vectors in PostgreSQL, not a pgvector or
 background-worker deployment.
 
 Opt-out, tag changes, reassignment, transcript replacement, speaker correction,
-and MOM save purge that meeting's vectors. Those sources remain searchable
+and MOM save purge that meeting's vectors. Deleting an embedding profile also
+purges vectors produced by it. Those sources remain searchable
 lexically where still eligible; manual reindex restores semantic coverage. A
 concurrent mutation during a reindex may leave an unusable stale vector, but
 fingerprint validation prevents it from being cited. A user can export or delete
