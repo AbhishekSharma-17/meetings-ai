@@ -189,11 +189,36 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     if (response.status === 401 && !path.startsWith("/v1/auth/")) {
       window.dispatchEvent(new Event("meetings-ai-session-expired"));
     }
-    const payload = await response.json().catch(() => null) as { detail?: string } | null;
-    throw new ApiError(payload?.detail ?? `API request failed (${response.status})`, response.status);
+    const payload = await response.json().catch(() => null) as unknown;
+    throw new ApiError(apiErrorMessage(payload) ?? `API request failed (${response.status})`, response.status);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
+}
+
+function apiErrorMessage(payload: unknown): string | null {
+  if (typeof payload === "string") return payload || null;
+  if (Array.isArray(payload)) {
+    const messages = payload.map((item) => {
+      if (typeof item === "object" && item !== null && "msg" in item && typeof item.msg === "string") {
+        const location = "loc" in item && Array.isArray(item.loc)
+          ? item.loc.filter((part: unknown) => part !== "body").join(".")
+          : "";
+        return location ? `${location}: ${item.msg}` : item.msg;
+      }
+      return apiErrorMessage(item);
+    }).filter(Boolean);
+    return messages.length ? messages.join("; ") : null;
+  }
+  if (typeof payload === "object" && payload !== null) {
+    for (const key of ["detail", "message", "error"]) {
+      if (key in payload) {
+        const message = apiErrorMessage((payload as Record<string, unknown>)[key]);
+        if (message) return message;
+      }
+    }
+  }
+  return null;
 }
 
 class ApiError extends Error {

@@ -12,14 +12,49 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
   const [error, setError] = useState<string | null>(null);
   const [joining, setJoining] = useState(false);
   const [bases, setBases] = useState<KnowledgeBase[]>([]);
+  const [basesError, setBasesError] = useState<string | null>(null);
   const [knowledgeEnabled, setKnowledgeEnabled] = useState(false);
+  const [selectedBaseId, setSelectedBaseId] = useState("");
+  const [newBaseName, setNewBaseName] = useState("");
   const [tagInput, setTagInput] = useState("");
   useEffect(() => {
-    if (open) void meetingsService.listKnowledgeBases().then(setBases).catch(() => setBases([]));
+    if (!open) return;
+    let active = true;
+    void meetingsService.listKnowledgeBases().then((items) => {
+      if (active) { setBases(items); setBasesError(null); }
+    }).catch(() => {
+      if (active) { setBases([]); setBasesError("Knowledge bases could not be loaded. Please retry or choose a new name."); }
+    });
+    return () => { active = false; };
   }, [open]);
   if (!open) return null;
 
-  function close() { setError(null); setJoining(false); onClose(); }
+  function close() { setError(null); setJoining(false); setSelectedBaseId(""); setNewBaseName(""); setTagInput(""); setKnowledgeEnabled(false); onClose(); }
+
+  async function resolveKnowledgeBaseId(): Promise<string | null> {
+    if (!knowledgeEnabled) return null;
+    const name = newBaseName.trim();
+    if (!name) return selectedBaseId || null;
+    const matches = (items: KnowledgeBase[]) => items.find((base) => base.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase());
+    const existing = matches(bases);
+    if (existing) return existing.id;
+    try {
+      const created = await meetingsService.createKnowledgeBase(name);
+      setBases((items) => [...items, created]);
+      return created.id;
+    } catch (createError) {
+      if ((createError as { status?: number }).status !== 409) throw createError;
+      // A second tab or another teammate may have created this base since the dialog opened.
+      const latest = await meetingsService.listKnowledgeBases().catch(() => {
+        throw new Error(`A knowledge base named “${name}” already exists, but the available bases could not be loaded. Refresh the page and select it, or ask an administrator for access.`);
+      });
+      setBases(latest);
+      setBasesError(null);
+      const concurrent = matches(latest);
+      if (concurrent) return concurrent.id;
+      throw new Error(`A knowledge base named “${name}” already exists, but you cannot access it. Ask its owner to share it or choose another name.`);
+    }
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -27,10 +62,16 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
     setError(null);
     setJoining(true);
     try {
-      const newBaseName = knowledgeEnabled ? String(form.get("new-knowledge-base") ?? "").trim() : "";
-      const knowledgeBaseId = newBaseName
-        ? (await meetingsService.createKnowledgeBase(newBaseName)).id
-        : knowledgeEnabled ? String(form.get("knowledge-base") ?? "") || null : null;
+      const deliverySettings = {
+        internal_recipients: addresses(String(form.get("internal-recipients") ?? "")),
+        participant_recipients: addresses(String(form.get("participant-recipients") ?? "")),
+        send_to_participants: form.get("share-participants") === "on",
+        include_transcript: form.get("include-transcript") === "on",
+      };
+      if (deliverySettings.send_to_participants && deliverySettings.participant_recipients.length === 0) {
+        throw new Error("Add at least one participant email address, or turn off participant delivery.");
+      }
+      const knowledgeBaseId = await resolveKnowledgeBaseId();
       const input = {
         meetingUrl: String(form.get("meeting-link") ?? ""),
         title: String(form.get("meeting-title") ?? "") || undefined,
@@ -38,12 +79,7 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
         tags: tagInput.split(/[,;\n]+/).map((item) => item.trim()).filter(Boolean),
         knowledgeEnabled,
         knowledgeBaseId,
-        deliverySettings: {
-          internal_recipients: addresses(String(form.get("internal-recipients") ?? "")),
-          participant_recipients: addresses(String(form.get("participant-recipients") ?? "")),
-          send_to_participants: form.get("share-participants") === "on",
-          include_transcript: form.get("include-transcript") === "on",
-        },
+        deliverySettings,
       };
       const shouldSchedule = calendarSelection && new Date(calendarSelection.event.starts_at).getTime() > Date.now() + 60_000;
       if (shouldSchedule) {
@@ -87,13 +123,15 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
         <div className={knowledgeEnabled ? "meeting-knowledge-options enabled" : "meeting-knowledge-options"}>
           <label className="meeting-knowledge-primary"><input type="checkbox" name="knowledge-enabled" checked={knowledgeEnabled} onChange={(event) => setKnowledgeEnabled(event.target.checked)} disabled={joining} /><span><b>Add this meeting to AI knowledge</b><small>Connect its transcript and approved MOM to a searchable knowledge base after completion.</small></span></label>
           <div className="meeting-knowledge-fields"><label htmlFor="knowledge-base">Knowledge base <span className="optional">one per meeting</span></label>
-          <select id="knowledge-base" name="knowledge-base" defaultValue="" disabled={joining} onChange={(event) => { if (event.target.value) setKnowledgeEnabled(true); }}><option value="">No named knowledge base</option>{bases.map((base) => <option value={base.id} key={base.id}>{base.name}</option>)}</select>
+          <select id="knowledge-base" name="knowledge-base" value={selectedBaseId} disabled={joining} onChange={(event) => { setSelectedBaseId(event.target.value); if (event.target.value) setKnowledgeEnabled(true); }}><option value="">No named knowledge base</option>{bases.map((base) => <option value={base.id} key={base.id}>{base.name}</option>)}</select>
+          {basesError ? <p className="form-error" role="alert">{basesError}</p> : null}
           <label htmlFor="new-knowledge-base">Or create a knowledge base <span className="optional">optional</span></label>
-          <input id="new-knowledge-base" name="new-knowledge-base" maxLength={120} placeholder="e.g. Acme client" disabled={joining} onChange={(event) => { if (event.target.value.trim()) setKnowledgeEnabled(true); }} />
+          <input id="new-knowledge-base" name="new-knowledge-base" maxLength={120} placeholder="e.g. Acme client" value={newBaseName} disabled={joining} onChange={(event) => { setNewBaseName(event.target.value); if (event.target.value.trim()) setKnowledgeEnabled(true); }} />
+          {newBaseName.trim() && bases.some((base) => base.name.trim().toLocaleLowerCase() === newBaseName.trim().toLocaleLowerCase()) ? <p role="status">This knowledge base already exists. The meeting will be added to it.</p> : null}
           <label htmlFor="meeting-tags">Knowledge tags <span className="optional">add multiple, separated by commas</span></label>
           <input id="meeting-tags" name="meeting-tags" value={tagInput} onChange={(event) => setTagInput(event.target.value)} placeholder="e.g. discovery, roadmap, Acme" disabled={joining} />
           {tagInput.trim() ? <div className="meeting-tag-preview" aria-label="Tags to add">{tagInput.split(/[,;\n]+/).map((item) => item.trim()).filter(Boolean).map((item, index) => <span key={`${item}:${index}`}>#{item}</span>)}</div> : null}
-          <p>One knowledge base can hold many meetings. Tags can be multiple. A new base name takes precedence over a selection.</p></div>
+          <p>One knowledge base can hold many meetings. Tags can be multiple. An existing name reuses that base; a new name creates one.</p></div>
         </div>
         <details className="meeting-delivery-options">
           <summary>Recap delivery options</summary>
@@ -103,6 +141,7 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
           <label htmlFor="participant-recipients">Participant email addresses</label>
           <textarea id="participant-recipients" name="participant-recipients" rows={2} placeholder="optional; enter exact addresses" disabled={joining} />
           <label className="check-label"><input type="checkbox" name="share-participants" disabled={joining} /> Also send to listed participants after approval</label>
+          <p>To enable participant delivery, add their email addresses above. Nothing is sent until the MOM is approved.</p>
           <label className="check-label"><input type="checkbox" name="include-transcript" disabled={joining} /> Include full transcript in the email</label>
         </details>
         <div className="disclosure"><span aria-hidden="true">ⓘ</span><p><b>Disclosure is required.</b> Before sending, confirm the host will announce: “Meetings AI has joined and will record and transcribe this conversation.”</p></div>
