@@ -56,7 +56,11 @@ and the MOM screen shows whether an API key and sender are configured. A configu
 sender does **not** prove domain verification: Resend must accept a real send.
 The app no longer silently falls back to `onboarding@resend.dev`; set
 `RESEND_FROM_EMAIL` explicitly. Approved-MOM sends carry a deterministic
-idempotency key to avoid duplicate provider sends during retries.
+idempotency key to avoid duplicate provider sends during retries. The recap uses
+an HTML and plain-text template; the logo is an inline image. When the sender
+chooses to include the transcript, it is attached as a timestamped Markdown
+file rather than appended to the message body. Internal segment IDs are kept
+out of the recipient-facing recap.
 
 For a local email witness, configure a Resend key from the account that owns the
 sending domain, set `RESEND_FROM_EMAIL`, restart the API, then review and approve
@@ -65,7 +69,10 @@ or inspect domains. The current local sender is `meetings@genaiprotos.com`, and
 the API uses a domain-scoped send-only key in the ignored `.env.local` file. On
 2026-09-23, the product sent an approved MOM to `abhishek@genaiprotos.com`;
 Resend reported it delivered. The domain still has a failed click-tracking CNAME
-record, which should be fixed before relying on click tracking.
+record, which should be fixed before relying on click tracking. The `meetings@`
+address is a sender on the verified root domain, not a separate mailbox; Resend
+receiving is disabled for this domain, so replies need a separately configured
+inbox or reply-to route.
 All provider credentials belong in the ignored local secret file and must be rotated
 if they have appeared in a chat or task transcript.
 

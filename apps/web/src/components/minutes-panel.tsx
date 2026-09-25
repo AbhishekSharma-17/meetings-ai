@@ -2,14 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { meetingsService } from "@/lib/meetings-service";
-import type { AttributedQuestion, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MinutesDraft, PostMeetingJob, ResendStatus, SpeakerContribution, TranscriptSegment } from "@/lib/types";
+import type { ActionItem, AttributedQuestion, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MinutesDraft, PostMeetingJob, ResendStatus, SpeakerContribution, TranscriptSegment } from "@/lib/types";
 
 type EditableDraft = {
   title: string;
   summary: string;
   discussion: string;
   decisions: string;
-  actions: string;
+  actions: ActionItem[];
   questions: string;
   contributions: SpeakerContribution[];
   questionsAsked: AttributedQuestion[];
@@ -171,7 +171,7 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
     if (!draft) return null;
     setBusy("save"); setError(null); setNotice(null);
     try {
-      const saved = await meetingsService.saveMinutes(meeting.id, toPayload(draft, minutes));
+      const saved = await meetingsService.saveMinutes(meeting.id, toPayload(draft));
       accept(saved);
       setNotice("Draft saved.");
       return saved;
@@ -183,7 +183,7 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
     if (!draft) return;
     setBusy("approve"); setError(null); setNotice(null);
     try {
-      await meetingsService.saveMinutes(meeting.id, toPayload(draft, minutes));
+      await meetingsService.saveMinutes(meeting.id, toPayload(draft));
       accept(await meetingsService.approveMinutes(meeting.id));
       setNotice("MOM approved and ready to send.");
     } catch (requestError) { setError(messageFor(requestError)); }
@@ -225,8 +225,7 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
         <label>Discussion points <span>one per line</span><textarea rows={6} value={draft.discussion} disabled={minutes.status === "sent"} onChange={(event) => setDraft({ ...draft, discussion: event.target.value })} /></label>
         <label>Decisions <span>one per line</span><textarea rows={6} value={draft.decisions} disabled={minutes.status === "sent"} onChange={(event) => setDraft({ ...draft, decisions: event.target.value })} /></label>
       </div>
-      <label>Action items <span>description | owner | due date | evidence IDs — one per line</span><textarea rows={6} value={draft.actions} disabled={minutes.status === "sent"} onChange={(event) => setDraft({ ...draft, actions: event.target.value })} /></label>
-      <details className="evidence-picker"><summary>Find transcript evidence IDs</summary><ul>{segments.filter((segment) => segment.isFinal).map((segment) => <li key={segment.segmentId}><code>{segment.segmentId}</code> · {segment.speaker}: {segment.text}</li>)}</ul></details>
+      <div className="mom-action-list"><div className="section-heading"><div><h3>Action items</h3><p>Owners and dates should reflect what was explicitly agreed. Every action needs transcript evidence.</p></div>{minutes.status !== "sent" ? <button type="button" className="button secondary" onClick={() => setDraft({ ...draft, actions: [...draft.actions, { description: "", owner: null, due_date: null, evidence_segment_ids: [] }] })}>Add action</button> : null}</div>{draft.actions.map((item, index) => <div className="mom-action-card" key={index}><label>Action<input value={item.description} disabled={minutes.status === "sent"} onChange={(event) => setDraft({ ...draft, actions: draft.actions.map((entry, position) => position === index ? { ...entry, description: event.target.value } : entry) })} /></label><div className="mom-columns"><label>Owner<input value={item.owner ?? ""} disabled={minutes.status === "sent"} onChange={(event) => setDraft({ ...draft, actions: draft.actions.map((entry, position) => position === index ? { ...entry, owner: event.target.value || null } : entry) })} /></label><label>Due date<input value={item.due_date ?? ""} disabled={minutes.status === "sent"} onChange={(event) => setDraft({ ...draft, actions: draft.actions.map((entry, position) => position === index ? { ...entry, due_date: event.target.value || null } : entry) })} /></label></div><EvidenceLinks ids={item.evidence_segment_ids ?? []} segments={segments} />{minutes.status !== "sent" ? <><div className="mom-evidence-remove">{(item.evidence_segment_ids ?? []).map((id) => <button type="button" className="text-button" key={id} onClick={() => setDraft({ ...draft, actions: draft.actions.map((entry, position) => position === index ? { ...entry, evidence_segment_ids: (entry.evidence_segment_ids ?? []).filter((evidenceId) => evidenceId !== id) } : entry) })}>Remove {evidenceTime(id, segments)} evidence</button>)}</div><label className="mom-evidence-add">Add transcript evidence<select value="" onChange={(event) => { const value = event.target.value; if (value) setDraft({ ...draft, actions: draft.actions.map((entry, position) => position === index ? { ...entry, evidence_segment_ids: [...new Set([...(entry.evidence_segment_ids ?? []), value])] } : entry) }); }}><option value="">Choose a transcript turn</option>{segments.filter((segment) => segment.isFinal).map((segment) => <option key={segment.segmentId} value={segment.segmentId}>{evidenceTime(segment.segmentId, segments)} · {segment.speaker} · {segment.text.slice(0, 80)}</option>)}</select></label><button type="button" className="text-button destructive" onClick={() => setDraft({ ...draft, actions: draft.actions.filter((_, position) => position !== index) })}>Remove action</button></> : null}</div>)}</div>
       <label>Open questions <span>one per line</span><textarea rows={5} value={draft.questions} disabled={minutes.status === "sent"} onChange={(event) => setDraft({ ...draft, questions: event.target.value })} /></label>
       <div className="attribution-review"><h3>Who said what</h3><p>Each claim links to transcript evidence. Correct a speaker in the transcript and regenerate if attribution is wrong.</p>{draft.contributions.length ? draft.contributions.map((item, index) => <div className="attribution-item" key={`${item.speaker}-${index}`}><b>{item.speaker}</b><textarea aria-label={`Contribution by ${item.speaker}`} rows={2} value={item.summary} disabled={minutes.status === "sent"} onChange={(event) => setDraft({ ...draft, contributions: draft.contributions.map((entry, position) => position === index ? { ...entry, summary: event.target.value } : entry) })} /><EvidenceLinks ids={item.evidence_segment_ids} segments={segments} />{minutes.status !== "sent" ? <button className="text-button" onClick={() => setDraft({ ...draft, contributions: draft.contributions.filter((_, position) => position !== index) })}>Remove claim</button> : null}</div>) : <p>No named-speaker contributions were extracted.</p>}</div>
       <div className="attribution-review"><h3>Questions asked</h3>{draft.questionsAsked.length ? draft.questionsAsked.map((item, index) => <div className="attribution-item" key={`${item.speaker ?? "unknown"}-${index}`}><b>{item.speaker ?? "Unidentified speaker"}</b><textarea aria-label={`Question asked by ${item.speaker ?? "unidentified speaker"}`} rows={2} value={item.question} disabled={minutes.status === "sent"} onChange={(event) => setDraft({ ...draft, questionsAsked: draft.questionsAsked.map((entry, position) => position === index ? { ...entry, question: event.target.value } : entry) })} /><EvidenceLinks ids={item.evidence_segment_ids} segments={segments} />{minutes.status !== "sent" ? <button className="text-button" onClick={() => setDraft({ ...draft, questionsAsked: draft.questionsAsked.filter((_, position) => position !== index) })}>Remove question</button> : null}</div>) : <p>No direct questions were extracted.</p>}</div>
@@ -244,7 +243,7 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
         <label>Internal team recipients<textarea rows={2} placeholder="team@company.com" value={recipients} onChange={(event) => setRecipients(event.target.value)} /></label>
         <label>Participant recipients<textarea rows={2} placeholder="optional, exact email addresses" value={participantRecipients} onChange={(event) => setParticipantRecipients(event.target.value)} /></label>
         <label className="include-transcript"><input type="checkbox" checked={shareParticipants} onChange={(event) => setShareParticipants(event.target.checked)} /> Also send to listed participants</label>
-        <label className="include-transcript"><input type="checkbox" checked={includeTranscript} onChange={(event) => setIncludeTranscript(event.target.checked)} /> Include the full transcript</label>
+        <label className="include-transcript"><input type="checkbox" checked={includeTranscript} onChange={(event) => setIncludeTranscript(event.target.checked)} /> Attach the full timestamped transcript (.md)</label>
         <div className="dialog-actions"><button className="button secondary" disabled={busy !== null} onClick={() => void saveDeliverySettings()}>Save recipients</button><button className="button primary" disabled={busy !== null || !recipientList.length || (shareParticipants && !participantList.length) || !resendStatus?.can_attempt_send} onClick={() => void send()}>{busy === "send" ? "Sending…" : "Send recap"}</button></div>
       </div> : null}
       {minutes.status === "sent" ? <div className="sent-banner"><b>Recap sent</b><p>This delivered MOM is locked. Corrections require a future versioned workflow.</p></div> : null}
@@ -254,14 +253,14 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
 
 function toEditable(minutes: MeetingMinutes): EditableDraft {
   return {
-    title: minutes.title,
-    summary: minutes.executive_summary,
-    discussion: minutes.discussion_points.join("\n"),
-    decisions: minutes.decisions.join("\n"),
-    actions: minutes.action_items.map((item) => [item.description, item.owner ?? "", item.due_date ?? "", (item.evidence_segment_ids ?? []).join(", ")].join(" | ")).join("\n"),
-    questions: minutes.open_questions.join("\n"),
-    contributions: minutes.speaker_contributions ?? [],
-    questionsAsked: minutes.questions_asked ?? [],
+    title: readableText(minutes.title),
+    summary: readableText(minutes.executive_summary),
+    discussion: minutes.discussion_points.map(readableText).join("\n"),
+    decisions: minutes.decisions.map(readableText).join("\n"),
+    actions: minutes.action_items.map((item) => ({ ...item, description: readableText(item.description) })),
+    questions: minutes.open_questions.map(readableText).join("\n"),
+    contributions: (minutes.speaker_contributions ?? []).map((item) => ({ ...item, summary: readableText(item.summary) })),
+    questionsAsked: (minutes.questions_asked ?? []).map((item) => ({ ...item, question: readableText(item.question) })),
   };
 }
 
@@ -269,17 +268,13 @@ function lines(value: string): string[] {
   return value.split("\n").map((line) => line.trim()).filter(Boolean);
 }
 
-function toPayload(draft: EditableDraft, previous: MeetingMinutes | null): MinutesDraft {
+function toPayload(draft: EditableDraft): MinutesDraft {
   return {
     title: draft.title.trim(),
     executive_summary: draft.summary.trim(),
     discussion_points: lines(draft.discussion),
     decisions: lines(draft.decisions),
-    action_items: lines(draft.actions).map((line) => {
-      const [description = "", owner = "", dueDate = "", evidence = ""] = line.split("|").map((part) => part.trim());
-      const prior = previous?.action_items.find((item) => item.description === description);
-      return { description, owner: owner || null, due_date: dueDate || null, evidence_segment_ids: evidence ? evidence.split(",").map((id) => id.trim()).filter(Boolean) : prior?.evidence_segment_ids ?? [] };
-    }),
+    action_items: draft.actions.filter((item) => item.description.trim()).map((item) => ({ ...item, description: item.description.trim(), owner: item.owner?.trim() || null, due_date: item.due_date?.trim() || null })),
     open_questions: lines(draft.questions),
     speaker_contributions: draft.contributions,
     questions_asked: draft.questionsAsked,
@@ -289,9 +284,24 @@ function toPayload(draft: EditableDraft, previous: MeetingMinutes | null): Minut
 function EvidenceLinks({ ids, segments }: { ids: string[]; segments: TranscriptSegment[] }) {
   return <div className="evidence-links">Evidence: {ids.map((id) => {
     const segment = segments.find((item) => item.segmentId === id);
-    const label = typeof segment?.startedAt === "number" ? `${Math.floor(segment.startedAt / 60)}:${Math.floor(segment.startedAt % 60).toString().padStart(2, "0")}` : id.slice(0, 10);
-    return <a key={id} href={`#transcript-${encodeURIComponent(id)}`} title={id}>{label}</a>;
+    return <a key={id} href={`#transcript-${encodeURIComponent(id)}`} title={segment ? `${segment.speaker}: ${segment.text.slice(0, 100)}` : "Transcript evidence"}>{evidenceTime(id, segments)}</a>;
   })}</div>;
+}
+
+function readableText(value: string): string {
+  return value.replace(/\[[^\]]*csrc-[^\]]+\]/g, "").replace(/csrc-[A-Za-z0-9:._-]+/g, "transcript source").replace(/\s{2,}/g, " ").trim();
+}
+
+function evidenceTime(id: string, segments: TranscriptSegment[]): string {
+  const segment = segments.find((item) => item.segmentId === id);
+  const first = segments.find((item) => item.startedAt !== null);
+  if (!segment || !first) return "View transcript";
+  const numeric = (value: string | number | null): number | null => typeof value === "number" ? value : value ? Date.parse(value) / 1000 : null;
+  const at = numeric(segment.startedAt);
+  const start = numeric(first.startedAt);
+  if (at === null || start === null || !Number.isFinite(at - start)) return "View transcript";
+  const seconds = Math.max(0, Math.floor(at - start));
+  return `${Math.floor(seconds / 60).toString().padStart(2, "0")}:${(seconds % 60).toString().padStart(2, "0")}`;
 }
 
 function messageFor(error: unknown): string {

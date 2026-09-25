@@ -2,9 +2,11 @@
 
 import json
 import re
+from base64 import b64encode
 from hashlib import sha256
 from datetime import UTC, datetime
 from html import escape
+from pathlib import Path
 from uuid import UUID
 
 from meetings_contracts import (
@@ -96,13 +98,16 @@ class MinutesService:
                 "Do not invent names, owners, dates, commitments, decisions, or context. "
                 "Treat Unidentified speaker as unknown, never infer their name from context. "
                 "Use null when an action owner or due date was not explicitly stated. "
-                "Attach exact segment IDs as evidence for every attributed claim and action."
+                "Attach exact segment IDs only in evidence_segment_ids arrays for attributed claims and actions. "
+                "Never put raw segment IDs or bracketed citations in narrative fields."
             ),
             prompt=(
                 f"Meeting title: {meeting.title or 'Untitled meeting'}\n\n"
                 "Return concise structured minutes for this transcript. Separate discussion "
                 "points, explicit decisions, action items, unresolved questions, "
                 "who each identified speaker said, and who asked each question. "
+                "Write a concise but comprehensive executive summary covering the meeting purpose, "
+                "main themes, outcomes or decisions, open issues, and next steps when evidenced. "
                 "Every substantive named speaker needs a contribution entry. "
                 "For an unidentified questioner use null.\n\n"
                 f"Transcript:\n{transcript}"
@@ -119,6 +124,18 @@ class MinutesService:
             draft = MeetingMinutesDraft.model_validate(payload)
             _normalize_generated_evidence(draft, finalized)
             _validate_generated_evidence(draft, finalized)
+            times = _evidence_times(finalized)
+            draft.title = _human_text(draft.title, times)
+            draft.executive_summary = _human_text(draft.executive_summary, times)
+            draft.discussion_points = [_human_text(item, times) for item in draft.discussion_points]
+            draft.decisions = [_human_text(item, times) for item in draft.decisions]
+            draft.open_questions = [_human_text(item, times) for item in draft.open_questions]
+            for item in draft.action_items:
+                item.description = _human_text(item.description, times)
+            for item in draft.speaker_contributions:
+                item.summary = _human_text(item.summary, times)
+            for item in draft.questions_asked:
+                item.question = _human_text(item.question, times)
         except (ProviderExecutionError, ProviderSelectionError, ValidationError, ValueError) as exc:
             raise MinutesGenerationError(f"MOM generation failed: {exc}") from exc
 
@@ -191,8 +208,9 @@ class MinutesService:
         if minutes.status is not MinutesStatus.APPROVED:
             raise MinutesConflictError("approve the MOM before sending it")
         self._require_current_transcript(meeting_id)
-        transcript = self.repository.get_transcript(meeting_id) if request.include_transcript else []
-        html, plain_text = _email_content(minutes, transcript)
+        transcript = self.repository.get_transcript(meeting_id)
+        html, plain_text = _email_content(minutes, transcript, include_transcript=request.include_transcript)
+        attachments = _email_attachments(meeting.title or minutes.title, transcript if request.include_transcript else [])
         delivery = EmailDelivery(
             meeting_id=meeting_id,
             recipients=request.recipients,
@@ -206,9 +224,10 @@ class MinutesService:
             )
             delivery.provider_message_id = await self.resend.send(
                 recipients=request.recipients,
-                subject=f"Meeting recap: {minutes.title or meeting.title or 'Untitled meeting'}",
+                subject=f"Meeting recap: {_human_text(minutes.title or meeting.title or 'Untitled meeting', _evidence_times(transcript))}",
                 html=html,
                 text=plain_text,
+                attachments=attachments,
                 idempotency_key=f"minutes-{sha256(delivery_identity.encode()).hexdigest()}",
             )
         except EmailDeliveryError as exc:
@@ -374,38 +393,120 @@ def _validate_generated_evidence(draft: MeetingMinutesDraft, segments: list[obje
         raise MinutesGenerationError("MOM omitted a substantive named speaker; regenerate or review the transcript")
 
 
-def _email_content(minutes: MeetingMinutes, transcript: list[object]) -> tuple[str, str]:
-    action_lines = [
-        f"- {item.description} — Owner: {item.owner or 'Unassigned'}; Due: {item.due_date or 'Not specified'}"
-        for item in minutes.action_items
-    ]
+_RAW_EVIDENCE = re.compile(r"\[[^\]]*csrc-[^\]]+\]")
+_RAW_SEGMENT_ID = re.compile(r"csrc-[A-Za-z0-9:._-]+")
+
+
+def _clock(seconds: float) -> str:
+    total = max(0, int(seconds))
+    hours, remainder = divmod(total, 3600)
+    minutes, remaining = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{remaining:02d}" if hours else f"{minutes:02d}:{remaining:02d}"
+
+
+def _evidence_times(transcript: list[object]) -> dict[str, str]:
+    if not transcript:
+        return {}
+    first = min(float(getattr(item, "start_seconds", 0)) for item in transcript)
+    return {
+        str(getattr(item, "segment_id", "")): _clock(float(getattr(item, "start_seconds", 0)) - first)
+        for item in transcript
+    }
+
+
+def _human_text(value: str, evidence_times: dict[str, str]) -> str:
+    """Turn model-inserted internal IDs into readable transcript references."""
+    def replace(match: re.Match[str]) -> str:
+        times = list(dict.fromkeys(
+            evidence_times[item] for item in _RAW_SEGMENT_ID.findall(match.group(0))
+            if item in evidence_times
+        ))
+        return f"(Transcript {', '.join(times)})" if times else ""
+
+    return _RAW_SEGMENT_ID.sub("transcript source", _RAW_EVIDENCE.sub(replace, value)).strip()
+
+
+def _email_content(
+    minutes: MeetingMinutes, transcript: list[object], *, include_transcript: bool = False,
+) -> tuple[str, str]:
+    times = _evidence_times(transcript)
+    title = _human_text(minutes.title, times)
+    summary = _human_text(minutes.executive_summary, times)
     sections = [
-        ("Executive summary", [minutes.executive_summary]),
-        ("Who said what", [f"{item.speaker}: {item.summary}" for item in minutes.speaker_contributions]),
-        ("Questions asked", [f"{item.speaker or 'Unidentified speaker'}: {item.question}" for item in minutes.questions_asked]),
         ("Discussion points", minutes.discussion_points),
         ("Decisions", minutes.decisions),
-        ("Action items", action_lines),
+        ("Action items", [
+            f"{item.description} — Owner: {item.owner or 'Unassigned'} · Due: {item.due_date or 'Not specified'}"
+            + (f" (Transcript {', '.join(dict.fromkeys(times[id] for id in item.evidence_segment_ids if id in times))})"
+               if any(id in times for id in item.evidence_segment_ids) else "")
+            for item in minutes.action_items
+        ]),
         ("Open questions", minutes.open_questions),
+        ("Who said what", [f"{item.speaker}: {item.summary}" for item in minutes.speaker_contributions]),
+        ("Questions asked", [f"{item.speaker or 'Unidentified speaker'}: {item.question}" for item in minutes.questions_asked]),
     ]
-    text_parts = [minutes.title]
-    html_parts = [f"<h1>{escape(minutes.title)}</h1>"]
-    for heading, items in sections:
+    text_parts = [title, "", "EXECUTIVE SUMMARY", summary]
+    html_parts = [
+        '<!doctype html><html><body style="margin:0;padding:24px;background:#f3f6f5;color:#172322;font-family:Arial,Helvetica,sans-serif;">',
+        '<table role="presentation" cellpadding="0" cellspacing="0" style="max-width:680px;width:100%;margin:auto;border:1px solid #dce7e3;border-radius:16px;background:#ffffff;">',
+        '<tr><td style="padding:28px 32px;background:#0e4946;border-radius:16px 16px 0 0;color:#ffffff;">',
+        '<table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="vertical-align:middle;padding-right:12px;">',
+        '<img src="cid:meetings-ai-logo" width="42" height="42" alt="Meetings AI" style="display:block;border-radius:10px;" />',
+        '</td><td style="vertical-align:middle;font-size:18px;font-weight:700;letter-spacing:.2px;">Meetings AI</td></tr></table>',
+        '<p style="margin:25px 0 6px;color:#c5e8e2;font-size:11px;font-weight:700;letter-spacing:2px;">MEETING RECAP</p>',
+        f'<h1 style="margin:0;font-size:28px;line-height:1.25;color:#ffffff;">{escape(title)}</h1>',
+        '</td></tr><tr><td style="padding:30px 32px;">',
+        '<h2 style="margin:0 0 12px;font-size:17px;color:#143e3b;">Executive summary</h2>',
+        f'<p style="margin:0 0 24px;line-height:1.65;font-size:15px;">{escape(summary)}</p>',
+    ]
+    for heading, raw_items in sections:
+        items = [_human_text(item, times) for item in raw_items if item.strip()]
         if not items:
             continue
-        text_parts.extend([f"\n{heading}", *items])
-        html_parts.append(f"<h2>{escape(heading)}</h2><ul>")
-        html_parts.extend(f"<li>{escape(item.removeprefix('- '))}</li>" for item in items)
+        text_parts.extend(["", heading.upper(), *[f"• {item}" for item in items]])
+        html_parts.append(
+            f'<h2 style="margin:24px 0 12px;padding-top:20px;border-top:1px solid #e5eeeb;font-size:16px;color:#143e3b;">{escape(heading)}</h2>'
+            '<ul style="margin:0;padding-left:22px;line-height:1.6;font-size:14px;">'
+        )
+        html_parts.extend(f'<li style="margin:0 0 9px;">{escape(item)}</li>' for item in items)
         html_parts.append("</ul>")
-    if transcript:
-        text_parts.append("\nTranscript")
-        html_parts.append("<h2>Transcript</h2><ul>")
-        for segment in transcript:
-            speaker = getattr(segment, "speaker", None) or "Unidentified speaker"
-            line = f"{speaker}: {getattr(segment, 'text', '')}"
-            text_parts.append(line)
-            html_parts.append(f"<li>{escape(line)}</li>")
-        html_parts.append("</ul>")
-    html_parts.append("<p>Prepared by Meetings AI.</p>")
-    text_parts.append("\nPrepared by Meetings AI.")
+    if include_transcript:
+        text_parts.extend(["", "The full timestamped transcript is attached as a Markdown file."])
+        html_parts.append('<p style="margin:25px 0 0;padding:13px 16px;border-radius:8px;background:#eef7f4;color:#254e49;font-size:13px;">Full timestamped transcript attached as a Markdown file.</p>')
+    text_parts.extend(["", "Prepared by Meetings AI. Please review important details against the transcript."])
+    html_parts.append('</td></tr><tr><td style="padding:18px 32px;border-top:1px solid #e5eeeb;color:#687b76;font-size:12px;">Prepared by Meetings AI · Review important details against the transcript.</td></tr></table></body></html>')
     return "".join(html_parts), "\n".join(text_parts)
+
+
+def _transcript_markdown(title: str, transcript: list[object]) -> str:
+    times = _evidence_times(transcript)
+    lines = [f"# Transcript — {title}", "", "Timestamps are relative to the first captured turn. Speaker names may require review.", ""]
+    for segment in transcript:
+        if not getattr(segment, "completed", True) or not getattr(segment, "text", "").strip():
+            continue
+        timestamp = times.get(str(getattr(segment, "segment_id", "")), "00:00")
+        speaker = getattr(segment, "speaker", None) or "Unidentified speaker"
+        lines.append(f"**[{timestamp}] {speaker}:** {getattr(segment, 'text', '').strip()}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _email_attachments(title: str, transcript: list[object]) -> list[dict[str, str]]:
+    logo_candidates = [
+        Path("/app/brand/meetings-ai-avatar-1024.png"),
+        Path(__file__).resolve().parents[3] / "apps/web/public/brand/meetings-ai-avatar-1024.png",
+    ]
+    logo = next((path for path in logo_candidates if path.is_file()), None)
+    attachments = []
+    if logo:
+        attachments.append({
+            "filename": "meetings-ai-logo.png",
+            "content": b64encode(logo.read_bytes()).decode("ascii"),
+            "content_id": "meetings-ai-logo",
+        })
+    if transcript:
+        attachments.append({
+            "filename": "meeting-transcript.md",
+            "content": b64encode(_transcript_markdown(title, transcript).encode("utf-8")).decode("ascii"),
+        })
+    return attachments

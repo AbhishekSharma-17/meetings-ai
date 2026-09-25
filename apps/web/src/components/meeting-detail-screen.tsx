@@ -2,6 +2,8 @@
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import { Dialog } from "@base-ui/react/dialog";
+import { X } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
 import type { CalendarSchedule, KnowledgeBase, MeetingDetail, MeetingParticipants, SpeakerIdentity, TranscriptSegment, TranscriptionRoute } from "@/lib/types";
 import { MinutesPanel } from "./minutes-panel";
@@ -39,6 +41,7 @@ export function MeetingDetailScreen({ meetingId, focusSegmentId, onBack, onMeeti
   const [applyToSameLabel, setApplyToSameLabel] = useState(false);
   const [savingSpeaker, setSavingSpeaker] = useState(false);
   const [speakerRevision, setSpeakerRevision] = useState(0);
+  const [transcriptExpanded, setTranscriptExpanded] = useState(false);
   const lastFocused = useRef<string | null>(null);
 
   const acceptMeeting = useCallback((next: MeetingDetail) => {
@@ -147,11 +150,13 @@ export function MeetingDetailScreen({ meetingId, focusSegmentId, onBack, onMeeti
   async function downloadTranscript() {
     setError(null);
     try {
-      const json = await meetingsService.exportTranscript(meetingId);
-      const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+      const ordered = [...segments].sort((a, b) => transcriptSeconds(a.startedAt) - transcriptSeconds(b.startedAt));
+      const first = ordered.length ? transcriptSeconds(ordered[0].startedAt) : 0;
+      const markdown = [`# Transcript — ${meeting?.title || "Meeting"}`, "", "Timestamps are relative to the first captured turn. Speaker names may need review.", "", ...ordered.filter((segment) => segment.isFinal).flatMap((segment) => [`**[${relativeTime(transcriptSeconds(segment.startedAt) - first)}] ${segment.speaker}:** ${segment.text}`, ""])].join("\n");
+      const url = URL.createObjectURL(new Blob([markdown], { type: "text/markdown;charset=utf-8" }));
       const link = document.createElement("a");
       link.href = url;
-      link.download = `meetings-ai-transcript-${meetingId}.json`;
+      link.download = `meetings-ai-transcript-${meetingId}.md`;
       link.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (requestError) {
@@ -181,6 +186,10 @@ export function MeetingDetailScreen({ meetingId, focusSegmentId, onBack, onMeeti
   const finalizedCount = segments.filter((segment) => segment.isFinal).length;
   const reviewedCount = segments.filter((segment) => segment.isFinal && segment.speakerReviewed).length;
   const namedCoverage = finalizedCount ? Math.round((finalizedCount - unattributedCount) * 100 / finalizedCount) : 0;
+  const newestFirst = [...segments].sort((left, right) => transcriptSeconds(right.startedAt) - transcriptSeconds(left.startedAt));
+  const oldestFirst = newestFirst[newestFirst.length - 1];
+  const firstSegmentAt = oldestFirst ? transcriptSeconds(oldestFirst.startedAt) : 0;
+  const renderSegment = (segment: TranscriptSegment) => <li key={segment.id} id={`transcript-${encodeURIComponent(segment.segmentId)}`} className={focusSegmentId === segment.segmentId ? "focused-source" : undefined}><div className="segment-meta"><b>{segment.speaker}</b><span>{relativeTime(transcriptSeconds(segment.startedAt) - firstSegmentAt)}{segment.isFinal ? "" : " · provisional"}{segment.speakerReviewed ? " · reviewed" : segment.attributionSource ? ` · ${segment.attributionSource}` : ""}</span></div><p>{segment.text}</p><div className="speaker-review-row">{segment.rawSpeaker && segment.rawSpeaker !== segment.speaker ? <small>Capture label: {segment.rawSpeaker}</small> : null}<button className="text-button" type="button" onClick={() => { setEditingSpeakerId(segment.segmentId); setSpeakerName(segment.speaker === "Unidentified speaker" ? "" : segment.speaker); setApplyToSameLabel(false); }}>Review speaker</button></div>{editingSpeakerId === segment.segmentId ? <div className="speaker-review-form"><label>Correct speaker name<input value={speakerName} onChange={(event) => setSpeakerName(event.target.value)} placeholder="Leave blank to mark unidentified" /></label><label className="speaker-bulk-choice"><input type="checkbox" checked={applyToSameLabel} onChange={(event) => setApplyToSameLabel(event.target.checked)} disabled={!segment.rawSpeaker} /> Apply to all turns with capture label “{segment.rawSpeaker || "none"}”</label><div className="dialog-actions"><button className="button secondary" onClick={() => setEditingSpeakerId(null)} disabled={savingSpeaker}>Cancel</button><button className="button primary" onClick={() => void saveSpeaker(segment)} disabled={savingSpeaker}>{savingSpeaker ? "Saving…" : "Save speaker"}</button></div></div> : null}</li>;
   return <section className="page detail-page">
     <button className="back-button" onClick={onBack}>← All meetings</button>
     <div className="detail-hero">
@@ -202,10 +211,11 @@ export function MeetingDetailScreen({ meetingId, focusSegmentId, onBack, onMeeti
       <section className="detail-card" aria-labelledby="capture-title"><h2 id="capture-title">People & capture</h2><p className="muted-copy">Duration: {meeting.duration}</p>{participants?.participants.length ? <ul className="participant-list">{participants.participants.map((person, index) => <li key={`${person.source}-${person.name}-${index}`}><b>{person.name}</b> <span>{person.source === "invite" ? "Invited" : "Heard speaking"}</span>{person.email ? <small>{person.email}</small> : null}</li>)}</ul> : <p className="muted-copy">No participant evidence is available yet.</p>}<p className="muted-copy">This is not a verified attendance roster. Invitees may not have joined; silent attendees may be absent. Speaker names are not automatically matched to invitee emails.</p>{namedSpeakers.length ? <div className="speaker-identities"><h3>Confirm speaker contact</h3><p>Only link an email after you verify who spoke. This does not add them to recap recipients.</p>{namedSpeakers.map((speaker) => { const identity = speakerIdentities.find((item) => item.speaker === speaker); return <div key={speaker} className="speaker-identity-row"><span><b>{speaker}</b>{identity ? ` · ${identity.email} (confirmed)` : " · email not linked"}</span><button className="text-button" onClick={() => { setEditingIdentity(speaker); setIdentityEmail(identity?.email ?? ""); }}>Confirm email</button>{editingIdentity === speaker ? <div className="speaker-identity-form"><label>Email for {speaker}<input type="email" value={identityEmail} onChange={(event) => setIdentityEmail(event.target.value)} placeholder="person@company.com" /></label><div className="dialog-actions"><button className="button secondary" onClick={() => setEditingIdentity(null)}>Cancel</button><button className="button primary" onClick={() => void saveIdentity(speaker)}>Save mapping</button></div></div> : null}</div>; })}</div> : null}{meeting.errorMessage ? <p className="inline-error"><b>Adapter message:</b> {meeting.errorMessage}</p> : null}</section>
     </div>
 
-    <section className="transcript-panel" aria-labelledby="transcript-title"><div className="section-heading"><div><h2 id="transcript-title">Speaker-attributed transcript</h2><p>Names come from the capture pipeline or your explicit corrections. Unresolved turns stay unidentified.</p></div><div className="transcript-tools"><span className="polling-indicator">{pollableStatuses.has(meeting.status) ? "Updates every 5 seconds" : "Capture complete"}</span>{segments.length ? <button className="text-button" type="button" onClick={() => void downloadTranscript()}>Download transcript JSON</button> : null}</div></div>
-      {segments.length ? <><p className="speaker-summary"><b>Speakers heard:</b> {namedSpeakers.length ? namedSpeakers.join(", ") : "none identified"}{unattributedCount ? ` · ${unattributedCount} unidentified turn${unattributedCount === 1 ? "" : "s"}` : ""} · {namedCoverage}% of finalized turns named · {reviewedCount} reviewed. Coverage is not a measure of identity accuracy, and this is not a complete attendance roster.</p><ol className="transcript-list">{segments.map((segment) => <li key={segment.id} id={`transcript-${encodeURIComponent(segment.segmentId)}`} className={focusSegmentId === segment.segmentId ? "focused-source" : undefined}><div className="segment-meta"><b>{segment.speaker}</b><span>{formatTimestamp(segment.startedAt)}{segment.isFinal ? "" : " · provisional"}{segment.speakerReviewed ? " · reviewed" : segment.attributionSource ? ` · ${segment.attributionSource}` : ""}</span></div><p>{segment.text}</p><div className="speaker-review-row">{segment.rawSpeaker && segment.rawSpeaker !== segment.speaker ? <small>Capture label: {segment.rawSpeaker}</small> : null}<button className="text-button" type="button" onClick={() => { setEditingSpeakerId(segment.segmentId); setSpeakerName(segment.speaker === "Unidentified speaker" ? "" : segment.speaker); setApplyToSameLabel(false); }}>Review speaker</button></div>{editingSpeakerId === segment.segmentId ? <div className="speaker-review-form"><label>Correct speaker name<input value={speakerName} onChange={(event) => setSpeakerName(event.target.value)} placeholder="Leave blank to mark unidentified" /></label><label className="speaker-bulk-choice"><input type="checkbox" checked={applyToSameLabel} onChange={(event) => setApplyToSameLabel(event.target.checked)} disabled={!segment.rawSpeaker} /> Apply to all turns with capture label “{segment.rawSpeaker || "none"}”</label><div className="dialog-actions"><button className="button secondary" onClick={() => setEditingSpeakerId(null)} disabled={savingSpeaker}>Cancel</button><button className="button primary" onClick={() => void saveSpeaker(segment)} disabled={savingSpeaker}>{savingSpeaker ? "Saving…" : "Save speaker"}</button></div></div> : null}</li>)}</ol></> : <div className="empty-state"><b>No transcript segments yet.</b><p>{meeting.status === "live" ? "The assistant is live; the first finalized segment will appear here when the API returns it." : "Transcript segments will appear after the capture adapter produces them."}</p></div>}</section>
     {transcriptionRoute ? <section className="route-audit" aria-label="Transcription runtime route"><b>Transcription runtime</b><span>{transcriptionRoute.mode === "profile" ? `${transcriptionRoute.profile_name} · ${transcriptionRoute.model} · ${transcriptionRoute.endpoint_host}` : transcriptionRoute.mode === "vexa_deployment" ? "Vexa deployment default" : "Chosen when the assistant joins"}</span><small>Stored for this bot run. Changing provider defaults does not switch an active bot.</small></section> : null}
     <MinutesPanel key={`${meeting.id}:${speakerRevision}`} meeting={meeting} transcriptCount={segments.filter((segment) => segment.isFinal).length} segments={segments} />
+    <section className="transcript-panel" aria-labelledby="transcript-title"><div className="section-heading"><div><p className="eyebrow">SOURCE RECORD</p><h2 id="transcript-title">Speaker-attributed transcript</h2><p>Newest turns appear first. Open the full view for a focused reading experience.</p></div><div className="transcript-tools"><span className="polling-indicator">{pollableStatuses.has(meeting.status) ? "Updates every 5 seconds" : "Capture complete"}</span>{segments.length ? <><button className="button secondary" type="button" onClick={() => setTranscriptExpanded(true)}>Open full transcript</button><button className="text-button" type="button" onClick={() => void downloadTranscript()}>Download .md</button></> : null}</div></div>
+      {segments.length ? <><p className="speaker-summary"><b>Speakers heard:</b> {namedSpeakers.length ? namedSpeakers.join(", ") : "none identified"}{unattributedCount ? ` · ${unattributedCount} unidentified turn${unattributedCount === 1 ? "" : "s"}` : ""} · {namedCoverage}% of finalized turns named · {reviewedCount} reviewed. Coverage is not a measure of identity accuracy, and this is not a complete attendance roster.</p>{!transcriptExpanded ? <ol className="transcript-list transcript-list-compact" aria-label="Recent transcript turns, newest first">{newestFirst.map(renderSegment)}</ol> : null}</> : <div className="empty-state"><b>No transcript segments yet.</b><p>{meeting.status === "live" ? "The assistant is live; the first finalized segment will appear here when the API returns it." : "Transcript segments will appear after the capture adapter produces them."}</p></div>}</section>
+    <Dialog.Root open={transcriptExpanded} onOpenChange={setTranscriptExpanded}><Dialog.Portal><Dialog.Backdrop className="dialog-backdrop" /><Dialog.Popup className="dialog transcript-dialog"><Dialog.Close className="close-button" aria-label="Close transcript"><X /></Dialog.Close><Dialog.Title>Full transcript</Dialog.Title><Dialog.Description className="dialog-intro">{meeting.title} · {segments.length} turns · newest first. Speaker labels can be corrected here.</Dialog.Description><ol className="transcript-list">{newestFirst.map(renderSegment)}</ol></Dialog.Popup></Dialog.Portal></Dialog.Root>
   </section>;
 }
 
@@ -251,4 +261,19 @@ function formatTimestamp(value: string | number | null): string {
   }
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
+}
+
+function transcriptSeconds(value: string | number | null): number {
+  if (typeof value === "number") return value;
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed / 1000 : 0;
+  }
+  return 0;
+}
+
+function relativeTime(value: number): string {
+  const seconds = Math.max(0, Math.floor(value));
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes.toString().padStart(2, "0")}:${(seconds % 60).toString().padStart(2, "0")}`;
 }

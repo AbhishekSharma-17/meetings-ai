@@ -34,6 +34,7 @@ class ResendAdapter:
     async def send(
         self, *, recipients: list[str], subject: str, html: str, text: str,
         idempotency_key: str | None = None,
+        attachments: list[dict[str, str]] | None = None,
     ) -> str:
         if not self.api_key:
             raise EmailDeliveryError("Resend API key is not configured")
@@ -56,6 +57,7 @@ class ResendAdapter:
                         "subject": subject,
                         "html": html,
                         "text": text,
+                        **({"attachments": attachments} if attachments else {}),
                     },
                 )
         except httpx.RequestError as exc:

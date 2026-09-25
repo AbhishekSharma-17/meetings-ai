@@ -1,6 +1,7 @@
 import asyncio
 import json
 import re
+from base64 import b64decode
 from types import SimpleNamespace
 
 import httpx
@@ -17,7 +18,7 @@ from meetings_contracts import (
 from app.adapters.resend import EmailDeliveryError, ResendAdapter
 from app.adapters.vexa import VexaCaptureAdapter
 from app.main import create_app
-from app.minutes_service import MinutesGenerationError, _normalize_generated_evidence, _validate_references
+from app.minutes_service import MinutesGenerationError, _email_content, _normalize_generated_evidence, _validate_references
 
 
 class FakeTextAdapter:
@@ -164,7 +165,14 @@ def test_generate_review_approve_and_send_minutes() -> None:
         assert delivered.json()["recipients"] == ["team@example.test"]
         assert sent_payloads[0]["to"] == ["team@example.test"]
         assert "Reviewed and corrected" in str(sent_payloads[0]["html"])
-        assert "Anna" in str(sent_payloads[0]["text"])
+        assert "Anna" not in str(sent_payloads[0]["text"])
+        assert "<img src=\"cid:meetings-ai-logo\"" in str(sent_payloads[0]["html"])
+        attachments = sent_payloads[0]["attachments"]
+        assert attachments[0]["filename"] == "meetings-ai-logo.png"
+        assert attachments[0]["content_id"] == "meetings-ai-logo"
+        transcript_file = next(item for item in attachments if item["filename"] == "meeting-transcript.md")
+        assert "Anna" in b64decode(transcript_file["content"]).decode("utf-8")
+        assert "Transcript</h2><ul>" not in str(sent_payloads[0]["html"])
 
         final = client.get(f"/v1/meetings/{meeting_id}/minutes")
         assert final.json()["status"] == "sent"
@@ -196,6 +204,24 @@ def test_resend_status_and_missing_sender_do_not_silently_use_test_domain() -> N
             html="<p>Test</p>",
             text="Test",
         ))
+
+
+def test_email_hides_internal_evidence_ids_and_escapes_meeting_content() -> None:
+    segment_id = "csrc-201:9:1790332285194"
+    segment = SimpleNamespace(segment_id=segment_id, start_seconds=100.0, completed=True, speaker="Anna", text="Agreed to follow up")
+    minutes = SimpleNamespace(
+        title="Client <script>alert(1)</script>",
+        executive_summary=f"Follow-up agreed. [{segment_id}]",
+        discussion_points=[f"Plan reviewed. [{segment_id}]"], decisions=[], action_items=[],
+        open_questions=[], speaker_contributions=[], questions_asked=[],
+    )
+    html, plain = _email_content(minutes, [segment], include_transcript=True)
+    assert segment_id not in html + plain
+    assert "Transcript 00:00" in html + plain
+    assert "<script>" not in html
+    assert "&lt;script&gt;" in html
+    assert "Follow-up agreed" in plain
+    assert "Agreed to follow up" not in html + plain
 
 
 def test_minutes_require_finished_capture_and_transcript() -> None:

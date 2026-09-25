@@ -11,6 +11,7 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 COPY packages/contracts /app/packages/contracts
 COPY services/api /app/services/api
+COPY apps/web/public/brand/meetings-ai-avatar-1024.png /app/brand/meetings-ai-avatar-1024.png
 
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
