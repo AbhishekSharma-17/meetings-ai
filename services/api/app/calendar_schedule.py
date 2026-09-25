@@ -12,8 +12,9 @@ from pydantic import BaseModel
 from sqlalchemy import select, update
 
 from .accounts import Actor
-from .composio_calendar import CalendarError, CalendarRange, ComposioCalendar
-from .database import CalendarScheduleRow, Database
+from .composio_calendar import CalendarError, CalendarEvent, CalendarRange, ComposioCalendar
+from .database import CalendarScheduleRow, Database, MeetingSourceRow
+from .adapters.vexa import VexaAPIError
 from .meeting_service import MeetingService
 from .tenant import tenant_scope
 
@@ -74,16 +75,68 @@ class CalendarScheduleService:
             row = session.get(CalendarScheduleRow, str(meeting_id))
             return _public(row) if row and row.organization_id == str(actor.organization_id) else None
 
-    async def create(self, actor: Actor, payload: ScheduleCreate) -> tuple[CalendarSchedulePublic, MeetingPublic]:
-        # Never trust the event URL or start time posted by the browser. Re-read
-        # this account's calendar and bind the capture to that source event.
+    def source(self, actor: Actor, meeting_id: UUID) -> CalendarEvent | None:
+        with self.database.session_factory() as session:
+            row = session.get(MeetingSourceRow, str(meeting_id))
+            if row is None or row.organization_id != str(actor.organization_id):
+                return None
+            return CalendarEvent(
+                connection_id=row.connection_id, provider=row.provider, event_id=row.event_id,
+                title=row.title, starts_at=row.starts_at, ends_at=row.ends_at,
+                meeting_url=row.meeting_url, platform=row.platform, agenda=row.agenda, organizer=row.organizer,
+                invitees=row.invitees,
+            )
+
+    def _save_source(self, actor: Actor, meeting_id: UUID, event: CalendarEvent) -> None:
+        with self.database.session_factory.begin() as session:
+            session.add(MeetingSourceRow(
+                meeting_id=str(meeting_id), organization_id=str(actor.organization_id),
+                provider=event.provider, connection_id=event.connection_id, event_id=event.event_id,
+                title=event.title, meeting_url=event.meeting_url, platform=event.platform,
+                starts_at=event.starts_at, ends_at=event.ends_at,
+                agenda=event.agenda, organizer=event.organizer,
+                invitees=[person.model_dump() for person in event.invitees], saved_at=datetime.now(UTC),
+            ))
+
+    async def _verified_event(self, actor: Actor, payload: ScheduleCreate) -> CalendarEvent:
         scan = await self.calendar.events(actor, payload.connection_id, payload.period, payload.timezone)
         event = next((item for item in scan.events if item.event_id == payload.event_id), None)
         if event is None:
-            raise CalendarScheduleError("selected event is no longer available; scan the calendar again")
+            raise CalendarScheduleError("selected event is no longer available; scan the source again")
+        return event
+
+    def _assert_not_imported(self, actor: Actor, event: CalendarEvent) -> None:
+        with self.database.session_factory() as session:
+            existing = session.execute(select(MeetingSourceRow).where(
+                MeetingSourceRow.organization_id == str(actor.organization_id),
+                MeetingSourceRow.meeting_url == event.meeting_url,
+            )).scalars().all()
+            if any(abs((row.starts_at.replace(tzinfo=row.starts_at.tzinfo or UTC) - event.starts_at.astimezone(UTC)).total_seconds()) < 60 for row in existing):
+                raise CalendarScheduleError("this meeting link and start time already have a record in this workspace")
+
+    async def create_now(self, actor: Actor, payload: ScheduleCreate) -> MeetingPublic:
+        event = await self._verified_event(actor, payload)
+        now = datetime.now(UTC)
+        if event.starts_at.astimezone(UTC) > now + timedelta(minutes=1) or event.ends_at.astimezone(UTC) <= now:
+            raise CalendarScheduleError("this event is not in progress; schedule the assistant for its start time")
+        self._assert_not_imported(actor, event)
+        meeting = self.meetings.create(payload.meeting.model_copy(update={
+            "meeting_url": event.meeting_url, "title": payload.meeting.title or event.title,
+        }))
+        self._save_source(actor, meeting.id, event)
+        try:
+            return self.meetings.to_public(await self.meetings.join(meeting.id))
+        except VexaAPIError:
+            return self.meetings.to_public(self.meetings.repository.get_meeting(meeting.id))
+
+    async def create(self, actor: Actor, payload: ScheduleCreate) -> tuple[CalendarSchedulePublic, MeetingPublic]:
+        # Never trust the event URL or start time posted by the browser. Re-read
+        # this account's calendar and bind the capture to that source event.
+        event = await self._verified_event(actor, payload)
         now = datetime.now(UTC)
         if event.starts_at.astimezone(UTC) <= now + timedelta(minutes=1):
             raise CalendarScheduleError("this meeting starts too soon to schedule; use Send assistant now")
+        self._assert_not_imported(actor, event)
         with self.database.session_factory() as session:
             existing = session.execute(select(CalendarScheduleRow).where(
                 CalendarScheduleRow.organization_id == str(actor.organization_id),
@@ -98,6 +151,7 @@ class CalendarScheduleService:
             "title": payload.meeting.title or event.title,
         })
         meeting = self.meetings.create(meeting_payload)
+        self._save_source(actor, meeting.id, event)
         with self.database.session_factory.begin() as session:
             row = CalendarScheduleRow(
                 meeting_id=str(meeting.id), organization_id=str(actor.organization_id),

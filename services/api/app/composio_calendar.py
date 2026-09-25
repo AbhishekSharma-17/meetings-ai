@@ -18,14 +18,17 @@ from .accounts import Actor
 from .meeting_links import parse_meeting_url
 
 logger = logging.getLogger(__name__)
-CalendarProvider = Literal["googlecalendar", "outlook"]
+CalendarProvider = Literal["googlecalendar", "outlook", "calendly", "zoom"]
 CalendarRange = Literal["today", "tomorrow", "this_week", "next_week"]
 
 _TOOL = {
     "googlecalendar": "GOOGLECALENDAR_EVENTS_LIST",
     "outlook": "OUTLOOK_GET_CALENDAR_VIEW",
+    "calendly": "CALENDLY_LIST_SCHEDULED_EVENTS",
+    "zoom": "ZOOM_LIST_MEETINGS",
 }
-_VERSION_DEFAULT = {"googlecalendar": "20260915_00", "outlook": "20260922_00"}
+_VERSION_DEFAULT = {"googlecalendar": "20260915_00", "outlook": "20260922_00", "calendly": "20260915_00", "zoom": "20260903_00"}
+_PROVIDER_NAME = {"googlecalendar": "Google Calendar", "outlook": "Outlook Calendar", "calendly": "Calendly", "zoom": "Zoom"}
 _TIMEZONE_ALIASES = {"Asia/Calcutta": "Asia/Kolkata"}
 _URL = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 
@@ -58,6 +61,15 @@ class CalendarEvent(BaseModel):
     ends_at: datetime
     meeting_url: str
     platform: str
+    agenda: str | None = None
+    organizer: str | None = None
+    invitees: list["CalendarInvitee"] = Field(default_factory=list)
+
+
+class CalendarInvitee(BaseModel):
+    name: str
+    email: str | None = None
+    response_status: str | None = None
 
 
 class CalendarEventsResponse(BaseModel):
@@ -135,7 +147,7 @@ def _meeting_link(item: dict) -> tuple[str, str] | None:
     for key in ("onlineMeeting", "online_meeting", "location", "body"):
         value = item.get(key)
         if isinstance(value, dict):
-            candidates.extend(str(value.get(field) or "") for field in ("joinUrl", "join_url", "displayName", "content"))
+            candidates.extend(str(value.get(field) or "") for field in ("joinUrl", "join_url", "displayName", "content", "location"))
         elif isinstance(value, str):
             candidates.append(value)
     for entry in (item.get("conferenceData") or {}).get("entryPoints", []) if isinstance(item.get("conferenceData"), dict) else []:
@@ -154,19 +166,72 @@ def _meeting_link(item: dict) -> tuple[str, str] | None:
     return None
 
 
+def _plain(value: object, limit: int = 3000) -> str | None:
+    if isinstance(value, dict):
+        value = value.get("content") or value.get("text")
+    if not isinstance(value, str):
+        return None
+    clean = re.sub(r"<[^>]+>", " ", html.unescape(value))
+    clean = re.sub(r"\s+", " ", clean).strip()
+    return clean[:limit] or None
+
+
+def _person(item: object) -> CalendarInvitee | None:
+    if not isinstance(item, dict):
+        return None
+    address = item.get("email") or item.get("emailAddress") or item.get("email_address")
+    if isinstance(address, dict):
+        name = address.get("name") or item.get("displayName") or item.get("name")
+        address = address.get("address")
+    else:
+        name = item.get("displayName") or item.get("name") or item.get("first_name")
+    email = address.strip().lower()[:254] if isinstance(address, str) and "@" in address else None
+    name = _plain(name, 160) or email
+    if not name:
+        return None
+    response = item.get("responseStatus") or item.get("response_status") or item.get("status")
+    return CalendarInvitee(name=name, email=email, response_status=str(response)[:40] if response else None)
+
+
+def _people(item: dict) -> list[CalendarInvitee]:
+    people: list[CalendarInvitee] = []
+    for key in ("attendees", "invitees", "event_guests", "event_memberships"):
+        entries = item.get(key)
+        for entry in entries if isinstance(entries, list) else []:
+            person = _person(entry.get("user", entry) if isinstance(entry, dict) else entry)
+            if person:
+                people.append(person)
+    seen: set[str] = set()
+    unique: list[CalendarInvitee] = []
+    for person in people:
+        key = person.email or person.name.casefold()
+        if key not in seen:
+            unique.append(person)
+            seen.add(key)
+    return unique[:100]
+
+
 def _event(item: dict, connection: CalendarConnection, timezone: str) -> CalendarEvent | None:
     if item.get("status") == "cancelled" or item.get("isCancelled") is True or item.get("is_cancelled") is True:
         return None
     link = _meeting_link(item)
     starts_at = _event_time(item.get("start") or item.get("start_time") or item.get("start_datetime"), timezone)
     ends_at = _event_time(item.get("end") or item.get("end_time") or item.get("end_datetime"), timezone)
-    event_id = item.get("id") or item.get("event_id")
-    if not link or not starts_at or not ends_at or ends_at <= starts_at or not isinstance(event_id, str):
+    if not ends_at and connection.provider == "zoom" and starts_at:
+        ends_at = starts_at + timedelta(minutes=max(1, min(int(item.get("duration") or 60), 720)))
+    event_id = item.get("id") or item.get("event_id") or item.get("uri")
+    if not link or not starts_at or not ends_at or ends_at <= starts_at or event_id is None:
         return None
+    organizer = item.get("organizer") or item.get("creator") or item.get("host_email")
+    if isinstance(organizer, dict):
+        organizer = _person(organizer)
+        organizer = organizer.name if organizer else None
     return CalendarEvent(
-        connection_id=connection.id, provider=connection.provider, event_id=event_id,
-        title=str(item.get("summary") or item.get("subject") or "Untitled meeting")[:200],
+        connection_id=connection.id, provider=connection.provider, event_id=str(event_id),
+        title=str(item.get("summary") or item.get("subject") or item.get("name") or item.get("topic") or "Untitled meeting")[:200],
         starts_at=starts_at, ends_at=ends_at, meeting_url=link[0], platform=link[1],
+        agenda=_plain(item.get("description") or item.get("body") or item.get("meeting_notes_plain") or item.get("meeting_notes_html") or item.get("agenda")),
+        organizer=_plain(organizer, 160), invitees=_people(item),
     )
 
 
@@ -178,10 +243,14 @@ class ComposioCalendar:
         self.auth_configs = {
             "googlecalendar": os.getenv("COMPOSIO_GOOGLE_CALENDAR_AUTH_CONFIG_ID", ""),
             "outlook": os.getenv("COMPOSIO_OUTLOOK_AUTH_CONFIG_ID", ""),
+            "calendly": os.getenv("COMPOSIO_CALENDLY_AUTH_CONFIG_ID", ""),
+            "zoom": os.getenv("COMPOSIO_ZOOM_AUTH_CONFIG_ID", ""),
         }
         self.versions = {
             "googlecalendar": os.getenv("COMPOSIO_GOOGLE_CALENDAR_VERSION") or _VERSION_DEFAULT["googlecalendar"],
             "outlook": os.getenv("COMPOSIO_OUTLOOK_VERSION") or _VERSION_DEFAULT["outlook"],
+            "calendly": os.getenv("COMPOSIO_CALENDLY_VERSION") or _VERSION_DEFAULT["calendly"],
+            "zoom": os.getenv("COMPOSIO_ZOOM_VERSION") or _VERSION_DEFAULT["zoom"],
         }
 
     @property
@@ -217,8 +286,7 @@ class ComposioCalendar:
             account_data = item.get("data") if isinstance(item.get("data"), dict) else {}
             label = item.get("alias") or account_data.get("displayName")
             if not isinstance(label, str) or not label.strip():
-                provider_name = "Google Calendar" if provider == "googlecalendar" else "Outlook Calendar"
-                label = f"{provider_name} · {str(item['id'])[-4:]}"
+                label = f"{_PROVIDER_NAME[provider]} · {str(item['id'])[-4:]}"
             connections.append(CalendarConnection(
                 id=str(item.get("id")), provider=provider, status=str(item.get("status") or "UNKNOWN"),
                 label=label.strip()[:160],
@@ -240,47 +308,75 @@ class ComposioCalendar:
             raise CalendarError("calendar provider did not return a secure connection link")
         return CalendarConnectResponse(redirect_url=url)
 
+    async def _execute(self, actor: Actor, connection: CalendarConnection, tool: str, arguments: dict) -> dict:
+        result = await self._request("POST", f"/tools/execute/{tool}", body={
+            "user_id": _user_id(actor), "connected_account_id": connection.id,
+            "version": self.versions[connection.provider], "arguments": arguments,
+        })
+        for _ in range(3):
+            if result.get("successful") is False:
+                raise CalendarError(f"{_PROVIDER_NAME[connection.provider]} scan failed; check account permissions or reconnect")
+            data = result.get("data")
+            if not isinstance(data, dict):
+                raise CalendarError("meeting source returned an invalid response")
+            if "successful" not in data or "data" not in data:
+                return data
+            result = data
+        return result
+
     async def events(self, actor: Actor, connection_id: str, preset: CalendarRange, timezone: str) -> CalendarEventsResponse:
         timezone = _TIMEZONE_ALIASES.get(timezone, timezone)
         start, end = calendar_window(preset, timezone)
         connection = next((item for item in await self.connections(actor) if item.id == connection_id), None)
         if connection is None or connection.status != "ACTIVE":
             raise CalendarError("choose an active calendar connection owned by your account")
-        arguments = ({"calendarId": "primary", "timeMin": start.isoformat(), "timeMax": end.isoformat(),
-                      "singleEvents": True, "orderBy": "startTime", "maxResults": 100, "showDeleted": False}
-                     if connection.provider == "googlecalendar" else
-                     {"start_datetime": start.isoformat(), "end_datetime": end.isoformat(),
-                      "timezone": timezone, "top": 100})
+        if connection.provider == "googlecalendar":
+            arguments = {"calendarId": "primary", "timeMin": start.isoformat(), "timeMax": end.isoformat(),
+                         "singleEvents": True, "orderBy": "startTime", "maxResults": 100, "showDeleted": False}
+        elif connection.provider == "outlook":
+            arguments = {"start_datetime": start.isoformat(), "end_datetime": end.isoformat(),
+                         "timezone": timezone, "top": 100}
+        elif connection.provider == "calendly":
+            identity = await self._execute(actor, connection, "CALENDLY_WHO_AM_I", {})
+            user = identity.get("uri") or (identity.get("data") or {}).get("uri")
+            if not isinstance(user, str) or not user.startswith("https://api.calendly.com/users/"):
+                raise CalendarError("Calendly could not identify the connected user")
+            arguments = {"user": user, "min_start_time": start.astimezone(UTC).isoformat(),
+                         "max_start_time": end.astimezone(UTC).isoformat(), "status": "active", "count": 100}
+        else:
+            arguments = {"user_id": "me", "type": "upcoming", "page_size": 100}
         records: list[CalendarEvent] = []
         token: str | None = None
         truncated = False
         for page in range(3):
             if token:
-                arguments["pageToken" if connection.provider == "googlecalendar" else "page_token"] = token
-            result = await self._request("POST", f"/tools/execute/{_TOOL[connection.provider]}", body={
-                "user_id": _user_id(actor), "connected_account_id": connection.id,
-                "version": self.versions[connection.provider], "arguments": arguments,
-            })
-            if result.get("successful") is False:
-                raise CalendarError("calendar scan failed; check this account's permissions and reconnect if needed")
-            data = result.get("data") or {}
-            if isinstance(data, dict) and "successful" in data and "data" in data:
-                if data.get("successful") is False:
-                    raise CalendarError("calendar scan failed; check this account's permissions and reconnect if needed")
-                data = data.get("data") or {}
-            if not isinstance(data, dict):
-                raise CalendarError("calendar provider returned an invalid event list")
-            items = data.get("items") or data.get("events") or data.get("value") or []
+                arguments["pageToken" if connection.provider == "googlecalendar" else "next_page_token" if connection.provider == "zoom" else "page_token"] = token
+            data = await self._execute(actor, connection, _TOOL[connection.provider], arguments)
+            items = data.get("items") or data.get("events") or data.get("value") or data.get("collection") or data.get("meetings") or []
             if not isinstance(items, list):
                 raise CalendarError("calendar provider returned an invalid event list")
             for item in items:
                 event = _event(item, connection, timezone) if isinstance(item, dict) else None
                 if event and event.ends_at.astimezone(UTC) > datetime.now(UTC) and start <= event.starts_at.astimezone(start.tzinfo) < end:
                     records.append(event)
-            token = data.get("nextPageToken") or data.get("next_page_token")
+            token = data.get("nextPageToken") or data.get("next_page_token") or (data.get("pagination") or {}).get("next_page_token")
             if not token:
                 break
             if page == 2:
+                truncated = True
+        if connection.provider == "calendly":
+            enriched = []
+            for event in records:
+                event_uuid = event.event_id.rstrip("/").rsplit("/", 1)[-1]
+                if len(enriched) < 40:
+                    try:
+                        people = await self._execute(actor, connection, "CALENDLY_LIST_EVENT_INVITEES", {"uuid": event_uuid, "count": 100, "status": "active"})
+                        event.invitees = _people({"invitees": [*([person.model_dump() for person in event.invitees]), *(people.get("collection") or [])]})
+                    except CalendarError:
+                        logger.warning("Calendly invitees unavailable for a discovered event")
+                enriched.append(event)
+            records = enriched
+            if len(records) > 40:
                 truncated = True
         unique = {(event.event_id, event.starts_at): event for event in records}
         return CalendarEventsResponse(

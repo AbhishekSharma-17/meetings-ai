@@ -7,6 +7,7 @@ import type { CurrentAccount, Meeting, ProviderProfile, Workspace, WorkspaceOpti
 import { Dashboard } from "./dashboard";
 import { NewMeetingDialog } from "./new-meeting-dialog";
 import { CalendarImportDialog, type CalendarSelection } from "./calendar-import-dialog";
+import { MeetingsLibrary } from "./meetings-library";
 import { MeetingDetailScreen } from "./meeting-detail-screen";
 import { ProviderSettings } from "./provider-settings";
 import { WorkspaceSettings } from "./workspace-settings";
@@ -16,9 +17,9 @@ import { KnowledgeEvidenceScreen } from "./knowledge-evidence-screen";
 import { MeetingsIcon, ProvidersIcon } from "./ui-icons";
 import { ThemeSwitcher } from "./theme-switcher";
 import { Dialog } from "@base-ui/react/dialog";
-import { BookOpenText, Building2, ChevronUp, LogOut, Menu, UserRound, X } from "lucide-react";
+import { BookOpenText, Building2, CalendarDays, ChevronUp, LayoutDashboard, LogOut, Menu, UserRound, X } from "lucide-react";
 
-type View = "dashboard" | "providers" | "meeting" | "workspace" | "knowledge" | "profile";
+type View = "dashboard" | "meetings" | "calendar" | "providers" | "meeting" | "workspace" | "knowledge" | "profile";
 
 export function AppShell() {
   const [view, setView] = useState<View>("dashboard");
@@ -29,7 +30,6 @@ export function AppShell() {
   const [workspaces, setWorkspaces] = useState<WorkspaceOption[]>([]);
   const [workspaceLoading, setWorkspaceLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [calendarOpen, setCalendarOpen] = useState(false);
   const [preferredCalendarConnectionId, setPreferredCalendarConnectionId] = useState<string | null>(null);
   const [calendarSelection, setCalendarSelection] = useState<CalendarSelection | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -50,7 +50,7 @@ export function AppShell() {
     if (invitedEmail) queueMicrotask(() => setLoginEmail(invitedEmail));
     if (callback.get("calendar") === "connected") {
       const connectedAccountId = callback.get("connected_account_id");
-      queueMicrotask(() => { setPreferredCalendarConnectionId(connectedAccountId); setCalendarOpen(true); });
+      queueMicrotask(() => { setPreferredCalendarConnectionId(connectedAccountId); setView("calendar"); });
       window.history.replaceState(null, "", window.location.pathname);
     }
     void meetingsService.getSession().then(async (active) => {
@@ -101,7 +101,7 @@ export function AppShell() {
 
   const openMeeting = useCallback((id: string, segmentId?: string) => {
     setActiveMeetingId(id); setFocusSegmentId(segmentId ?? null);
-    setMeetingReturnView(view === "knowledge" || segmentId ? "knowledge" : "dashboard"); setView("meeting");
+    setMeetingReturnView(view === "knowledge" || segmentId ? "knowledge" : view === "meetings" ? "meetings" : view === "calendar" ? "calendar" : "dashboard"); setView("meeting");
   }, [view]);
   const updateMeeting = useCallback((meeting: Meeting) => {
     setMeetings((current) => current.some((candidate) => candidate.id === meeting.id) ? current.map((candidate) => candidate.id === meeting.id ? meeting : candidate) : [meeting, ...current]);
@@ -137,11 +137,13 @@ export function AppShell() {
       <div className="workspace-main">
       <header className="topbar">
         <button className="mobile-nav-trigger" aria-label="Open navigation" onClick={() => setMobileNavOpen(true)}><Menu /></button>
-        <div className="topbar-context"><span className="topbar-kicker">{workspace?.display_name ?? "Meetings AI"}</span><span className="topbar-location">{view === "providers" ? "AI providers" : view === "workspace" ? "Organization & people" : view === "knowledge" ? "AI knowledge" : view === "profile" ? "My profile" : view === "meeting" ? "Meeting details" : "Overview"}</span></div>
+        <div className="topbar-context"><span className="topbar-kicker">{workspace?.display_name ?? "Meetings AI"}</span><span className="topbar-location">{view === "providers" ? "AI providers" : view === "workspace" ? "Organization & people" : view === "knowledge" ? "AI knowledge" : view === "profile" ? "My profile" : view === "meeting" ? "Meeting details" : view === "meetings" ? "Meetings" : view === "calendar" ? "Calendar" : "Overview"}</span></div>
         <span className="topbar-environment"><span aria-hidden="true" /> Local environment</span>
       </header>
       <main id="main-content">
-        {view === "dashboard" ? <Dashboard meetings={meetings} onNewMeeting={() => { setCalendarSelection(null); setDialogOpen(true); }} onOpenCalendar={() => setCalendarOpen(true)} onOpenProviders={() => setView("providers")} onOpenMeeting={openMeeting} /> : null}
+        {view === "dashboard" ? <Dashboard meetings={meetings} onNewMeeting={() => { setCalendarSelection(null); setDialogOpen(true); }} onOpenCalendar={() => setView("calendar")} onOpenProviders={() => setView("providers")} onOpenMeeting={openMeeting} /> : null}
+        {view === "meetings" ? <MeetingsLibrary meetings={meetings} onOpen={openMeeting} onNew={() => { setCalendarSelection(null); setDialogOpen(true); }} onCalendar={() => setView("calendar")} /> : null}
+        {view === "calendar" && (account?.role === "owner" || account?.role === "admin") ? <CalendarImportDialog open embedded preferredConnectionId={preferredCalendarConnectionId} onClose={() => setView("dashboard")} onChoose={(selection) => { setCalendarSelection(selection); setDialogOpen(true); }} /> : null}
         {view === "providers" ? providersLoadError ? <section className="page" role="alert"><h1>AI providers are unavailable</h1><p className="intro">{providersLoadError}</p><button className="button secondary" onClick={() => void meetingsService.listProviderProfiles().then((nextProfiles) => { setProfiles(nextProfiles); setProvidersLoadError(null); }).catch(() => undefined)}>Retry</button></section> : <ProviderSettings profiles={profiles} onProfilesChange={setProfiles} /> : null}
         {view === "knowledge" ? <KnowledgeScreen account={account} onOpenSource={openMeeting} /> : null}
         {view === "workspace" ? workspace
@@ -164,7 +166,6 @@ export function AppShell() {
           </Dialog.Popup>
         </Dialog.Portal>
       </Dialog.Root>
-      <CalendarImportDialog open={calendarOpen && (account?.role === "owner" || account?.role === "admin")} preferredConnectionId={preferredCalendarConnectionId} onClose={() => setCalendarOpen(false)} onChoose={(selection) => { setCalendarSelection({ ...selection, willSchedule: new Date(selection.event.starts_at).getTime() > Date.now() + 60_000 }); setCalendarOpen(false); setDialogOpen(true); }} />
       <NewMeetingDialog open={dialogOpen && (account?.role === "owner" || account?.role === "admin")} calendarSelection={calendarSelection} onClose={() => { setDialogOpen(false); setCalendarSelection(null); }} onMeetingJoined={(meeting) => {
         setDialogOpen(false);
         setCalendarSelection(null);
@@ -199,7 +200,9 @@ function SidebarPanel({ view, onNavigate, workspaces, account, onSignOut, onSwit
     <button className="brand" onClick={() => navigate("dashboard")} aria-label="Meetings AI home"><span className="brand-mark" aria-hidden="true"><Image src="/icon.svg" width={28} height={28} alt="" /></span><span>Meetings <b>AI</b></span></button>
     <p className="sidebar-label">YOUR WORK</p>
     <nav aria-label="Main navigation">
-      {canManageMeetings ? <button aria-current={view === "dashboard" || view === "meeting" ? "page" : undefined} className={view === "dashboard" || view === "meeting" ? "nav-link active" : "nav-link"} onClick={() => onNavigate("dashboard")}><MeetingsIcon /> Meetings</button> : null}
+      {canManageMeetings ? <button aria-current={view === "dashboard" ? "page" : undefined} className={view === "dashboard" ? "nav-link active" : "nav-link"} onClick={() => onNavigate("dashboard")}><LayoutDashboard /> Overview</button> : null}
+      {canManageMeetings ? <button aria-current={view === "meetings" || view === "meeting" ? "page" : undefined} className={view === "meetings" || view === "meeting" ? "nav-link active" : "nav-link"} onClick={() => onNavigate("meetings")}><MeetingsIcon /> Meetings</button> : null}
+      {canManageMeetings ? <button aria-current={view === "calendar" ? "page" : undefined} className={view === "calendar" ? "nav-link active" : "nav-link"} onClick={() => onNavigate("calendar")}><CalendarDays /> Calendar</button> : null}
       {canManageMeetings ? <button aria-current={view === "providers" ? "page" : undefined} className={view === "providers" ? "nav-link active" : "nav-link"} onClick={() => onNavigate("providers")}><ProvidersIcon /> AI providers</button> : null}
       <button aria-current={view === "knowledge" ? "page" : undefined} className={view === "knowledge" ? "nav-link active" : "nav-link"} onClick={() => onNavigate("knowledge")}><BookOpenText /> AI knowledge</button>
     </nav>

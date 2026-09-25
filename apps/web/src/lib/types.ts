@@ -356,11 +356,13 @@ export type MomGuidance = {
   focus_fields: string[];
 };
 
-export type CalendarConnection = { id: string; provider: "googlecalendar" | "outlook"; status: string; label: string };
+export type CalendarConnection = { id: string; provider: "googlecalendar" | "outlook" | "calendly" | "zoom"; status: string; label: string };
 export type CalendarPeriod = "today" | "tomorrow" | "this_week" | "next_week";
+export type CalendarInvitee = { name: string; email: string | null; response_status: string | null };
 export type CalendarEvent = {
   connection_id: string; provider: CalendarConnection["provider"]; event_id: string;
   title: string; starts_at: string; ends_at: string; meeting_url: string; platform: string;
+  agenda?: string | null; organizer?: string | null; invitees?: CalendarInvitee[];
 };
 export type CalendarSchedule = {
   meeting_id: string; connection_id: string; event_id: string; starts_at: string; ends_at: string;

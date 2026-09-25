@@ -78,7 +78,9 @@ def test_composio_tool_scan_filters_non_meetings_and_uses_explicit_account() -> 
         return httpx.Response(200, json={"successful": True, "data": {"items": [
             {"id": "meeting", "summary": "Team sync", "start": {"dateTime": event_time.isoformat()},
              "end": {"dateTime": (event_time + timedelta(hours=1)).isoformat()},
-             "description": "Join https://meet.google.com/abc-defg-hij"},
+             "description": "Discuss roadmap. Join https://meet.google.com/abc-defg-hij",
+             "organizer": {"email": "host@example.test", "displayName": "Host"},
+             "attendees": [{"email": "asha@example.test", "displayName": "Asha", "responseStatus": "accepted"}]},
             {"id": "no-link", "summary": "Lunch", "start": {"dateTime": event_time.isoformat()},
              "end": {"dateTime": (event_time + timedelta(hours=1)).isoformat()}},
         ]}})
@@ -88,6 +90,9 @@ def test_composio_tool_scan_filters_non_meetings_and_uses_explicit_account() -> 
     result = asyncio.run(calendar.events(actor, "ca-own", "tomorrow", "UTC"))
     assert [event.event_id for event in result.events] == ["meeting"]
     assert result.events[0].meeting_url == "https://meet.google.com/abc-defg-hij"
+    assert result.events[0].organizer == "Host"
+    assert result.events[0].invitees[0].email == "asha@example.test"
+    assert result.events[0].invitees[0].response_status == "accepted"
     assert b'"connected_account_id":"ca-own"' in requests[-1].content
     assert b'"version":"20260915_00"' in requests[-1].content
 
@@ -120,6 +125,58 @@ def test_multiple_accounts_of_same_provider_are_listed_and_selected_explicitly()
     assert b'"connected_account_id":"ca-personal"' in requests[-1].content
 
 
+def test_calendly_scan_enriches_invitees_and_agenda() -> None:
+    actor = _actor()
+    start, _ = calendar_window("tomorrow", "UTC")
+    when = start + timedelta(hours=10)
+    calls = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        if request.url.path.endswith("/connected_accounts"):
+            return httpx.Response(200, json={"items": [{"id": "ca-calendly", "toolkit": {"slug": "calendly"},
+                "user_id": f"meetings-ai:{actor.organization_id}:{actor.user_id}", "status": "ACTIVE"}]})
+        if request.url.path.endswith("/CALENDLY_WHO_AM_I"):
+            return httpx.Response(200, json={"successful": True, "data": {"data": {"uri": "https://api.calendly.com/users/me"}}})
+        if request.url.path.endswith("/CALENDLY_LIST_EVENT_INVITEES"):
+            return httpx.Response(200, json={"successful": True, "data": {"collection": [
+                {"name": "Asha Patel", "email": "asha@example.test", "status": "active"}]}})
+        return httpx.Response(200, json={"successful": True, "data": {"collection": [{
+            "uri": "https://api.calendly.com/scheduled_events/event-1", "name": "Discovery",
+            "start_time": when.isoformat(), "end_time": (when + timedelta(hours=1)).isoformat(),
+            "location": {"join_url": "https://meet.google.com/abc-defg-hij"},
+            "meeting_notes_plain": "Discuss rollout", "event_guests": [{"email": "guest@example.test"}],
+        }]}})
+
+    calendar = ComposioCalendar("test-key", transport=httpx.MockTransport(respond))
+    result = asyncio.run(calendar.events(actor, "ca-calendly", "tomorrow", "UTC"))
+    assert result.events[0].agenda == "Discuss rollout"
+    assert {person.email for person in result.events[0].invitees} == {"guest@example.test", "asha@example.test"}
+    assert any(request.url.path.endswith("/CALENDLY_LIST_EVENT_INVITEES") for request in calls)
+
+
+def test_zoom_scan_returns_hosted_meeting_without_inventing_invitees() -> None:
+    actor = _actor()
+    start, _ = calendar_window("tomorrow", "UTC")
+    when = start + timedelta(hours=11)
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/connected_accounts"):
+            return httpx.Response(200, json={"items": [{"id": "ca-zoom", "toolkit": {"slug": "zoom"},
+                "user_id": f"meetings-ai:{actor.organization_id}:{actor.user_id}", "status": "ACTIVE"}]})
+        return httpx.Response(200, json={"successful": True, "data": {"meetings": [{
+            "id": 12345678901, "topic": "Planning", "start_time": when.isoformat(), "duration": 45,
+            "join_url": "https://zoom.us/j/12345678901", "agenda": "Quarterly planning", "host_email": "host@example.test",
+        }]}})
+
+    calendar = ComposioCalendar("test-key", transport=httpx.MockTransport(respond))
+    result = asyncio.run(calendar.events(actor, "ca-zoom", "tomorrow", "UTC"))
+    assert result.events[0].event_id == "12345678901"
+    assert result.events[0].organizer == "host@example.test"
+    assert result.events[0].invitees == []
+    assert result.events[0].ends_at - result.events[0].starts_at == timedelta(minutes=45)
+
+
 def test_schedule_refetches_calendar_event_and_can_cancel(tmp_path) -> None:
     class FakeCalendar:
         async def events(self, actor, connection_id, period, timezone):
@@ -128,6 +185,8 @@ def test_schedule_refetches_calendar_event_and_can_cancel(tmp_path) -> None:
                 title="Customer call", starts_at=datetime.now(UTC) + timedelta(hours=4),
                 ends_at=datetime.now(UTC) + timedelta(hours=5),
                 meeting_url="https://meet.google.com/abc-defg-hij", platform="google_meet",
+                agenda="Discuss rollout", organizer="host@example.test",
+                invitees=[{"name": "Asha Patel", "email": "asha@example.test"}],
             )
             return type("Result", (), {"events": [event]})()
 
@@ -144,8 +203,45 @@ def test_schedule_refetches_calendar_event_and_can_cancel(tmp_path) -> None:
         meeting_id = response.json()["meeting"]["id"]
         assert response.json()["meeting"]["meeting_url"] == "https://meet.google.com/abc-defg-hij"
         assert client.get("/v1/calendar/schedules").json()[0]["status"] == "pending"
+        source = client.get(f"/v1/meetings/{meeting_id}/source").json()
+        assert source["agenda"] == "Discuss rollout"
+        people = client.get(f"/v1/meetings/{meeting_id}/participants").json()
+        assert people["participants"][0]["email"] == "asha@example.test"
         assert client.post(f"/v1/calendar/schedules/{meeting_id}/cancel").json()["status"] == "cancelled"
         assert client.get(f"/v1/meetings/{meeting_id}").status_code == 200
+
+
+def test_immediate_source_import_refetches_link_and_saves_invitees(tmp_path) -> None:
+    from unittest.mock import AsyncMock
+
+    class FakeCalendar:
+        async def events(self, actor, connection_id, period, timezone):
+            return type("Result", (), {"events": [CalendarEvent(
+                connection_id="ca-zoom", provider="zoom", event_id="zoom-42",
+                title="Product review", starts_at=datetime.now(UTC) - timedelta(minutes=5),
+                ends_at=datetime.now(UTC) + timedelta(minutes=55),
+                meeting_url="https://zoom.us/j/12345678901", platform="zoom",
+                agenda="Review scope", invitees=[{"name": "Casey", "email": "casey@example.test"}],
+            )]})()
+
+    app = create_app(database_url=f"sqlite+pysqlite:///{tmp_path / 'source-now.db'}",
+                     credential_key="test-only-credential-key", calendar_adapter=FakeCalendar())
+    app.state.meeting_service.join = AsyncMock(side_effect=lambda meeting_id: app.state.meeting_service.repository.get_meeting(meeting_id))
+    with TestClient(app) as client:
+        created = client.post("/v1/calendar/meetings", json={
+            "connection_id": "ca-zoom", "event_id": "zoom-42", "period": "today", "timezone": "UTC",
+            "meeting": {"meeting_url": "https://meet.google.com/attacker-link"},
+        })
+        assert created.status_code == 201, created.text
+        meeting_id = created.json()["meeting"]["id"]
+        assert created.json()["meeting"]["meeting_url"] == "https://zoom.us/j/12345678901"
+        assert client.get(f"/v1/meetings/{meeting_id}/source").json()["agenda"] == "Review scope"
+        assert client.get(f"/v1/meetings/{meeting_id}/participants").json()["participants"][0]["email"] == "casey@example.test"
+        duplicate = client.post("/v1/calendar/meetings", json={
+            "connection_id": "ca-zoom", "event_id": "zoom-42", "period": "today", "timezone": "UTC",
+            "meeting": {"meeting_url": "https://zoom.us/j/12345678901"},
+        })
+        assert duplicate.status_code == 400
 
 
 def test_missed_schedule_does_not_join_an_expired_call(tmp_path) -> None:

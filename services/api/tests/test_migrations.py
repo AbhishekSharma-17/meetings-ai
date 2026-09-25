@@ -77,6 +77,7 @@ def test_version_twelve_upgrade_backfills_meeting_and_provider_owners(tmp_path) 
         connection.execute(text("DROP TABLE calendar_schedules"))
         connection.execute(text("DROP TABLE model_usage"))
         connection.execute(text("DROP TABLE meeting_mom_guidance"))
+        connection.execute(text("DROP TABLE meeting_sources"))
         connection.execute(text("DROP TABLE organization_provider_defaults"))
         connection.execute(text("DROP TABLE meeting_tenants"))
         connection.execute(text("DROP TABLE provider_tenants"))
@@ -87,6 +88,7 @@ def test_version_twelve_upgrade_backfills_meeting_and_provider_owners(tmp_path) 
         connection.execute(text("DELETE FROM schema_version WHERE version = 17"))
         connection.execute(text("DELETE FROM schema_version WHERE version = 18"))
         connection.execute(text("DELETE FROM schema_version WHERE version = 19"))
+        connection.execute(text("DELETE FROM schema_version WHERE version = 20"))
         connection.execute(text(
             "INSERT INTO provider_defaults (capability, policy, cloud_profile_id) "
             "VALUES ('text_generation', 'cloud_only', :profile_id)"
@@ -127,7 +129,7 @@ def test_unknown_future_version_refuses_startup(tmp_path) -> None:
             version=Database.SCHEMA_VERSION + 1, applied_at=datetime.now(UTC),
         ))
 
-    with pytest.raises(SchemaMigrationError, match="unsupported database schema version 20"):
+    with pytest.raises(SchemaMigrationError, match=f"unsupported database schema version {Database.SCHEMA_VERSION + 1}"):
         database.migrate()
     database.engine.dispose()
 
@@ -151,7 +153,7 @@ def test_readiness_requires_current_schema(tmp_path) -> None:
         assert client.get("/health").status_code == 200
         assert client.get("/ready").json() == {"status": "ready", "schema_version": Database.SCHEMA_VERSION}
         with app.state.database.engine.begin() as connection:
-                connection.execute(text("DELETE FROM schema_version WHERE version = 19"))
+                connection.execute(text("DELETE FROM schema_version WHERE version = 20"))
         response = client.get("/ready")
         assert response.status_code == 503
         assert response.json()["detail"] == "database schema is not current"

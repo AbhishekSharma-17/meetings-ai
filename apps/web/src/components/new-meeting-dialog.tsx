@@ -101,6 +101,11 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
         onMeetingJoined(scheduled);
         return;
       }
+      if (calendarSelection) {
+        const joined = await meetingsService.joinCalendarEvent(calendarSelection.event, calendarSelection.period, calendarSelection.timezone, input);
+        onMeetingJoined(joined);
+        return;
+      }
       if (scheduledStartIso) {
         const scheduled = await meetingsService.scheduleMeeting(input, scheduledStartIso);
         onMeetingJoined(scheduled);
@@ -131,12 +136,13 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
     <Dialog.Backdrop className="dialog-backdrop" />
     <Dialog.Popup className="dialog" aria-labelledby={titleId}>
       <Dialog.Close className="close-button" aria-label="Close" disabled={joining}><X /></Dialog.Close>
-      <p className="eyebrow">NEW CAPTURE</p><Dialog.Title id={titleId}>{calendarSelection ? "Review calendar meeting" : "Send your assistant"}</Dialog.Title><Dialog.Description className="dialog-intro">{calendarSelection ? `From your ${calendarSelection.event.provider === "googlecalendar" ? "Google" : "Outlook"} calendar · ${new Date(calendarSelection.event.starts_at).toLocaleString()}. Future meetings are scheduled automatically; meetings starting now join immediately.` : "Paste a meeting link to start a capture. You’ll review the transcript and minutes here before anything is emailed."}</Dialog.Description>
+      <p className="eyebrow">NEW CAPTURE</p><Dialog.Title id={titleId}>{calendarSelection ? "Review sourced meeting" : "Send your assistant"}</Dialog.Title><Dialog.Description className="dialog-intro">{calendarSelection ? `From ${calendarSelection.event.provider === "googlecalendar" ? "Google Calendar" : calendarSelection.event.provider === "outlook" ? "Outlook Calendar" : calendarSelection.event.provider === "calendly" ? "Calendly" : "Zoom"} · ${new Date(calendarSelection.event.starts_at).toLocaleString()}. Future meetings are scheduled automatically; meetings starting now join immediately.` : "Paste a meeting link to start a capture. You’ll review the transcript and minutes here before anything is emailed."}</Dialog.Description>
       <form onSubmit={(event) => void submit(event)}>
         <label htmlFor="meeting-link">Meeting link</label>
         <input id="meeting-link" name="meeting-link" type="url" required placeholder="https://meet.google.com/..." autoFocus defaultValue={calendarSelection?.event.meeting_url ?? ""} readOnly={Boolean(calendarSelection)} disabled={joining} />
         <label htmlFor="meeting-title">Meeting name <span className="optional">optional</span></label>
         <input id="meeting-title" name="meeting-title" placeholder="e.g. Product discovery" defaultValue={calendarSelection?.event.title ?? ""} disabled={joining} />
+        {calendarSelection ? <div className="source-preview"><b>Source details</b>{calendarSelection.event.organizer ? <p>Organizer: {calendarSelection.event.organizer}</p> : null}{calendarSelection.event.agenda ? <p>Agenda: {calendarSelection.event.agenda}</p> : null}<p>{calendarSelection.event.invitees?.length ?? 0} listed invitees. These are not verified attendees or speakers.</p>{calendarSelection.event.invitees?.length ? <ul>{calendarSelection.event.invitees.map((person, index) => <li key={`${person.email ?? person.name}-${index}`}>{person.name}{person.email ? ` · ${person.email}` : ""}</li>)}</ul> : null}</div> : null}
         <label htmlFor="bot-name">Assistant name</label>
         <input id="bot-name" name="bot-name" defaultValue="Meetings AI" disabled={joining} />
         {!calendarSelection ? <fieldset className="meeting-join-timing"><legend>When should the assistant join?</legend><label><input type="radio" name="join-timing" value="now" checked={joinTiming === "now"} onChange={() => setJoinTiming("now")} disabled={joining} /> Join now</label><label><input type="radio" name="join-timing" value="scheduled" checked={joinTiming === "scheduled"} onChange={() => setJoinTiming("scheduled")} disabled={joining} /> At the meeting start time</label>{joinTiming === "scheduled" ? <><label htmlFor="scheduled-start">Meeting start · {Intl.DateTimeFormat().resolvedOptions().timeZone}</label><input id="scheduled-start" type="datetime-local" value={scheduledStart} onChange={(event) => setScheduledStart(event.target.value)} required disabled={joining} /><p>The assistant is queued now and joins at this time. It will leave after Vexa detects the meeting has gone quiet.</p></> : null}</fieldset> : null}
@@ -160,7 +166,7 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
           <label htmlFor="internal-recipients">Internal team email addresses</label>
           <textarea id="internal-recipients" name="internal-recipients" rows={2} placeholder="team@company.com" disabled={joining} />
           <label htmlFor="participant-recipients">Participant email addresses</label>
-          <textarea id="participant-recipients" name="participant-recipients" rows={2} placeholder="optional; enter exact addresses" disabled={joining} />
+          <textarea id="participant-recipients" name="participant-recipients" rows={2} placeholder="optional; enter exact addresses" defaultValue={calendarSelection?.event.invitees?.map((person) => person.email).filter(Boolean).join("\n") ?? ""} disabled={joining} />
           <label className="check-label"><input type="checkbox" name="share-participants" disabled={joining} /> Also send to listed participants after approval</label>
           <p>To enable participant delivery, add their email addresses above. Nothing is sent until the MOM is approved.</p>
           <label className="check-label"><input type="checkbox" name="include-transcript" disabled={joining} /> Include full transcript in the email</label>

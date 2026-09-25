@@ -32,6 +32,7 @@ from meetings_contracts import (
     MeetingPublic,
     MeetingStatus,
     MeetingParticipantsResponse,
+    MeetingParticipant,
     MeetingTranscriptResponse,
     SpeakerCorrectionRequest,
     SpeakerIdentityRequest,
@@ -45,7 +46,7 @@ from meetings_contracts import (
 from .adapters.vexa import VexaAPIError, VexaCaptureAdapter
 from .adapters.resend import EmailDeliveryError, ResendAdapter
 from .adapters.base import ProviderExecutionError
-from .composio_calendar import CalendarConnection, CalendarConnectRequest, CalendarConnectResponse, CalendarEventsResponse, CalendarError, CalendarProvider, CalendarRange, ComposioCalendar, calendar_callback_url
+from .composio_calendar import CalendarConnection, CalendarConnectRequest, CalendarConnectResponse, CalendarEvent, CalendarEventsResponse, CalendarError, CalendarProvider, CalendarRange, ComposioCalendar, calendar_callback_url
 from .calendar_schedule import CalendarScheduleError, CalendarSchedulePublic, CalendarScheduleService, ManualScheduleCreate, ScheduleCreate
 from .database import Database, SchemaVersionRow, LEGACY_ADMIN_USER_ID, LEGACY_ORGANIZATION_ID
 from .accounts import AccountError, AccountPublic, AccountService, Actor, ChangePasswordRequest, InviteRequest, InviteResult, MemberRolePatch, OrganizationCreateRequest, OrganizationOption, ProfilePatch
@@ -228,7 +229,7 @@ def create_app(
                         or (method == "GET" and re.fullmatch(r"/v1/knowledge/text-profiles/[0-9a-f-]+/models", path))
                         or path == "/v1/auth/me"
                         or (path == "/v1/calendar/connections" and method == "GET")
-                        or (re.fullmatch(r"/v1/calendar/connect/(googlecalendar|outlook)", path) and method == "POST")
+                        or (re.fullmatch(r"/v1/calendar/connect/(googlecalendar|outlook|calendly|zoom)", path) and method == "POST")
                         or (path == "/v1/calendar/events" and method == "GET")
                         or (method == "GET" and re.fullmatch(r"/v1/meetings/[0-9a-f-]+(?:/transcript)?", path))
                     )
@@ -789,6 +790,14 @@ def create_app(
     def calendar_schedules(request: Request) -> list[CalendarSchedulePublic]:
         return calendar_schedule.list(request.state.actor)
 
+    @app.post("/v1/calendar/meetings", status_code=201)
+    async def calendar_create_now(payload: ScheduleCreate, request: Request) -> dict[str, object]:
+        try:
+            meeting = await calendar_schedule.create_now(request.state.actor, payload)
+            return {"meeting": meeting.model_dump(mode="json")}
+        except (CalendarScheduleError, CalendarError, MeetingValidationError, KnowledgeBaseNotFoundError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.get("/v1/calendar/schedules/{meeting_id}", response_model=CalendarSchedulePublic)
     def calendar_schedule_get(meeting_id: UUID, request: Request) -> CalendarSchedulePublic:
         scheduled = calendar_schedule.get(request.state.actor, meeting_id)
@@ -953,9 +962,28 @@ def create_app(
             raise api_error(exc) from exc
 
     @app.get("/v1/meetings/{meeting_id}/participants", response_model=MeetingParticipantsResponse)
-    async def get_meeting_participants(meeting_id: UUID) -> MeetingParticipantsResponse:
+    async def get_meeting_participants(meeting_id: UUID, request: Request) -> MeetingParticipantsResponse:
         try:
-            return await meeting_service.participants(meeting_id)
+            response = await meeting_service.participants(meeting_id)
+            source = calendar_schedule.source(request.state.actor, meeting_id)
+            if source:
+                known = {(person.email or "").lower() for person in response.participants if person.source == "invite"}
+                response.participants = [
+                    MeetingParticipant(name=person.name, email=person.email, source="invite", response_status=person.response_status)
+                    for person in source.invitees if not person.email or person.email.lower() not in known
+                ] + response.participants
+            return response
+        except MEETING_EXCEPTIONS as exc:
+            raise api_error(exc) from exc
+
+    @app.get("/v1/meetings/{meeting_id}/source", response_model=CalendarEvent)
+    def get_meeting_source(meeting_id: UUID, request: Request) -> CalendarEvent:
+        try:
+            repository.get_meeting(meeting_id)
+            source = calendar_schedule.source(request.state.actor, meeting_id)
+            if source is None:
+                raise HTTPException(status_code=404, detail="meeting has no connected source")
+            return source
         except MEETING_EXCEPTIONS as exc:
             raise api_error(exc) from exc
 

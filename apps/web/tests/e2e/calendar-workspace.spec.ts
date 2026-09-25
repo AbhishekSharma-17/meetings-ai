@@ -47,10 +47,13 @@ test("calendar shows provider status and normalizes browser time zone", async ({
     await route.fulfill({ json: { events: [], timezone: "Asia/Kolkata", range_start: "2026-09-25T00:00:00Z", range_end: "2026-09-26T00:00:00Z" } });
   });
   await page.goto("/");
-  await page.getByRole("button", { name: "Calendar", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Calendar" }).click();
+  await expect(page.getByRole("heading", { name: "Meeting sources" })).toBeVisible();
   await expect(page.getByLabel("Calendar connections").getByText("Outlook Calendar")).toBeVisible();
   await expect(page.getByLabel("Calendar connections").getByText("Connected", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Calendar connections").getByText("Google Calendar")).toBeVisible();
+  await expect(page.getByLabel("Calendar connections").getByText("Calendly")).toBeVisible();
+  await expect(page.getByLabel("Calendar connections").getByText("Zoom", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Show meetings" }).click();
   await expect(page.getByText("No upcoming supported meetings in this range")).toBeVisible();
 });
@@ -73,9 +76,46 @@ test("multiple calendar accounts stay distinct and the selected account is scann
   await expect(page.getByText("Personal calendar", { exact: true })).toBeVisible();
   await expect(page.getByText("outlook@example.test")).toBeVisible();
   await expect(page.getByRole("button", { name: "Add another" })).toHaveCount(2);
-  await expect(page.getByRole("combobox", { name: "Scan calendar account" })).toContainText("Personal calendar");
+  await expect(page.getByRole("combobox", { name: "Scan connected account" })).toContainText("Personal calendar");
   await page.getByRole("button", { name: "Show meetings" }).click();
   await expect.poll(() => scannedAccount).toBe("ca-personal");
+});
+
+test("source discovery shows agenda and invitees before scheduling", async ({ page }) => {
+  const startsAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+  const endsAt = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
+  await page.route("**/v1/calendar/events?**", (route) => route.fulfill({ json: { events: [{
+    connection_id: "outlook-account", provider: "outlook", event_id: "event-42", title: "Client discovery",
+    starts_at: startsAt, ends_at: endsAt, meeting_url: "https://meet.google.com/abc-defg-hij", platform: "google_meet",
+    agenda: "Review rollout and owners", organizer: "host@example.test",
+    invitees: [{ name: "Asha", email: "asha@example.test", response_status: "accepted" }],
+  }], range_start: startsAt, range_end: endsAt, timezone: "UTC" } }));
+  await page.goto("/");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Calendar" }).click();
+  await page.getByRole("button", { name: "Show meetings" }).click();
+  await expect(page.getByText("Review rollout and owners")).toBeVisible();
+  await page.getByRole("button", { name: "Review setup" }).click();
+  await expect(page.getByText("Organizer: host@example.test")).toBeVisible();
+  await expect(page.getByText("Asha · asha@example.test")).toBeVisible();
+});
+
+test("meetings page filters scheduled and completed records", async ({ page }) => {
+  await page.route("**/v1/meetings", (route) => route.fulfill({ json: { items: [
+    { id: "00000000-0000-4000-8000-000000000011", title: "Future planning", status: "created", platform: "google_meet", created_at: "2026-09-25T00:00:00Z", meeting_url: "https://meet.google.com/abc-defg-hij" },
+    { id: "00000000-0000-4000-8000-000000000012", title: "Past client recap", status: "ready", platform: "google_meet", created_at: "2026-09-24T00:00:00Z", meeting_url: "https://meet.google.com/abc-defg-hij" },
+  ], count: 2 } }));
+  await page.route("**/v1/calendar/schedules", (route) => route.fulfill({ json: [{
+    meeting_id: "00000000-0000-4000-8000-000000000011", connection_id: "ca-calendly", provider: "calendly", event_id: "event-1",
+    starts_at: "2026-09-26T09:00:00Z", ends_at: "2026-09-26T10:00:00Z", status: "pending", last_error: null,
+  }] }));
+  await page.goto("/");
+  await page.getByRole("button", { name: "Meetings", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Meetings", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /Scheduled/ }).click();
+  await expect(page.getByText("Future planning")).toBeVisible();
+  await expect(page.getByText("Past client recap")).toHaveCount(0);
+  await page.getByRole("button", { name: /Ready to review/ }).click();
+  await expect(page.getByText("Past client recap")).toBeVisible();
 });
 
 test("workspace creation lives in Organization & people, not the profile menu", async ({ page }) => {

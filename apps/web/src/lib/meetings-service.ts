@@ -47,6 +47,8 @@ export interface MeetingsService {
   listCalendarSchedules(): Promise<CalendarSchedule[]>;
   getCalendarSchedule(meetingId: string): Promise<CalendarSchedule | null>;
   scheduleCalendarEvent(event: CalendarEvent, period: CalendarPeriod, timezone: string, input: CreateMeetingInput): Promise<MeetingDetail>;
+  joinCalendarEvent(event: CalendarEvent, period: CalendarPeriod, timezone: string, input: CreateMeetingInput): Promise<MeetingDetail>;
+  getMeetingSource(meetingId: string): Promise<CalendarEvent | null>;
   cancelCalendarSchedule(meetingId: string): Promise<CalendarSchedule>;
   getMeeting(id: string): Promise<MeetingDetail>;
   deleteMeeting(id: string): Promise<void>;
@@ -553,6 +555,23 @@ class HttpMeetingsService implements MeetingsService {
       },
     }) });
     return toMeetingDetail(result.meeting);
+  }
+
+  async joinCalendarEvent(event: CalendarEvent, period: CalendarPeriod, timezone: string, input: CreateMeetingInput): Promise<MeetingDetail> {
+    const result = await api<{ meeting: BackendMeeting }>("/v1/calendar/meetings", { method: "POST", body: JSON.stringify({
+      connection_id: event.connection_id, event_id: event.event_id, period, timezone,
+      meeting: {
+        meeting_url: event.meeting_url, title: input.title || event.title, bot_name: input.botName || "Meetings AI",
+        delivery_settings: input.deliverySettings, tags: input.tags ?? [], mom_guidance: input.momGuidance,
+        knowledge_enabled: input.knowledgeEnabled ?? false, knowledge_base_id: input.knowledgeBaseId ?? null,
+      },
+    }) });
+    return toMeetingDetail(result.meeting);
+  }
+
+  async getMeetingSource(meetingId: string): Promise<CalendarEvent | null> {
+    try { return await api<CalendarEvent>(`/v1/meetings/${meetingId}/source`); }
+    catch (cause) { if (cause instanceof ApiError && cause.status === 404) return null; throw cause; }
   }
 
   async cancelCalendarSchedule(meetingId: string): Promise<CalendarSchedule> {

@@ -193,6 +193,25 @@ class CalendarScheduleRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class MeetingSourceRow(Base):
+    __tablename__ = "meeting_sources"
+
+    meeting_id: Mapped[str] = mapped_column(String(36), ForeignKey("meetings.id"), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(30), nullable=False)
+    connection_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    event_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    meeting_url: Mapped[str] = mapped_column(Text, nullable=False)
+    platform: Mapped[str] = mapped_column(String(30), nullable=False)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    agenda: Mapped[str | None] = mapped_column(Text)
+    organizer: Mapped[str | None] = mapped_column(String(160))
+    invitees: Mapped[list[dict]] = mapped_column(JSON, nullable=False)
+    saved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class MeetingKnowledgeBaseRow(Base):
     __tablename__ = "meeting_knowledge_bases"
 
@@ -491,6 +510,7 @@ SCHEMA_TABLES_BY_VERSION: dict[int, tuple[str, ...]] = {
     17: ("calendar_schedules",),
     18: ("model_usage",),
     19: ("meeting_mom_guidance",),
+    20: ("meeting_sources",),
 }
 
 SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
@@ -524,6 +544,7 @@ SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
     "knowledge_embeddings": ("id", "organization_id", "knowledge_base_id", "meeting_id", "source_id", "fingerprint", "profile_id", "model", "dimensions", "vector", "updated_at"),
     "knowledge_index_jobs": ("knowledge_base_id", "organization_id", "status", "attempts", "requested_at", "started_at", "completed_at", "next_retry_at", "last_error"),
     "calendar_schedules": ("meeting_id", "organization_id", "user_id", "connection_id", "provider", "event_id", "starts_at", "ends_at", "status", "attempts", "last_error", "created_at", "updated_at"),
+    "meeting_sources": ("meeting_id", "organization_id", "provider", "connection_id", "event_id", "title", "meeting_url", "platform", "starts_at", "ends_at", "agenda", "organizer", "invitees", "saved_at"),
     "meeting_knowledge_bases": ("meeting_id", "knowledge_base_id"),
     "knowledge_conversations": ("id", "knowledge_base_id", "user_id", "title", "created_at", "updated_at"),
     "knowledge_messages": ("id", "conversation_id", "position", "role", "content", "citations", "provider", "model", "created_at"),
@@ -573,7 +594,7 @@ def _validate_database_schema(connection, version: int) -> None:
 class Database:
     """Upgrades known schemas and rejects unknown or incomplete ones."""
 
-    SCHEMA_VERSION = 19
+    SCHEMA_VERSION = 20
 
     def __init__(self, url: str) -> None:
         engine_options: dict[str, object] = {"pool_pre_ping": True}
