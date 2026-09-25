@@ -214,6 +214,9 @@ policies, account lifecycle, and security hardening are complete.
 
 ## Calendar discovery
 
+For the current hosted service layout and deployment checks, see the
+[Railway runbook](docs/deployment/railway.md).
+
 Set `COMPOSIO_API_KEY`, `COMPOSIO_GOOGLE_CALENDAR_AUTH_CONFIG_ID`, and
 `COMPOSIO_OUTLOOK_AUTH_CONFIG_ID` in the ignored `.env.local`; Compose passes
 them only to the API. Auth configurations should request calendar read-only
