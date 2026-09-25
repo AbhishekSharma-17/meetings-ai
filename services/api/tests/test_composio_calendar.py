@@ -36,8 +36,10 @@ def test_callback_uses_browser_visible_loopback_port_without_allowing_external_r
         "http://localhost:59631/?calendar=connected"
     with pytest.raises(CalendarError, match="not allowed"):
         calendar_callback_url("https://attacker.example", "http://localhost:3020", "development")
-    with pytest.raises(CalendarError, match="not allowed"):
-        calendar_callback_url("https://attacker.example", "https://app.example", "production")
+    assert calendar_callback_url("https://attacker.example", "https://app.example", "production") == \
+        "https://app.example/?calendar=connected"
+    assert calendar_callback_url("https://old-railway.example", "https://meeting.genaiprotos.com", "production") == \
+        "https://meeting.genaiprotos.com/?calendar=connected"
     with pytest.raises(CalendarError, match="must use HTTPS"):
         calendar_callback_url(None, "http://localhost:3020", "production")
 
@@ -59,6 +61,27 @@ def test_connect_route_passes_browser_origin_to_composio(tmp_path) -> None:
         assert fake.callback == "http://localhost:59631/?calendar=connected"
         denied = client.post("/v1/calendar/connect/outlook", json={"callback_origin": "https://attacker.example"})
         assert denied.status_code == 400
+
+
+def test_production_connect_uses_configured_url_instead_of_browser_origin(tmp_path, monkeypatch) -> None:
+    class FakeCalendar:
+        callback: str | None = None
+
+        async def connect(self, actor, provider, callback_url):
+            self.callback = callback_url
+            return CalendarConnectResponse(redirect_url="https://connect.composio.dev/example")
+
+    monkeypatch.setenv("APP_BASE_URL", "https://meeting.genaiprotos.com")
+    fake = FakeCalendar()
+    app = create_app(database_url=f"sqlite+pysqlite:///{tmp_path / 'production-callback.db'}",
+                     credential_key="test-only-credential-key", calendar_adapter=fake)
+    # The route reads APP_ENV when invoked; keep the test database in its
+    # isolated development mode during app construction.
+    monkeypatch.setenv("APP_ENV", "production")
+    with TestClient(app) as client:
+        response = client.post("/v1/calendar/connect/outlook", json={"callback_origin": "https://old-railway.example"})
+        assert response.status_code == 200
+        assert fake.callback == "https://meeting.genaiprotos.com/?calendar=connected"
 
 
 def test_admin_can_audit_each_members_calendar_connections(tmp_path) -> None:

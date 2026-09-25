@@ -126,7 +126,10 @@ def _user_id(actor: Actor) -> str:
 
 def calendar_callback_url(requested_origin: str | None, configured_origin: str, app_env: str) -> str:
     """Allow browser-visible loopback ports in development, not arbitrary redirects."""
-    origin = (requested_origin or configured_origin).rstrip("/")
+    # Production OAuth always returns to the server-configured application URL.
+    # The browser may still be on an older Railway URL or a newly added custom
+    # domain; neither should control the callback destination.
+    origin = (configured_origin if app_env == "production" else requested_origin or configured_origin).rstrip("/")
     try:
         parts = urlsplit(origin)
         _ = parts.port
@@ -137,8 +140,8 @@ def calendar_callback_url(requested_origin: str | None, configured_origin: str, 
         raise CalendarError("calendar callback origin is invalid")
     if app_env == "production" and parts.scheme != "https":
         raise CalendarError("calendar callback origin must use HTTPS in production")
-    if origin != configured_origin.rstrip("/"):
-        if app_env == "production" or parts.scheme != "http" or parts.hostname not in {"localhost", "127.0.0.1"}:
+    if app_env != "production" and origin != configured_origin.rstrip("/"):
+        if parts.scheme != "http" or parts.hostname not in {"localhost", "127.0.0.1"}:
             raise CalendarError("calendar callback origin is not allowed")
     return origin + "/?calendar=connected"
 
