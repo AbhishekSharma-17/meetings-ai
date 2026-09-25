@@ -1,4 +1,4 @@
-import type { AuditEvent, CalendarConnection, CalendarEvent, CalendarPeriod, CalendarSchedule, Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeTextProfile, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, MomGuidance, PostMeetingJob, ProfileKind, ProviderProfile, ResendStatus, RetentionPolicy, SpeakerIdentity, TextModelCatalog, TranscriptSegment, TranscriptionRoute, UsageSummary, Workspace, WorkspaceMember, WorkspaceOperations, WorkspaceOption } from "./types";
+import type { AuditEvent, CalendarConnection, CalendarEvent, CalendarPeriod, CalendarSchedule, Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeTextProfile, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, MomGuidance, PostMeetingJob, ProfileKind, ProviderProfile, ResendStatus, RetentionPolicy, SpeakerIdentity, TextModelCatalog, TranscriptSegment, TranscriptionRoute, UsageSummary, Workspace, WorkspaceCalendarConnection, WorkspaceMember, WorkspaceOperations, WorkspaceOption } from "./types";
 
 export interface MeetingsService {
   getSession(): Promise<boolean>;
@@ -42,6 +42,7 @@ export interface MeetingsService {
   createMeeting(input: CreateMeetingInput): Promise<MeetingDetail>;
   scheduleMeeting(input: CreateMeetingInput, startsAt: string): Promise<MeetingDetail>;
   listCalendarConnections(): Promise<CalendarConnection[]>;
+  listWorkspaceCalendarConnections(): Promise<WorkspaceCalendarConnection[]>;
   connectCalendar(provider: CalendarConnection["provider"]): Promise<string>;
   scanCalendar(connectionId: string, period: CalendarPeriod, timezone: string): Promise<CalendarEvent[]>;
   listCalendarSchedules(): Promise<CalendarSchedule[]>;
@@ -390,6 +391,10 @@ class HttpMeetingsService implements MeetingsService {
 
   async getWorkspaceUsage(): Promise<UsageSummary> {
     return api<UsageSummary>("/v1/workspace/usage");
+  }
+
+  async listWorkspaceCalendarConnections(): Promise<WorkspaceCalendarConnection[]> {
+    return api<WorkspaceCalendarConnection[]>("/v1/workspace/calendar-connections");
   }
 
   async getRetentionPolicy(): Promise<RetentionPolicy> {

@@ -39,6 +39,17 @@ class UsageSummary(BaseModel):
     unpriced_requests: int
     recent: list[ModelUsageEvent]
     by_meeting: list["MeetingUsageTotal"]
+    by_purpose: list["UsageGroupTotal"]
+    by_provider: list["UsageGroupTotal"]
+
+
+class UsageGroupTotal(BaseModel):
+    name: str
+    requests: int
+    input_tokens: int
+    output_tokens: int
+    estimated_usd: float
+    unpriced_requests: int
 
 
 class MeetingUsageTotal(BaseModel):
@@ -120,7 +131,23 @@ class UsageLedger:
             ).where(
                 ModelUsageRow.organization_id == str(organization_id),
                 ModelUsageRow.meeting_id.is_not(None),
-            ).group_by(ModelUsageRow.meeting_id).order_by(func.sum(ModelUsageRow.estimated_usd).desc()).limit(50)).all()
+            ).group_by(ModelUsageRow.meeting_id).order_by(func.sum(ModelUsageRow.estimated_usd).desc())).all()
+            def grouped(column):
+                return session.execute(select(
+                    column,
+                    func.count(ModelUsageRow.id),
+                    func.coalesce(func.sum(ModelUsageRow.input_tokens), 0),
+                    func.coalesce(func.sum(ModelUsageRow.output_tokens), 0),
+                    func.coalesce(func.sum(ModelUsageRow.estimated_usd), 0),
+                    func.count(ModelUsageRow.id).filter(ModelUsageRow.estimated_usd.is_(None)),
+                ).where(ModelUsageRow.organization_id == str(organization_id))
+                 .group_by(column).order_by(func.count(ModelUsageRow.id).desc())).all()
+            purpose_totals = grouped(ModelUsageRow.purpose)
+            provider_totals = grouped(ModelUsageRow.provider)
+        def group_models(group_rows):
+            return [UsageGroupTotal(name=row[0], requests=row[1], input_tokens=row[2],
+                                    output_tokens=row[3], estimated_usd=round(float(row[4]), 6),
+                                    unpriced_requests=row[5]) for row in group_rows]
         return UsageSummary(
             total_requests=totals[0], input_tokens=totals[1], output_tokens=totals[2],
             estimated_usd=round(float(totals[3]), 6), unpriced_requests=totals[4],
@@ -136,6 +163,8 @@ class UsageLedger:
                 output_tokens=row[3], estimated_usd=round(float(row[4]), 6),
                 unpriced_requests=row[5],
             ) for row in meeting_totals],
+            by_purpose=group_models(purpose_totals),
+            by_provider=group_models(provider_totals),
         )
 
 

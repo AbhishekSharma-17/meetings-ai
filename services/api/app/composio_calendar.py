@@ -44,6 +44,12 @@ class CalendarConnection(BaseModel):
     label: str
 
 
+class WorkspaceCalendarConnection(CalendarConnection):
+    user_id: str
+    user_name: str
+    user_email: str | None
+
+
 class CalendarConnectResponse(BaseModel):
     redirect_url: str
 

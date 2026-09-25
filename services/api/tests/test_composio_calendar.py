@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import update
 
 from app.accounts import Actor
-from app.composio_calendar import CalendarConnectResponse, CalendarError, CalendarEvent, ComposioCalendar, calendar_callback_url, calendar_window
+from app.composio_calendar import CalendarConnection, CalendarConnectResponse, CalendarError, CalendarEvent, ComposioCalendar, calendar_callback_url, calendar_window
 from app.main import create_app
 from app.database import CalendarScheduleRow
 
@@ -59,6 +59,29 @@ def test_connect_route_passes_browser_origin_to_composio(tmp_path) -> None:
         assert fake.callback == "http://localhost:59631/?calendar=connected"
         denied = client.post("/v1/calendar/connect/outlook", json={"callback_origin": "https://attacker.example"})
         assert denied.status_code == 400
+
+
+def test_admin_can_audit_each_members_calendar_connections(tmp_path) -> None:
+    class FakeCalendar:
+        seen = []
+
+        async def connections(self, actor):
+            self.seen.append(actor.user_id)
+            return [CalendarConnection(id=f"account-{actor.user_id}", provider="outlook", status="ACTIVE", label="Work calendar")]
+
+    fake = FakeCalendar()
+    app = create_app(database_url=f"sqlite+pysqlite:///{tmp_path / 'account-audit.db'}",
+                     credential_key="test-only-credential-key", calendar_adapter=fake)
+    with TestClient(app) as client:
+        invited = client.post("/v1/workspace/invite", json={"email": "teammate@example.test", "display_name": "Teammate", "role": "member"})
+        assert invited.status_code == 201
+        response = client.get("/v1/workspace/calendar-connections")
+        assert response.status_code == 200
+        rows = response.json()
+        assert len(rows) == 2
+        assert {row["user_id"] for row in rows} == {str(_actor().user_id), invited.json()["account"]["user_id"]}
+        assert {row["user_name"] for row in rows} == {"Local administrator", "Teammate"}
+        assert len(fake.seen) == 2
 
 
 def test_composio_tool_scan_filters_non_meetings_and_uses_explicit_account() -> None:

@@ -65,7 +65,7 @@ test("workspace profile can be edited", async ({ page }) => {
   await page.route("**/v1/workspace**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === "/v1/workspaces") return route.fulfill({ json: [{ id: workspace.id, slug: workspace.slug, display_name: workspace.display_name, role: "owner" }] });
-    if (pathname === "/v1/workspace/usage") return route.fulfill({ json: { total_requests: 0, input_tokens: 0, output_tokens: 0, estimated_usd: 0, unpriced_requests: 0, recent: [], by_meeting: [] } });
+    if (pathname === "/v1/workspace/usage") return route.fulfill({ json: { total_requests: 0, input_tokens: 0, output_tokens: 0, estimated_usd: 0, unpriced_requests: 0, recent: [], by_meeting: [], by_purpose: [], by_provider: [] } });
     if (pathname === "/v1/workspace/operations") return route.fulfill({ json: { people: 1, meetings_captured: 0, completed_meetings: 0, saved_chats: 0, active_captures: 0, failed_captures: 0, failed_mom_jobs: 0, pending_index_jobs: 0, failed_index_jobs: 0, failed_email_deliveries: 0, latest_audit_at: null } });
     if (pathname === "/v1/workspace/audit") return route.fulfill({ json: [{
       id: "00000000-0000-4000-8000-000000000099",
@@ -194,10 +194,12 @@ test("owner can invite a teammate and share a named knowledge base", async ({ pa
   await expect(page.getByText("Team Member", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "AI knowledge" }).click();
   await page.getByRole("button", { name: /Client account/ }).click();
-  await page.getByLabel("Share this base").selectOption("specific");
-  await page.getByLabel(/Team Member/).check();
+  await page.getByRole("button", { name: "Manage sharing" }).click();
+  await page.getByRole("radio", { name: "Specific teammates" }).check();
+  await page.getByRole("dialog").getByRole("checkbox", { name: /Team Member/ }).check();
   await page.getByRole("button", { name: "Save sharing" }).click();
   expect(sharing).toEqual({ visibility: "specific", user_ids: [memberId] });
+  await expect(page.getByText("Sharing saved for Client account.")).toBeVisible();
   await capture(page, "13-knowledge-sharing.png");
 });
 

@@ -91,6 +91,8 @@ export type UsageSummary = {
   unpriced_requests: number;
   recent: Array<{ id: string; meeting_id: string | null; knowledge_base_id: string | null; purpose: string; provider: string; model: string; input_tokens: number | null; output_tokens: number | null; estimated_usd: number | null; created_at: string }>;
   by_meeting: Array<{ meeting_id: string; requests: number; input_tokens: number; output_tokens: number; estimated_usd: number; unpriced_requests: number }>;
+  by_purpose: Array<{ name: string; requests: number; input_tokens: number; output_tokens: number; estimated_usd: number; unpriced_requests: number }>;
+  by_provider: Array<{ name: string; requests: number; input_tokens: number; output_tokens: number; estimated_usd: number; unpriced_requests: number }>;
 };
 
 export type RetentionPolicy = {
@@ -357,6 +359,7 @@ export type MomGuidance = {
 };
 
 export type CalendarConnection = { id: string; provider: "googlecalendar" | "outlook" | "calendly" | "zoom"; status: string; label: string };
+export type WorkspaceCalendarConnection = CalendarConnection & { user_id: string; user_name: string; user_email: string | null };
 export type CalendarPeriod = "today" | "tomorrow" | "this_week" | "next_week";
 export type CalendarInvitee = { name: string; email: string | null; response_status: string | null };
 export type CalendarEvent = {

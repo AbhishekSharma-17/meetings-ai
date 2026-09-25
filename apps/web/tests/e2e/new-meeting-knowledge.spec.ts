@@ -160,10 +160,11 @@ test("shows and changes sharing for the selected knowledge base", async ({ page 
   const mock = await mockApp(page, { visibility: "organization" });
   await page.goto("/");
   await page.getByRole("button", { name: "AI knowledge" }).click();
-  await expect(page.getByLabel("Share this base")).toHaveValue("organization");
   await expect(page.getByText("Shared with everyone in this organization")).toBeVisible();
-  await page.getByLabel("Share this base").selectOption("specific");
-  await page.getByLabel(/Team member/).check();
+  await page.getByRole("button", { name: "Manage sharing" }).click();
+  await expect(page.getByRole("radio", { name: "Everyone in this organization" })).toBeChecked();
+  await page.getByRole("radio", { name: "Specific teammates" }).check();
+  await page.getByRole("dialog").getByRole("checkbox", { name: /Team member/ }).check();
   await page.getByRole("button", { name: "Save sharing" }).click();
   await expect(page.getByText("Sharing saved for Mobius_meet.")).toBeVisible();
   expect(mock.sharingBody).toEqual({ visibility: "specific", user_ids: ["00000000-0000-4000-8000-000000000088"] });

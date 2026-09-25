@@ -2,6 +2,7 @@ import os
 import asyncio
 import logging
 import re
+from dataclasses import replace
 from html import escape
 from urllib.parse import quote
 from contextlib import asynccontextmanager
@@ -46,7 +47,7 @@ from meetings_contracts import (
 from .adapters.vexa import VexaAPIError, VexaCaptureAdapter
 from .adapters.resend import EmailDeliveryError, ResendAdapter
 from .adapters.base import ProviderExecutionError
-from .composio_calendar import CalendarConnection, CalendarConnectRequest, CalendarConnectResponse, CalendarEvent, CalendarEventsResponse, CalendarError, CalendarProvider, CalendarRange, ComposioCalendar, calendar_callback_url
+from .composio_calendar import CalendarConnection, WorkspaceCalendarConnection, CalendarConnectRequest, CalendarConnectResponse, CalendarEvent, CalendarEventsResponse, CalendarError, CalendarProvider, CalendarRange, ComposioCalendar, calendar_callback_url
 from .calendar_schedule import CalendarScheduleError, CalendarSchedulePublic, CalendarScheduleService, ManualScheduleCreate, ScheduleCreate
 from .database import Database, SchemaVersionRow, LEGACY_ADMIN_USER_ID, LEGACY_ORGANIZATION_ID
 from .accounts import AccountError, AccountPublic, AccountService, Actor, ChangePasswordRequest, InviteRequest, InviteResult, MemberRolePatch, OrganizationCreateRequest, OrganizationOption, ProfilePatch
@@ -766,6 +767,28 @@ def create_app(
             return await calendar.connections(request.state.actor)
         except CalendarError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.get("/v1/workspace/calendar-connections", response_model=list[WorkspaceCalendarConnection])
+    async def workspace_calendar_connections(request: Request) -> list[WorkspaceCalendarConnection]:
+        actor = request.state.actor
+        if not actor.is_admin:
+            raise HTTPException(status_code=403, detail="workspace administrator access required")
+        members = workspace_service.list_members()
+        gate = asyncio.Semaphore(5)
+
+        async def for_member(member):
+            async with gate:
+                member_actor = replace(actor, user_id=member.user_id)
+                connections = await calendar.connections(member_actor)
+                return [WorkspaceCalendarConnection(**connection.model_dump(), user_id=str(member.user_id),
+                                                    user_name=member.display_name, user_email=member.email)
+                        for connection in connections]
+
+        try:
+            batches = await asyncio.gather(*(for_member(member) for member in members))
+        except CalendarError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return [connection for batch in batches for connection in batch]
 
     @app.post("/v1/calendar/connect/{provider}", response_model=CalendarConnectResponse)
     async def calendar_connect(provider: CalendarProvider, request: Request, payload: CalendarConnectRequest | None = None) -> CalendarConnectResponse:

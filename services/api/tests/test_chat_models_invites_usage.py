@@ -89,6 +89,10 @@ def test_usage_ledger_records_reported_tokens_and_marks_unknown_price(tmp_path) 
     assert summary.output_tokens == 220
     assert summary.unpriced_requests == 1
     assert summary.estimated_usd == 0.0002
+    assert {row.name: row.requests for row in summary.by_purpose} == {"knowledge_answer": 1, "mom_generation": 1}
+    assert summary.by_provider[0].name == "openai"
+    assert summary.by_provider[0].requests == 2
+    assert summary.by_provider[0].unpriced_requests == 1
     database.engine.dispose()
 
 
@@ -109,4 +113,5 @@ def test_embedding_usage_is_priced_only_when_provider_reports_tokens(tmp_path) -
     assert summary.input_tokens == 1000
     assert summary.estimated_usd == 0.00002
     assert summary.recent[0].purpose == "knowledge_index"
+    assert summary.by_purpose[0].estimated_usd == 0.00002
     database.engine.dispose()
