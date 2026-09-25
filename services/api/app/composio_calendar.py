@@ -26,6 +26,7 @@ _TOOL = {
     "outlook": "OUTLOOK_GET_CALENDAR_VIEW",
 }
 _VERSION_DEFAULT = {"googlecalendar": "20260915_00", "outlook": "20260922_00"}
+_TIMEZONE_ALIASES = {"Asia/Calcutta": "Asia/Kolkata"}
 _URL = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 
 
@@ -68,6 +69,7 @@ class CalendarEventsResponse(BaseModel):
 
 
 def calendar_window(preset: CalendarRange, timezone: str, now: datetime | None = None) -> tuple[datetime, datetime]:
+    timezone = _TIMEZONE_ALIASES.get(timezone, timezone)
     try:
         zone = ZoneInfo(timezone)
     except ZoneInfoNotFoundError as exc:
@@ -234,6 +236,7 @@ class ComposioCalendar:
         return CalendarConnectResponse(redirect_url=url)
 
     async def events(self, actor: Actor, connection_id: str, preset: CalendarRange, timezone: str) -> CalendarEventsResponse:
+        timezone = _TIMEZONE_ALIASES.get(timezone, timezone)
         start, end = calendar_window(preset, timezone)
         connection = next((item for item in await self.connections(actor) if item.id == connection_id), None)
         if connection is None or connection.status != "ACTIVE":

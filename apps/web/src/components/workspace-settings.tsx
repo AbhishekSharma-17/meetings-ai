@@ -2,13 +2,16 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { meetingsService } from "@/lib/meetings-service";
-import type { AuditEvent, CurrentAccount, InviteResult, RetentionPolicy, Workspace, WorkspaceMember, WorkspaceOperations } from "@/lib/types";
+import type { AuditEvent, CurrentAccount, InviteResult, RetentionPolicy, Workspace, WorkspaceMember, WorkspaceOperations, WorkspaceOption } from "@/lib/types";
 import { UiSelect } from "./ui-select";
 
-export function WorkspaceSettings({ workspace, account, onWorkspaceChange }: {
+export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceChange, onSwitchWorkspace, onCreateWorkspace }: {
   workspace: Workspace;
+  workspaces: WorkspaceOption[];
   account: CurrentAccount | null;
   onWorkspaceChange(workspace: Workspace): void;
+  onSwitchWorkspace(id: string): Promise<void>;
+  onCreateWorkspace(name: string): Promise<void>;
 }) {
   const [name, setName] = useState(workspace.display_name);
   const [contactEmail, setContactEmail] = useState(workspace.contact_email ?? "");
@@ -23,6 +26,9 @@ export function WorkspaceSettings({ workspace, account, onWorkspaceChange }: {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [newWorkspaceName, setNewWorkspaceName] = useState("");
+  const [workspaceAction, setWorkspaceAction] = useState(false);
+  const [workspaceActionError, setWorkspaceActionError] = useState<string | null>(null);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteName, setInviteName] = useState("");
   const [inviteRole, setInviteRole] = useState<"admin" | "member" | "viewer">("member");
@@ -93,6 +99,24 @@ export function WorkspaceSettings({ workspace, account, onWorkspaceChange }: {
     }
   }
 
+  async function createWorkspace(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setWorkspaceAction(true); setWorkspaceActionError(null);
+    try { await onCreateWorkspace(newWorkspaceName.trim()); }
+    catch (cause) {
+      setWorkspaceActionError(cause instanceof Error ? cause.message : "Could not create workspace.");
+      setWorkspaceAction(false);
+    }
+  }
+
+  async function switchWorkspace(id: string) {
+    setWorkspaceAction(true); setWorkspaceActionError(null);
+    try { await onSwitchWorkspace(id); }
+    catch (cause) {
+      setWorkspaceActionError(cause instanceof Error ? cause.message : "Could not switch workspace.");
+      setWorkspaceAction(false);
+    }
+  }
+
   async function invite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setInviting(true); setError(null); setInviteResult(null);
     try {
@@ -143,6 +167,12 @@ export function WorkspaceSettings({ workspace, account, onWorkspaceChange }: {
     </div>
     {error ? <p className="form-error" role="alert">{error}</p> : null}
     {message ? <p className="workspace-success" role="status">{message}</p> : null}
+    <section className="workspace-card workspace-directory" aria-labelledby="workspace-directory-title">
+      <div><h2 id="workspace-directory-title">Your workspaces</h2><p>Choose the organization whose meetings, people, providers, and knowledge you want to manage.</p></div>
+      <div className="workspace-directory-list">{workspaces.map((item) => <div className={item.id === account?.organization_id ? "workspace-directory-item current" : "workspace-directory-item"} key={item.id}><span className="workspace-avatar" aria-hidden="true">{item.display_name[0]}</span><div><b>{item.display_name}</b><small>{item.role === "owner" ? "Owner" : item.role}</small></div>{item.id === account?.organization_id ? <span className="workspace-current-pill">Current workspace</span> : <button className="button secondary" type="button" disabled={workspaceAction} onClick={() => void switchWorkspace(item.id)}>Switch</button>}</div>)}</div>
+      {canManage ? <form className="workspace-create-form" onSubmit={(event) => void createWorkspace(event)}><div><h3>Create another workspace</h3><p>Start a separate organization with its own meetings and knowledge. You can add teammates below after switching to it.</p></div><label className="sr-only" htmlFor="new-workspace-name">New workspace name</label><input id="new-workspace-name" value={newWorkspaceName} onChange={(event) => setNewWorkspaceName(event.target.value)} minLength={2} maxLength={120} required placeholder="e.g. Novaala" disabled={workspaceAction} /><button className="button secondary" type="submit" disabled={workspaceAction}>{workspaceAction ? "Creating…" : "Create workspace"}</button></form> : null}
+      {workspaceActionError ? <p className="form-error" role="alert">{workspaceActionError}</p> : null}
+    </section>
     <div className="workspace-layout">
       {canManage ? <form className="workspace-card" onSubmit={(event) => void save(event)}>
         <h2>Organization profile</h2>

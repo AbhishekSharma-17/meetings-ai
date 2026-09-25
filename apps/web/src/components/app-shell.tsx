@@ -128,7 +128,7 @@ export function AppShell() {
   return (
     <div className="app-frame">
       <a className="skip-link" href="#main-content">Skip to content</a>
-      <SidebarPanel view={view} onNavigate={setView} workspace={workspace} workspaces={workspaces} account={account} onSignOut={signOut} onSwitchWorkspace={switchWorkspace} onCreateWorkspace={createWorkspace} className="desktop-sidebar" />
+      <SidebarPanel view={view} onNavigate={setView} workspaces={workspaces} account={account} onSignOut={signOut} onSwitchWorkspace={switchWorkspace} className="desktop-sidebar" />
       <div className="workspace-main">
       <header className="topbar">
         <button className="mobile-nav-trigger" aria-label="Open navigation" onClick={() => setMobileNavOpen(true)}><Menu /></button>
@@ -140,7 +140,7 @@ export function AppShell() {
         {view === "providers" ? providersLoadError ? <section className="page" role="alert"><h1>AI providers are unavailable</h1><p className="intro">{providersLoadError}</p><button className="button secondary" onClick={() => void meetingsService.listProviderProfiles().then((nextProfiles) => { setProfiles(nextProfiles); setProvidersLoadError(null); }).catch(() => undefined)}>Retry</button></section> : <ProviderSettings profiles={profiles} onProfilesChange={setProfiles} /> : null}
         {view === "knowledge" ? <KnowledgeScreen account={account} onOpenSource={openMeeting} /> : null}
         {view === "workspace" ? workspace
-          ? <WorkspaceSettings workspace={workspace} account={account} onWorkspaceChange={setWorkspace} />
+          ? <WorkspaceSettings workspace={workspace} workspaces={workspaces} account={account} onWorkspaceChange={setWorkspace} onSwitchWorkspace={switchWorkspace} onCreateWorkspace={createWorkspace} />
           : <section className="page" role="status">{workspaceLoading ? "Loading workspace…" : "Workspace profile is unavailable. Refresh the page to try again."}</section>
           : null}
         {view === "profile" && account ? <ProfileSettings account={account} workspace={workspace} onAccountChange={setAccount} /> : null}
@@ -155,7 +155,7 @@ export function AppShell() {
           <Dialog.Popup className="mobile-nav-sheet">
             <Dialog.Title className="sr-only">Workspace navigation</Dialog.Title>
             <Dialog.Close className="mobile-nav-close" aria-label="Close navigation"><X /></Dialog.Close>
-            <SidebarPanel view={view} onNavigate={(next) => { setView(next); setMobileNavOpen(false); }} workspace={workspace} workspaces={workspaces} account={account} onSignOut={signOut} onSwitchWorkspace={switchWorkspace} onCreateWorkspace={createWorkspace} className="drawer-sidebar" />
+            <SidebarPanel view={view} onNavigate={(next) => { setView(next); setMobileNavOpen(false); }} workspaces={workspaces} account={account} onSignOut={signOut} onSwitchWorkspace={switchWorkspace} className="drawer-sidebar" />
           </Dialog.Popup>
         </Dialog.Portal>
       </Dialog.Root>
@@ -170,10 +170,9 @@ export function AppShell() {
   );
 }
 
-function SidebarPanel({ view, onNavigate, workspace, workspaces, account, onSignOut, onSwitchWorkspace, onCreateWorkspace, className }: { view: View; onNavigate(view: View): void; workspace: Workspace | null; workspaces: WorkspaceOption[]; account: CurrentAccount | null; onSignOut(): void; onSwitchWorkspace(id: string): Promise<void>; onCreateWorkspace(name: string): Promise<void>; className: string }) {
+function SidebarPanel({ view, onNavigate, workspaces, account, onSignOut, onSwitchWorkspace, className }: { view: View; onNavigate(view: View): void; workspaces: WorkspaceOption[]; account: CurrentAccount | null; onSignOut(): void; onSwitchWorkspace(id: string): Promise<void>; className: string }) {
   const canManageMeetings = account?.role === "owner" || account?.role === "admin";
   const [menuOpen, setMenuOpen] = useState(false);
-  const [workspaceName, setWorkspaceName] = useState("");
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -191,11 +190,6 @@ function SidebarPanel({ view, onNavigate, workspace, workspaces, account, onSign
     try { await onSwitchWorkspace(id); }
     catch (error) { setWorkspaceError(error instanceof Error ? error.message : "Could not switch workspace."); setWorkspaceBusy(false); }
   };
-  const addWorkspace = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault(); setWorkspaceBusy(true); setWorkspaceError(null);
-    try { await onCreateWorkspace(workspaceName.trim()); }
-    catch (error) { setWorkspaceError(error instanceof Error ? error.message : "Could not create workspace."); setWorkspaceBusy(false); }
-  };
   return <aside className={`workspace-sidebar ${className}`} aria-label="Workspace navigation">
     <button className="brand" onClick={() => navigate("dashboard")} aria-label="Meetings AI home"><span className="brand-mark" aria-hidden="true"><Image src="/icon.svg" width={28} height={28} alt="" /></span><span>Meetings <b>AI</b></span></button>
     <p className="sidebar-label">YOUR WORK</p>
@@ -205,8 +199,7 @@ function SidebarPanel({ view, onNavigate, workspace, workspaces, account, onSign
       <button aria-current={view === "knowledge" ? "page" : undefined} className={view === "knowledge" ? "nav-link active" : "nav-link"} onClick={() => onNavigate("knowledge")}><BookOpenText /> AI knowledge</button>
     </nav>
     <div className="sidebar-foot" ref={menuRef}>
-      {menuOpen ? <div className="profile-popover" aria-label="Account and workspace menu"><div className="profile-popover-heading"><b>Signed in as {account?.display_name ?? "Account"}</b><small>{account?.email ?? "Local account"}</small></div><div className="profile-workspaces"><span className="profile-workspaces-label">WORKSPACES</span>{workspaces.map((item) => <button key={item.id} type="button" className={item.id === account?.organization_id ? "profile-workspace current" : "profile-workspace"} disabled={workspaceBusy || item.id === account?.organization_id} onClick={() => void changeWorkspace(item.id)}><Building2 size={15} /><span>{item.display_name}</span><small>{item.id === account?.organization_id ? "Current" : item.role}</small></button>)}{canManageMeetings ? <form className="profile-create-workspace" onSubmit={(event) => void addWorkspace(event)}><label className="sr-only" htmlFor={`new-workspace-${className}`}>New workspace name</label><input id={`new-workspace-${className}`} value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} placeholder="New workspace name" minLength={2} maxLength={120} required /><button type="submit" disabled={workspaceBusy}>Create</button></form> : null}{workspaceError ? <p role="alert" className="form-error">{workspaceError}</p> : null}</div><button onClick={() => navigate("workspace")}><Building2 /> Organization & people</button><button onClick={() => navigate("profile")}><UserRound /> My profile & password</button><div className="profile-popover-theme"><span>Appearance</span><ThemeSwitcher /></div><button className="profile-signout" onClick={() => { setMenuOpen(false); onSignOut(); }}><LogOut /> Sign out</button></div> : null}
-      <button className="sidebar-current-workspace" aria-label={`Current workspace: ${workspace?.display_name ?? "loading"}. Open account and workspace menu`} aria-expanded={menuOpen} onClick={() => setMenuOpen((value) => !value)}><span className="workspace-avatar" aria-hidden="true">{(workspace?.display_name ?? "W")[0]}</span><span><small>CURRENT WORKSPACE</small><b>{workspace?.display_name ?? "Loading workspace…"}</b></span></button>
+      {menuOpen ? <div className="profile-popover" aria-label="Account and workspace menu"><div className="profile-popover-heading"><b>Signed in as {account?.display_name ?? "Account"}</b><small>{account?.email ?? "Local account"}</small></div><div className="profile-workspaces"><span className="profile-workspaces-label">WORKSPACES</span>{workspaces.map((item) => <button key={item.id} type="button" className={item.id === account?.organization_id ? "profile-workspace current" : "profile-workspace"} disabled={workspaceBusy || item.id === account?.organization_id} onClick={() => void changeWorkspace(item.id)}><Building2 size={15} /><span>{item.display_name}</span><small>{item.id === account?.organization_id ? "Current" : item.role}</small></button>)}{workspaceError ? <p role="alert" className="form-error">{workspaceError}</p> : null}</div><button onClick={() => navigate("workspace")}><Building2 /> Organization & people</button><button onClick={() => navigate("profile")}><UserRound /> My profile & password</button><div className="profile-popover-theme"><span>Appearance</span><ThemeSwitcher /></div><button className="profile-signout" onClick={() => { setMenuOpen(false); onSignOut(); }}><LogOut /> Sign out</button></div> : null}
       <button className="profile-trigger" aria-expanded={menuOpen} aria-haspopup="menu" onClick={() => setMenuOpen((value) => !value)}><span className="profile-trigger-avatar" aria-hidden="true">{account?.display_name[0]?.toUpperCase() ?? "U"}</span><span className="profile-trigger-copy"><b>{account?.display_name ?? "Account"}</b><small>{account?.email ?? account?.role ?? "User"}</small></span><ChevronUp className={menuOpen ? "profile-chevron open" : "profile-chevron"} /></button>
     </div>
   </aside>;

@@ -26,6 +26,8 @@ def test_calendar_window_respects_local_week_and_time_zone() -> None:
     start, end = calendar_window("next_week", "America/New_York", datetime(2026, 9, 25, 12, tzinfo=UTC))
     assert start.isoformat() == "2026-09-28T00:00:00-04:00"
     assert end.isoformat() == "2026-10-05T00:00:00-04:00"
+    # Some browsers still report this historical alias.
+    assert calendar_window("today", "Asia/Calcutta") == calendar_window("today", "Asia/Kolkata")
 
 
 def test_callback_uses_browser_visible_loopback_port_without_allowing_external_redirect() -> None:

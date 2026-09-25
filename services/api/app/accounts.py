@@ -218,6 +218,10 @@ class AccountService:
                 id=str(organization_id), slug=slug, display_name=data.display_name,
                 contact_email=None, status="active", created_at=now, updated_at=now,
             ))
+            # Without an ORM relationship SQLAlchemy may flush the membership
+            # first. PostgreSQL enforces the FK immediately, so persist the
+            # parent row before adding its first member.
+            session.flush()
             session.add(OrganizationMembershipRow(
                 organization_id=str(organization_id), user_id=str(actor.user_id),
                 role="owner", created_at=now,

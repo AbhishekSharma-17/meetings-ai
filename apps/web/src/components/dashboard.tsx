@@ -1,4 +1,5 @@
 import type { Meeting } from "@/lib/types";
+import { CalendarDays } from "lucide-react";
 import { ArrowRightIcon, MicIcon, PlusIcon, ProvidersIcon, SparkIcon } from "./ui-icons";
 
 const statusLabel: Record<Meeting["status"], string> = {
@@ -25,7 +26,7 @@ export function Dashboard({ meetings, onNewMeeting, onOpenCalendar, onOpenProvid
           <h1>From conversation<br /><span>to clarity.</span></h1>
           <p className="intro">Capture the meeting, review what matters, and move decisions forward.</p>
         </div>
-        <div className="dashboard-hero-actions"><button className="button secondary" onClick={onOpenCalendar}>Find in calendar</button><button className="button primary" onClick={onNewMeeting}><PlusIcon /> New meeting</button></div>
+        <div className="dashboard-hero-actions"><button className="button secondary" onClick={onOpenCalendar}><CalendarDays /> Calendar</button><button className="button primary" onClick={onNewMeeting}><PlusIcon /> New meeting</button></div>
       </div>
 
       <div className="notice" role="status">
