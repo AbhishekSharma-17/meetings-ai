@@ -49,7 +49,7 @@ from meetings_contracts import (
 from .adapters.vexa import VexaAPIError, VexaCaptureAdapter
 from .adapters.resend import EmailDeliveryError, ResendAdapter
 from .adapters.base import ProviderExecutionError
-from .composio_calendar import CalendarConnection, WorkspaceCalendarConnection, CalendarConnectRequest, CalendarConnectResponse, CalendarEvent, CalendarEventsResponse, CalendarError, CalendarProvider, CalendarRange, ComposioCalendar, calendar_callback_url
+from .composio_calendar import CalendarConnection, WorkspaceCalendarConnection, CalendarConnectRequest, CalendarAliasRequest, CalendarConnectResponse, CalendarEvent, CalendarEventsResponse, CalendarError, CalendarProvider, CalendarRange, ComposioCalendar, calendar_callback_url
 from .calendar_schedule import CalendarScheduleError, CalendarSchedulePublic, CalendarScheduleService, ManualScheduleCreate, ScheduleCreate
 from .calendar_cache import CalendarCacheService, CalendarSyncRequest, CalendarSyncResponse, CachedCalendarResponse
 from .meeting_prep import OrganizationBriefService, OrganizationBrief, BriefDocument, MeetingPrepService, PrepRequest, PrepReport, PrepError
@@ -241,6 +241,7 @@ def create_app(
                         or path == "/v1/auth/me"
                         or (path == "/v1/calendar/connections" and method == "GET")
                         or (method == "DELETE" and re.fullmatch(r"/v1/calendar/connections/[^/]+", path))
+                        or (method == "PATCH" and re.fullmatch(r"/v1/calendar/connections/[^/]+", path))
                         or (re.fullmatch(r"/v1/calendar/connect/(googlecalendar|outlook|calendly|zoom)", path) and method == "POST")
                         or (path == "/v1/calendar/events" and method == "GET")
                         or (path == "/v1/calendar/synced" and method == "GET")
@@ -847,6 +848,14 @@ def create_app(
             raise HTTPException(status_code=code, detail=str(exc)) from exc
         return Response(status_code=204)
 
+    @app.patch("/v1/calendar/connections/{connection_id}", response_model=CalendarConnection)
+    async def calendar_rename(connection_id: str, payload: CalendarAliasRequest, request: Request) -> CalendarConnection:
+        try:
+            return await calendar.rename(request.state.actor, connection_id, payload.alias)
+        except CalendarError as exc:
+            code = 404 if "not found for your account" in str(exc) else 409 if "alias already in use" in str(exc) else 503
+            raise HTTPException(status_code=code, detail=str(exc)) from exc
+
     @app.get("/v1/workspace/calendar-connections", response_model=list[WorkspaceCalendarConnection])
     async def workspace_calendar_connections(request: Request) -> list[WorkspaceCalendarConnection]:
         actor = request.state.actor
@@ -908,9 +917,10 @@ def create_app(
                 os.getenv("APP_BASE_URL", "http://localhost:3020"),
                 os.getenv("APP_ENV", "development"),
             )
-            return await calendar.connect(request.state.actor, provider, callback_url)
+            return await calendar.connect(request.state.actor, provider, callback_url, payload.alias if payload else None)
         except CalendarError as exc:
-            raise HTTPException(status_code=400 if "callback origin" in str(exc) else 503, detail=str(exc)) from exc
+            code = 400 if "callback origin" in str(exc) else 409 if "alias already in use" in str(exc) else 503
+            raise HTTPException(status_code=code, detail=str(exc)) from exc
 
     @app.get("/v1/calendar/events", response_model=CalendarEventsResponse)
     async def calendar_events(request: Request, connection_id: str, period: CalendarRange = "today", timezone: str = "UTC") -> CalendarEventsResponse:

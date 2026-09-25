@@ -358,7 +358,7 @@ export type MomGuidance = {
   focus_fields: string[];
 };
 
-export type CalendarConnection = { id: string; provider: "googlecalendar" | "outlook" | "calendly" | "zoom"; status: string; label: string };
+export type CalendarConnection = { id: string; provider: "googlecalendar" | "outlook" | "calendly" | "zoom"; status: string; label: string; identity?: string | null };
 export type WorkspaceCalendarConnection = CalendarConnection & { user_id: string; user_name: string; user_email: string | null };
 export type CalendarPeriod = "today" | "tomorrow" | "this_week" | "next_week";
 export type CalendarInvitee = { name: string; email: string | null; response_status: string | null };

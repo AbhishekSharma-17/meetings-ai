@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight, CheckCircle2, Plus, RefreshCw, Sparkles } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
 import type { CachedCalendarEvent, CalendarConnection, CalendarSchedule, CalendarSnapshot } from "@/lib/types";
-import { CalendarBrandIcon, type CalendarSelection } from "./calendar-import-dialog";
+import { CalendarAliasForm, CalendarBrandIcon, type CalendarSelection } from "./calendar-import-dialog";
 import { UiSelect } from "./ui-select";
 
 const providerNames: Record<CalendarConnection["provider"], string> = {
@@ -86,6 +86,9 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, can
   const [accountFilter, setAccountFilter] = useState(preferredConnectionId ?? initial.accountFilter);
   const [selectedEvent, setSelectedEvent] = useState<CachedCalendarEvent | null>(null);
   const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null);
+  const [connectProvider, setConnectProvider] = useState<CalendarConnection["provider"] | null>(null);
+  const [editTarget, setEditTarget] = useState<string | null>(null);
+  const [editAlias, setEditAlias] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const autoRefreshKey = useRef<string | null>(null);
@@ -170,10 +173,20 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, can
     finally { setBusy(false); }
   }
 
-  async function connect(provider: CalendarConnection["provider"]) {
+  async function connect(provider: CalendarConnection["provider"], alias: string) {
     setBusy(true); setError(null);
-    try { window.location.assign(await meetingsService.connectCalendar(provider)); }
+    try { window.location.assign(await meetingsService.connectCalendar(provider, alias)); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Could not connect this account."); setBusy(false); }
+  }
+
+  async function rename(connectionId: string) {
+    setBusy(true); setError(null);
+    try {
+      const updated = await meetingsService.renameCalendarConnection(connectionId, editAlias);
+      setConnections((current) => current.map((item) => item.id === connectionId ? updated : item));
+      setEditTarget(null);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not rename this account."); }
+    finally { setBusy(false); }
   }
 
   async function disconnect(connectionId: string) {
@@ -194,8 +207,10 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, can
     {error ? <p className="form-error" role="alert">{error}</p> : null}
     {tab === "integrations" ? <div className="calendar-integrations"><div className="section-heading"><div><h2>Connected meeting sources</h2><p>Connect multiple accounts. Each event keeps its original source and account identity.</p></div></div><div className="calendar-provider-grid">{calendarSources.map((provider) => {
       const count = active.filter((item) => item.provider === provider).length;
-      return <div key={provider} className={count ? "calendar-provider-card connected" : "calendar-provider-card"}><CalendarBrandIcon provider={provider} /><div><b>{providerNames[provider]}</b><small>{count ? `${count} connected account${count === 1 ? "" : "s"}` : provider === "outlook" ? "Includes Microsoft Teams calendar meetings" : "Not connected"}</small></div>{count ? <button type="button" className="calendar-card-add" aria-label={`Add another ${providerNames[provider]} account`} onClick={() => void connect(provider)}><Plus size={16} /></button> : null}<div className="calendar-provider-actions">{count ? <span className="calendar-connection-badge"><CheckCircle2 /> Connected</span> : <button type="button" className="button secondary" onClick={() => void connect(provider)}>Connect account</button>}</div></div>;
-    })}</div><div className="calendar-account-list"><h3>Accounts</h3>{connections.length ? connections.map((item) => <div key={item.id} className="calendar-account-row"><CalendarBrandIcon provider={item.provider} /><span><b>{item.label}</b><small>{providerNames[item.provider]} · {item.status === "ACTIVE" ? "Connected" : item.status}</small></span>{disconnectTarget === item.id ? <div className="calendar-disconnect-confirm"><small>Disconnect this account? Saved meetings and scheduled assistants remain.</small><button type="button" className="button secondary" disabled={busy} onClick={() => setDisconnectTarget(null)}>Cancel</button><button type="button" className="button danger" disabled={busy} onClick={() => void disconnect(item.id)}>{busy ? "Disconnecting…" : "Confirm"}</button></div> : <><small>{snapshot.syncs.find((sync) => sync.connection_id === item.id) ? `Last sync ${new Date(snapshot.syncs.find((sync) => sync.connection_id === item.id)!.last_synced_at).toLocaleString()}` : "Not synced yet"}</small><button type="button" className="calendar-disconnect-button" disabled={busy} onClick={() => setDisconnectTarget(item.id)}>Disconnect</button></>}</div>) : <p className="calendar-note">No accounts yet. Connect a source above to import meetings.</p>}</div><p className="calendar-note">Microsoft Teams meetings already appear from Outlook Calendar when the event contains a Teams join link. A separate Teams connection is not required for those events.</p></div> : null}
+      return <div key={provider} className={count ? "calendar-provider-card connected" : "calendar-provider-card"}><CalendarBrandIcon provider={provider} /><div><b>{providerNames[provider]}</b><small>{count ? `${count} connected account${count === 1 ? "" : "s"}` : provider === "outlook" ? "Includes Microsoft Teams calendar meetings" : "Not connected"}</small></div>{count ? <button type="button" className="calendar-card-add" aria-label={`Add another ${providerNames[provider]} account`} onClick={() => setConnectProvider(provider)}><Plus size={16} /></button> : null}<div className="calendar-provider-actions">{count ? <span className="calendar-connection-badge"><CheckCircle2 /> Connected</span> : <button type="button" className="button secondary" onClick={() => setConnectProvider(provider)}>Connect account</button>}</div></div>;
+    })}</div>
+    {connectProvider ? <CalendarAliasForm key={connectProvider} provider={connectProvider} busy={busy} onCancel={() => setConnectProvider(null)} onSubmit={(alias) => void connect(connectProvider, alias)} /> : null}
+    <div className="calendar-account-list"><h3>Accounts</h3>{connections.length ? connections.map((item) => <div key={item.id} className="calendar-account-row"><CalendarBrandIcon provider={item.provider} /><span><b>{item.label}</b><small>{providerNames[item.provider]}{item.identity && item.identity !== item.label ? ` · ${item.identity}` : ""} · {item.status === "ACTIVE" ? "Connected" : item.status}</small></span>{editTarget === item.id ? <form className="calendar-rename-form" onSubmit={(event) => { event.preventDefault(); void rename(item.id); }}><label htmlFor={`calendar-alias-${item.id}`}>Connection name</label><input id={`calendar-alias-${item.id}`} value={editAlias} maxLength={80} onChange={(event) => setEditAlias(event.target.value)} autoFocus /><button type="button" className="button secondary" disabled={busy} onClick={() => setEditTarget(null)}>Cancel</button><button type="submit" className="button primary" disabled={busy}>{busy ? "Saving…" : "Save"}</button></form> : disconnectTarget === item.id ? <div className="calendar-disconnect-confirm"><small>Disconnect this account? Saved meetings and scheduled assistants remain.</small><button type="button" className="button secondary" disabled={busy} onClick={() => setDisconnectTarget(null)}>Cancel</button><button type="button" className="button danger" disabled={busy} onClick={() => void disconnect(item.id)}>{busy ? "Disconnecting…" : "Confirm"}</button></div> : <><small>{snapshot.syncs.find((sync) => sync.connection_id === item.id) ? `Last sync ${new Date(snapshot.syncs.find((sync) => sync.connection_id === item.id)!.last_synced_at).toLocaleString()}` : "Not synced yet"}</small><button type="button" className="calendar-disconnect-button" disabled={busy} onClick={() => { setEditAlias(item.identity === item.label ? "" : item.label); setEditTarget(item.id); }}>Rename</button><button type="button" className="calendar-disconnect-button" disabled={busy} onClick={() => setDisconnectTarget(item.id)}>Disconnect</button></>}</div>) : <p className="calendar-note">No accounts yet. Connect a source above to import meetings.</p>}</div><p className="calendar-note">Microsoft Teams meetings already appear from Outlook Calendar when the event contains a Teams join link. A separate Teams connection is not required for those events.</p></div> : null}
     {tab === "calendar" ? <><div className="calendar-toolbar"><div className="calendar-month-nav"><button type="button" aria-label="Previous month" onClick={() => changeMonth(-1)}><ChevronLeft /></button><h2>{month.toLocaleString(undefined, { month: "long", year: "numeric" })}</h2><button type="button" aria-label="Next month" onClick={() => changeMonth(1)}><ChevronRight /></button></div><UiSelect id="calendar-account-filter" label="Account" value={accountFilter} onChange={setAccountFilter} options={[{ value: "all", label: "All connected accounts" }, ...active.map((item) => ({ value: item.id, label: `${providerNames[item.provider]} · ${item.label}` }))]} disabled={!active.length} /></div>
       <div className="calendar-range"><div><label htmlFor="calendar-from">From</label><input id="calendar-from" type="date" value={startDate} onChange={(event) => { setStartDate(event.target.value); setSelectedEvent(null); }} /></div><div><label htmlFor="calendar-to">Through</label><input id="calendar-to" type="date" value={endDate} onChange={(event) => { setEndDate(event.target.value); setSelectedEvent(null); }} /></div><p>Choose up to 90 days, then sync any or all accounts. Times shown in {timezone}.</p></div>
       {!rangeValid ? <p className="form-error" role="alert">Choose a valid date range of 1 to 90 days.</p> : null}

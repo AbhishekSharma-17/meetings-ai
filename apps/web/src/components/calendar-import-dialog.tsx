@@ -29,6 +29,7 @@ export function CalendarImportDialog({ open, preferredConnectionId, onClose, onC
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [scanned, setScanned] = useState(false);
+  const [connectProvider, setConnectProvider] = useState<CalendarConnection["provider"] | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -48,9 +49,9 @@ export function CalendarImportDialog({ open, preferredConnectionId, onClose, onC
     return () => { alive = false; };
   }, [open, preferredConnectionId]);
 
-  async function connect(provider: CalendarConnection["provider"]) {
+  async function connect(provider: CalendarConnection["provider"], alias: string) {
     setBusy(true); setError(null);
-    try { window.location.assign(await meetingsService.connectCalendar(provider)); }
+    try { window.location.assign(await meetingsService.connectCalendar(provider, alias)); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Could not start calendar connection."); setBusy(false); }
   }
 
@@ -75,9 +76,10 @@ export function CalendarImportDialog({ open, preferredConnectionId, onClose, onC
       <h1 id={titleId}>Meeting sources</h1>
       <p className="dialog-intro">Connect one or more accounts, then review upcoming meetings before scheduling an assistant. Only sources with a supported join link appear.</p>
       <div className="calendar-provider-grid" aria-label="Calendar connections">
-        {([{ provider: "googlecalendar", count: googleCount, empty: "Connect a Google account" }, { provider: "outlook", count: outlookCount, empty: "Connect a Microsoft account" }, { provider: "calendly", count: calendlyCount, empty: "Booked events and invitees" }, { provider: "zoom", count: zoomCount, empty: "Hosted upcoming meetings" }] as const).map(({ provider, count, empty }) => <div key={provider} className={count ? "calendar-provider-card connected" : "calendar-provider-card"}><CalendarBrandIcon provider={provider} /><div><b>{providerNames[provider]}</b><small>{count ? `${count} connected account${count === 1 ? "" : "s"}` : empty}</small></div>{count ? <button className="calendar-card-add" type="button" aria-label={`Add another ${providerNames[provider]} account`} title={`Add another ${providerNames[provider]} account`} disabled={busy || loadingConnections} onClick={() => void connect(provider)}><Plus size={16} /></button> : null}<div className="calendar-provider-actions">{count ? <span className="calendar-connection-badge"><CheckCircle2 /> Connected</span> : <button className="button secondary" type="button" disabled={busy || loadingConnections} onClick={() => void connect(provider)}>Connect account</button>}</div></div>)}
+        {([{ provider: "googlecalendar", count: googleCount, empty: "Connect a Google account" }, { provider: "outlook", count: outlookCount, empty: "Connect a Microsoft account" }, { provider: "calendly", count: calendlyCount, empty: "Booked events and invitees" }, { provider: "zoom", count: zoomCount, empty: "Hosted upcoming meetings" }] as const).map(({ provider, count, empty }) => <div key={provider} className={count ? "calendar-provider-card connected" : "calendar-provider-card"}><CalendarBrandIcon provider={provider} /><div><b>{providerNames[provider]}</b><small>{count ? `${count} connected account${count === 1 ? "" : "s"}` : empty}</small></div>{count ? <button className="calendar-card-add" type="button" aria-label={`Add another ${providerNames[provider]} account`} title={`Add another ${providerNames[provider]} account`} disabled={busy || loadingConnections} onClick={() => setConnectProvider(provider)}><Plus size={16} /></button> : null}<div className="calendar-provider-actions">{count ? <span className="calendar-connection-badge"><CheckCircle2 /> Connected</span> : <button className="button secondary" type="button" disabled={busy || loadingConnections} onClick={() => setConnectProvider(provider)}>Connect account</button>}</div></div>)}
       </div>
-      {activeConnections.length ? <div className="calendar-account-list"><h3>Connected accounts</h3>{activeConnections.map((item) => <div className="calendar-account-row" key={item.id}><CalendarBrandIcon provider={item.provider} /><span><b>{item.label}</b><small>{providerNames[item.provider]}</small></span><span className="calendar-connection-badge"><CheckCircle2 /> Connected</span></div>)}</div> : null}
+      {connectProvider ? <CalendarAliasForm key={connectProvider} provider={connectProvider} busy={busy} onCancel={() => setConnectProvider(null)} onSubmit={(alias) => void connect(connectProvider, alias)} /> : null}
+      {activeConnections.length ? <div className="calendar-account-list"><h3>Connected accounts</h3>{activeConnections.map((item) => <div className="calendar-account-row" key={item.id}><CalendarBrandIcon provider={item.provider} /><span><b>{item.label}</b><small>{providerNames[item.provider]}{item.identity && item.identity !== item.label ? ` · ${item.identity}` : ""}</small></span><span className="calendar-connection-badge"><CheckCircle2 /> Connected</span></div>)}</div> : null}
       <div className="calendar-search-controls">
         <UiSelect id="calendar-account" label="Scan connected account" value={connectionId} onChange={(value) => { setConnectionId(value); setScanned(false); }} options={activeConnections.length ? activeConnections.map((item) => ({ value: item.id, label: `${providerNames[item.provider]} · ${item.label}` })) : [{ value: "", label: loadingConnections ? "Loading sources…" : "Connect a source first" }]} disabled={!activeConnections.length || busy} />
         <UiSelect id="calendar-period" label="When" value={period} onChange={(value) => { setPeriod(value as CalendarPeriod); setScanned(false); }} options={periods} disabled={busy} />
@@ -99,6 +101,17 @@ export function CalendarImportDialog({ open, preferredConnectionId, onClose, onC
   </>;
   if (embedded) return <section className="page calendar-page">{content}</section>;
   return <Dialog.Root open={open} onOpenChange={(next) => { if (!next) onClose(); }}><Dialog.Portal><Dialog.Backdrop className="dialog-backdrop" /><Dialog.Popup className="dialog calendar-dialog" aria-labelledby={titleId}>{content}</Dialog.Popup></Dialog.Portal></Dialog.Root>;
+}
+
+export function CalendarAliasForm({ provider, busy, onCancel, onSubmit }: { provider: CalendarConnection["provider"]; busy: boolean; onCancel(): void; onSubmit(alias: string): void }) {
+  const [alias, setAlias] = useState("");
+  const providerName = { googlecalendar: "Google Calendar", outlook: "Outlook Calendar", calendly: "Calendly", zoom: "Zoom" }[provider];
+  return <form className="calendar-alias-form" onSubmit={(event) => { event.preventDefault(); onSubmit(alias.trim()); }}>
+    <div><b>Name this {providerName} connection</b><p>Optional. Use a name like “Work” or “Client A”; you can change it later. Your account identity stays visible.</p></div>
+    <label htmlFor="new-calendar-alias">Connection name</label>
+    <input id="new-calendar-alias" value={alias} maxLength={80} placeholder="e.g. Work calendar" onChange={(event) => setAlias(event.target.value)} autoFocus />
+    <div className="calendar-alias-actions"><button type="button" className="button secondary" disabled={busy} onClick={onCancel}>Cancel</button><button type="submit" className="button primary" disabled={busy}>{busy ? "Connecting…" : "Continue to provider"}</button></div>
+  </form>;
 }
 
 export function CalendarBrandIcon({ provider }: { provider: CalendarConnection["provider"] }) {

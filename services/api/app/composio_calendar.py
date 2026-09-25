@@ -42,6 +42,7 @@ class CalendarConnection(BaseModel):
     provider: CalendarProvider
     status: str
     label: str
+    identity: str | None = None
 
 
 class WorkspaceCalendarConnection(CalendarConnection):
@@ -56,6 +57,11 @@ class CalendarConnectResponse(BaseModel):
 
 class CalendarConnectRequest(BaseModel):
     callback_origin: str | None = None
+    alias: str | None = Field(default=None, max_length=80)
+
+
+class CalendarAliasRequest(BaseModel):
+    alias: str = Field(max_length=80)
 
 
 class CalendarEvent(BaseModel):
@@ -285,6 +291,11 @@ class ComposioCalendar:
                 response = await client.request(method, path, params=params, json=body, headers={"x-api-key": self.api_key})
                 response.raise_for_status()
                 payload = response.json()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 409 and (path.endswith("/link") or method == "PATCH"):
+                raise CalendarError("calendar alias already in use; choose another name") from exc
+            logger.warning("Composio calendar request failed: %s %s", method, path)
+            raise CalendarError("calendar provider request failed; please try again or reconnect") from exc
         except (httpx.HTTPError, ValueError) as exc:
             logger.warning("Composio calendar request failed: %s %s", method, path)
             raise CalendarError("calendar provider request failed; please try again or reconnect") from exc
@@ -304,29 +315,49 @@ class ComposioCalendar:
             if not item.get("id") or item.get("user_id") not in {None, _user_id(actor)}:
                 continue
             account_data = item.get("data") if isinstance(item.get("data"), dict) else {}
-            label = item.get("alias") or account_data.get("displayName")
+            state = item.get("state") if isinstance(item.get("state"), dict) else {}
+            state_data = state.get("val") if isinstance(state.get("val"), dict) else {}
+            identity = account_data.get("displayName") or state_data.get("displayName")
+            if not isinstance(identity, str) or not identity.strip():
+                identity = None
+            label = item.get("alias") or identity
             if not isinstance(label, str) or not label.strip():
                 label = f"{_PROVIDER_NAME[provider]} · {str(item['id'])[-4:]}"
             connections.append(CalendarConnection(
                 id=str(item.get("id")), provider=provider, status=str(item.get("status") or "UNKNOWN"),
-                label=label.strip()[:160],
+                label=label.strip()[:160], identity=identity.strip()[:160] if identity else None,
             ))
         return connections
 
-    async def connect(self, actor: Actor, provider: CalendarProvider, callback_url: str) -> CalendarConnectResponse:
+    async def connect(self, actor: Actor, provider: CalendarProvider, callback_url: str, alias: str | None = None) -> CalendarConnectResponse:
         auth_config = self.auth_configs.get(provider)
         if not auth_config:
             raise CalendarError(f"{provider} is not configured on the server")
         parsed = urlsplit(callback_url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise CalendarError("calendar callback URL is invalid")
+        alias = alias.strip() if alias else None
         result = await self._request("POST", "/connected_accounts/link", body={
             "auth_config_id": auth_config, "user_id": _user_id(actor), "callback_url": callback_url,
+            "allow_multiple": True, **({"alias": alias} if alias else {}),
         })
         url = result.get("redirect_url")
         if not isinstance(url, str) or urlsplit(url).scheme != "https":
             raise CalendarError("calendar provider did not return a secure connection link")
         return CalendarConnectResponse(redirect_url=url)
+
+    async def rename(self, actor: Actor, connection_id: str, alias: str) -> CalendarConnection:
+        if not any(account.id == connection_id for account in await self.connections(actor)):
+            raise CalendarError("calendar connection not found for your account")
+        path = f"/connected_accounts/{quote(connection_id, safe='')}"
+        detail = await self._request("GET", path)
+        if detail.get("id") != connection_id or detail.get("user_id") != _user_id(actor):
+            raise CalendarError("calendar connection not found for your account")
+        await self._request("PATCH", path, body={"alias": alias.strip()})
+        account = next((item for item in await self.connections(actor) if item.id == connection_id), None)
+        if account is None:
+            raise CalendarError("calendar provider did not return the updated connection")
+        return account
 
     async def disconnect(self, actor: Actor, connection_id: str) -> None:
         # Never accept an account ID on its own: a project API key can access

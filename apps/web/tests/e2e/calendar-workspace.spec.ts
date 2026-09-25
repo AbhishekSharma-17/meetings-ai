@@ -114,6 +114,38 @@ test("disconnect confirms one account and leaves the other integration connected
   await expect(page.getByText("personal@example.test")).toBeVisible();
 });
 
+test("calendar connections can be named when added and renamed later", async ({ page }) => {
+  let alias = "Original name";
+  let requestedAlias: string | null = null;
+  await page.route("**/v1/calendar/connections**", (route) => {
+    if (route.request().method() === "PATCH") {
+      alias = route.request().postDataJSON().alias;
+      return route.fulfill({ json: { id: "ca-work", provider: "googlecalendar", status: "ACTIVE", label: alias, identity: "work@example.test" } });
+    }
+    return route.fulfill({ json: [{ id: "ca-work", provider: "googlecalendar", status: "ACTIVE", label: alias, identity: "work@example.test" }] });
+  });
+  await page.route("**/v1/calendar/connect/googlecalendar", (route) => {
+    requestedAlias = route.request().postDataJSON().alias;
+    return route.fulfill({ json: { redirect_url: "https://connect.example.test/auth" } });
+  });
+  await page.route("https://connect.example.test/auth", (route) => route.fulfill({ body: "Connection started" }));
+  await page.goto("/");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Calendar" }).click();
+  await page.getByRole("tab", { name: /Integrations/ }).click();
+  const account = page.locator(".calendar-account-row", { hasText: "work@example.test" });
+  await expect(account.getByText("Original name")).toBeVisible();
+  await account.getByRole("button", { name: "Rename" }).click();
+  await account.getByRole("textbox", { name: "Connection name" }).fill("Client A");
+  await account.getByRole("button", { name: "Save" }).click();
+  await expect(account.getByText("Client A")).toBeVisible();
+  await expect(account.getByText(/work@example.test/)).toBeVisible();
+  await page.getByRole("button", { name: "Add another Google Calendar account" }).click();
+  await expect(page.getByText("Name this Google Calendar connection")).toBeVisible();
+  await page.getByRole("textbox", { name: "Connection name" }).fill("Personal");
+  await page.getByRole("button", { name: "Continue to provider" }).click();
+  await expect.poll(() => requestedAlias).toBe("Personal");
+});
+
 test("saved calendar range and meetings survive a hard reload without another manual sync", async ({ page }) => {
   const today = new Date();
   const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);

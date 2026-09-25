@@ -48,8 +48,9 @@ def test_connect_route_passes_browser_origin_to_composio(tmp_path) -> None:
     class FakeCalendar:
         callback: str | None = None
 
-        async def connect(self, actor, provider, callback_url):
+        async def connect(self, actor, provider, callback_url, alias=None):
             self.callback = callback_url
+            self.alias = alias
             return CalendarConnectResponse(redirect_url="https://connect.composio.dev/example")
 
     fake = FakeCalendar()
@@ -59,6 +60,9 @@ def test_connect_route_passes_browser_origin_to_composio(tmp_path) -> None:
         response = client.post("/v1/calendar/connect/outlook", json={"callback_origin": "http://localhost:59631"})
         assert response.status_code == 200
         assert fake.callback == "http://localhost:59631/?calendar=connected"
+        named = client.post("/v1/calendar/connect/outlook", json={"callback_origin": "http://localhost:59631", "alias": "Client A"})
+        assert named.status_code == 200
+        assert fake.alias == "Client A"
         denied = client.post("/v1/calendar/connect/outlook", json={"callback_origin": "https://attacker.example"})
         assert denied.status_code == 400
 
@@ -67,7 +71,7 @@ def test_production_connect_uses_configured_url_instead_of_browser_origin(tmp_pa
     class FakeCalendar:
         callback: str | None = None
 
-        async def connect(self, actor, provider, callback_url):
+        async def connect(self, actor, provider, callback_url, alias=None):
             self.callback = callback_url
             return CalendarConnectResponse(redirect_url="https://connect.composio.dev/example")
 
@@ -167,8 +171,55 @@ def test_multiple_accounts_of_same_provider_are_listed_and_selected_explicitly()
     assert [(item.id, item.label) for item in connections] == [
         ("ca-work", "work@example.test"), ("ca-personal", "Personal calendar"),
     ]
+    assert connections[1].identity == "personal@example.test"
     asyncio.run(calendar.events(actor, "ca-personal", "today", "UTC"))
     assert b'"connected_account_id":"ca-personal"' in requests[-1].content
+
+
+def test_connect_alias_is_sent_to_composio_with_multiple_accounts_enabled() -> None:
+    actor = _actor()
+    requests: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(201, json={"redirect_url": "https://connect.composio.dev/test"})
+
+    calendar = ComposioCalendar("test-key", transport=httpx.MockTransport(respond))
+    calendar.auth_configs["googlecalendar"] = "ac-test"
+    result = asyncio.run(calendar.connect(actor, "googlecalendar", "https://meeting.example/?calendar=connected", "  Client A  "))
+    assert result.redirect_url == "https://connect.composio.dev/test"
+    assert requests[0].url.path.endswith("/connected_accounts/link")
+    assert requests[0].read().decode().count('"alias":"Client A"') == 1
+    assert b'"allow_multiple":true' in requests[0].content
+
+
+def test_rename_requires_owned_connection_and_updates_only_alias() -> None:
+    actor = _actor()
+    requests: list[httpx.Request] = []
+    alias = "Old name"
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        nonlocal alias
+        requests.append(request)
+        if request.url.path.endswith("/connected_accounts"):
+            return httpx.Response(200, json={"items": [{"id": "ca-own", "toolkit": {"slug": "outlook"},
+                "user_id": f"meetings-ai:{actor.organization_id}:{actor.user_id}", "status": "ACTIVE",
+                "alias": alias, "data": {"displayName": "work@example.test"}}]})
+        if request.method == "GET":
+            return httpx.Response(200, json={"id": "ca-own", "user_id": f"meetings-ai:{actor.organization_id}:{actor.user_id}"})
+        alias = request.read().decode().split('"alias":"')[1].split('"')[0]
+        return httpx.Response(200, json={"success": True, "id": "ca-own", "status": "ACTIVE"})
+
+    calendar = ComposioCalendar("test-key", transport=httpx.MockTransport(respond))
+    with pytest.raises(CalendarError, match="not found for your account"):
+        asyncio.run(calendar.rename(actor, "ca-other", "Wrong"))
+    assert not any(request.method == "PATCH" for request in requests)
+    renamed = asyncio.run(calendar.rename(actor, "ca-own", "Client A"))
+    assert renamed.label == "Client A"
+    assert renamed.identity == "work@example.test"
+    patch = next(request for request in requests if request.method == "PATCH")
+    assert patch.url.path.endswith("/connected_accounts/ca-own")
+    assert patch.content == b'{"alias":"Client A"}'
 
 
 def test_disconnect_only_deletes_own_account_and_requests_upstream_revocation(tmp_path) -> None:

@@ -49,7 +49,8 @@ export interface MeetingsService {
   scheduleMeeting(input: CreateMeetingInput, startsAt: string): Promise<MeetingDetail>;
   listCalendarConnections(): Promise<CalendarConnection[]>;
   listWorkspaceCalendarConnections(): Promise<WorkspaceCalendarConnection[]>;
-  connectCalendar(provider: CalendarConnection["provider"]): Promise<string>;
+  connectCalendar(provider: CalendarConnection["provider"], alias?: string): Promise<string>;
+  renameCalendarConnection(connectionId: string, alias: string): Promise<CalendarConnection>;
   disconnectCalendar(connectionId: string): Promise<void>;
   scanCalendar(connectionId: string, period: CalendarPeriod, timezone: string): Promise<CalendarEvent[]>;
   getSyncedCalendar(startDate: string, endDate: string, timezone: string): Promise<CalendarSnapshot>;
@@ -601,11 +602,17 @@ class HttpMeetingsService implements MeetingsService {
     return api<CalendarConnection[]>("/v1/calendar/connections");
   }
 
-  async connectCalendar(provider: CalendarConnection["provider"]): Promise<string> {
+  async connectCalendar(provider: CalendarConnection["provider"], alias = ""): Promise<string> {
     const result = await api<{ redirect_url: string }>(`/v1/calendar/connect/${provider}`, {
-      method: "POST", body: JSON.stringify({ callback_origin: window.location.origin }),
+      method: "POST", body: JSON.stringify({ callback_origin: window.location.origin, alias: alias.trim() || null }),
     });
     return result.redirect_url;
+  }
+
+  async renameCalendarConnection(connectionId: string, alias: string): Promise<CalendarConnection> {
+    return api<CalendarConnection>(`/v1/calendar/connections/${encodeURIComponent(connectionId)}`, {
+      method: "PATCH", body: JSON.stringify({ alias: alias.trim() }),
+    });
   }
 
   async disconnectCalendar(connectionId: string): Promise<void> {
