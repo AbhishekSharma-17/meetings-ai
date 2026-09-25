@@ -14,6 +14,7 @@ from meetings_contracts import (
 )
 
 from .base import ProviderExecutionError, RuntimeAdapterNotImplementedError
+from .embeddings import create_embeddings
 
 
 class OpenAICompatibleAdapter:
@@ -116,8 +117,17 @@ class OpenAICompatibleAdapter:
     async def embed(
         self, profile: ProviderProfile, request: EmbeddingRequest
     ) -> EmbeddingResult:
-        raise RuntimeAdapterNotImplementedError(
-            "OpenAI-compatible embeddings runtime is not wired yet"
+        from meetings_contracts import Capability
+
+        if not profile.base_url:
+            raise ProviderExecutionError("Compatible provider base URL is not configured")
+        model = profile.models.get(Capability.EMBEDDINGS)
+        if not model:
+            raise ProviderExecutionError("Compatible embedding model is not configured")
+        return await create_embeddings(
+            url=f"{profile.base_url.rstrip('/')}/embeddings", api_key=profile.api_key,
+            model=model, request=request, provider=profile.provider_type.value,
+            transport=self.transport,
         )
 
 

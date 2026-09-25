@@ -9,6 +9,8 @@ from meetings_contracts import (
     DefaultSelectionRequest,
     DefaultSelectionResponse,
     ExecutionLocation,
+    EmbeddingRequest,
+    EmbeddingResult,
     ProfileCreate,
     ProfilePublic,
     ProfileUpdate,
@@ -146,6 +148,30 @@ class ProviderProfileService:
             except (ProviderExecutionError, RuntimeError) as exc:
                 failures.append(f"{profile.name}: {exc}")
         raise ProviderExecutionError("; ".join(failures) or "all selected providers failed")
+
+    async def embed(
+        self, request: EmbeddingRequest, *, profile_id: UUID | None = None,
+    ) -> tuple[ProviderProfile, EmbeddingResult]:
+        if profile_id is not None:
+            profile = self.repository.get_profile(profile_id)
+            if not profile.supports(Capability.EMBEDDINGS):
+                raise ProviderSelectionError("selected profile does not support embeddings")
+            return profile, await self.adapters[profile.provider_type].embed(profile, request)
+        selection = self.repository.get_default(Capability.EMBEDDINGS)
+        if selection is None or not selection.ordered_profile_ids():
+            raise ProviderSelectionError("no default embedding provider is selected")
+        failures: list[str] = []
+        for candidate_id in selection.ordered_profile_ids():
+            profile = self.repository.get_profile(candidate_id)
+            if not profile.supports(Capability.EMBEDDINGS):
+                failures.append(f"{profile.name}: embeddings are not configured")
+                continue
+            try:
+                result = await self.adapters[profile.provider_type].embed(profile, request)
+                return profile, result
+            except (ProviderExecutionError, RuntimeError) as exc:
+                failures.append(f"{profile.name}: {exc}")
+        raise ProviderExecutionError("; ".join(failures) or "all selected embedding providers failed")
 
     def select_default(
         self, capability: Capability, request: DefaultSelectionRequest

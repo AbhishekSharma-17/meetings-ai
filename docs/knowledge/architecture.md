@@ -1,6 +1,6 @@
 # Meeting knowledge: first slice and target wiki
 
-The local pilot now supports this source-linked path:
+The local application supports this source-linked path:
 
 ```text
 New meeting: named knowledge base + tags + explicit opt-in
@@ -24,25 +24,28 @@ segment ID. An AI answer must cite retrieved source IDs; a missing or invented
 ID is rejected. The answer remains a draft; an exact citation is not proof
 that a diarized person is correctly identified.
 
-Creators and admins can share a base with everyone in this local organization
+Creators and admins can share a base with everyone in their organization
 or specific members. Members can search only accessible named bases and open
 only completed, cited meeting transcripts in those bases. Admins retain access
 to all bases. A temporary-password account must change its password before
-access. This is not yet a multi-organization tenant boundary.
+access. The application API now scopes meetings, providers and knowledge by
+the selected organization; hosted database row-level security remains work.
 
 Current limits: matching is lexical and scans at most the 200 newest eligible
 meetings per query. The search response says when the scope was truncated.
 Chats are saved per user in named bases; follow-up retrieval includes the last
 user question, but every answer must cite fresh evidence. No
-embeddings, vector store, entity graph, linked topic/person pages, or model-led
-query planning have been implemented. Existing answer text is not
+embedding index, vector search, entity graph, linked topic/person pages, or
+model-led query planning have been implemented. The embedding provider runtime
+does support OpenAI and OpenAI-compatible endpoints, but retrieval does not
+call it yet. Existing answer text is not
 revoked when a meeting is later opted out. Treat exported/copied answers as
 separate records under a future retention policy.
 
-Before calling this a multi-customer wiki, complete tenant isolation. Scope
-every meeting, transcript, MOM, provider profile, retrieval request, chat
-history, and background job by authenticated organization; test cross-tenant
-denial and deletion. Then add a durable organization-scoped knowledge index
+Before calling this a multi-customer wiki, complete hosted row-level security
+and production identity. The application API scopes meetings, transcripts,
+MOMs, providers, retrieval, chat and worker jobs by organization and has
+two-organization denial tests. Next add a durable organization-scoped knowledge index
 with change events for opt-in, transcript correction, MOM approval and deletion.
 Use the configurable embedding provider for semantic retrieval, retain the
 exact segment citation contract, and show linked topic/person/decision pages

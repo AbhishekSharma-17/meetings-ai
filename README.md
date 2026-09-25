@@ -60,7 +60,8 @@ runtime integration, UI/UX work, and later SaaS features.
 Provider selection is exposed in the product. Text generation uses the selected
 provider for MOM drafts and knowledge answers. A selected transcription profile
 is signed into the next Vexa bot run; existing bots retain their prior route.
-Embeddings are configurable but are not yet used by knowledge retrieval.
+Embeddings are configurable and the OpenAI/OpenAI-compatible batch runtime is
+wired, but knowledge retrieval does not yet build or query an embedding index.
 
 - Transcription, text generation and embeddings have separate provider profiles.
 - Profiles declare capabilities such as streaming, timestamps, diarization, structured output and tool calling.

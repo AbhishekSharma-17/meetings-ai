@@ -15,6 +15,7 @@ from meetings_contracts import (
 )
 
 from .base import ProviderExecutionError, RuntimeAdapterNotImplementedError
+from .embeddings import create_embeddings
 
 
 class OpenAIAdapter:
@@ -95,7 +96,15 @@ class OpenAIAdapter:
     async def embed(
         self, profile: ProviderProfile, request: EmbeddingRequest
     ) -> EmbeddingResult:
-        raise RuntimeAdapterNotImplementedError("OpenAI embeddings runtime is not wired yet")
+        if not profile.api_key:
+            raise ProviderExecutionError("OpenAI API key is not configured")
+        model = profile.models.get(Capability.EMBEDDINGS)
+        if not model:
+            raise ProviderExecutionError("OpenAI embedding model is not configured")
+        return await create_embeddings(
+            url="https://api.openai.com/v1/embeddings", api_key=profile.api_key,
+            model=model, request=request, provider="openai", transport=self.transport,
+        )
 
 
 async def _post_json(
