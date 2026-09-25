@@ -17,6 +17,8 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
   const [selectedBaseId, setSelectedBaseId] = useState("");
   const [newBaseName, setNewBaseName] = useState("");
   const [tagInput, setTagInput] = useState("");
+  const [joinTiming, setJoinTiming] = useState<"now" | "scheduled">("now");
+  const [scheduledStart, setScheduledStart] = useState("");
   useEffect(() => {
     if (!open) return;
     let active = true;
@@ -29,7 +31,7 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
   }, [open]);
   if (!open) return null;
 
-  function close() { setError(null); setJoining(false); setSelectedBaseId(""); setNewBaseName(""); setTagInput(""); setKnowledgeEnabled(false); onClose(); }
+  function close() { setError(null); setJoining(false); setSelectedBaseId(""); setNewBaseName(""); setTagInput(""); setKnowledgeEnabled(false); setJoinTiming("now"); setScheduledStart(""); onClose(); }
 
   async function resolveKnowledgeBaseId(): Promise<string | null> {
     if (!knowledgeEnabled) return null;
@@ -71,6 +73,14 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
       if (deliverySettings.send_to_participants && deliverySettings.participant_recipients.length === 0) {
         throw new Error("Add at least one participant email address, or turn off participant delivery.");
       }
+      let scheduledStartIso: string | null = null;
+      if (!calendarSelection && joinTiming === "scheduled") {
+        const scheduledTime = new Date(scheduledStart).getTime();
+        if (!scheduledStart || !Number.isFinite(scheduledTime) || scheduledTime <= Date.now() + 60_000) {
+          throw new Error("Choose a start time at least one minute from now, or select Join now.");
+        }
+        scheduledStartIso = new Date(scheduledTime).toISOString();
+      }
       const knowledgeBaseId = await resolveKnowledgeBaseId();
       const input = {
         meetingUrl: String(form.get("meeting-link") ?? ""),
@@ -84,6 +94,11 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
       const shouldSchedule = calendarSelection && new Date(calendarSelection.event.starts_at).getTime() > Date.now() + 60_000;
       if (shouldSchedule) {
         const scheduled = await meetingsService.scheduleCalendarEvent(calendarSelection.event, calendarSelection.period, calendarSelection.timezone, input);
+        onMeetingJoined(scheduled);
+        return;
+      }
+      if (scheduledStartIso) {
+        const scheduled = await meetingsService.scheduleMeeting(input, scheduledStartIso);
         onMeetingJoined(scheduled);
         return;
       }
@@ -120,6 +135,7 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
         <input id="meeting-title" name="meeting-title" placeholder="e.g. Product discovery" defaultValue={calendarSelection?.event.title ?? ""} disabled={joining} />
         <label htmlFor="bot-name">Assistant name</label>
         <input id="bot-name" name="bot-name" defaultValue="Meetings AI" disabled={joining} />
+        {!calendarSelection ? <fieldset className="meeting-join-timing"><legend>When should the assistant join?</legend><label><input type="radio" name="join-timing" value="now" checked={joinTiming === "now"} onChange={() => setJoinTiming("now")} disabled={joining} /> Join now</label><label><input type="radio" name="join-timing" value="scheduled" checked={joinTiming === "scheduled"} onChange={() => setJoinTiming("scheduled")} disabled={joining} /> At the meeting start time</label>{joinTiming === "scheduled" ? <><label htmlFor="scheduled-start">Meeting start · {Intl.DateTimeFormat().resolvedOptions().timeZone}</label><input id="scheduled-start" type="datetime-local" value={scheduledStart} onChange={(event) => setScheduledStart(event.target.value)} required disabled={joining} /><p>The assistant is queued now and joins at this time. It will leave after Vexa detects the meeting has gone quiet.</p></> : null}</fieldset> : null}
         <div className={knowledgeEnabled ? "meeting-knowledge-options enabled" : "meeting-knowledge-options"}>
           <label className="meeting-knowledge-primary"><input type="checkbox" name="knowledge-enabled" checked={knowledgeEnabled} onChange={(event) => setKnowledgeEnabled(event.target.checked)} disabled={joining} /><span><b>Add this meeting to AI knowledge</b><small>Connect its transcript and approved MOM to a searchable knowledge base after completion.</small></span></label>
           <div className="meeting-knowledge-fields"><label htmlFor="knowledge-base">Knowledge base <span className="optional">one per meeting</span></label>
@@ -146,7 +162,7 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
         </details>
         <div className="disclosure"><span aria-hidden="true">ⓘ</span><p><b>Disclosure is required.</b> Before sending, confirm the host will announce: “Meetings AI has joined and will record and transcribe this conversation.”</p></div>
         {error ? <p className="form-error" role="alert">{error}</p> : null}
-        <div className="dialog-actions"><button className="button secondary" type="button" onClick={close} disabled={joining}>Cancel</button><button className="button primary" type="submit" disabled={joining}>{joining ? "Saving…" : calendarSelection?.willSchedule ? "Schedule assistant" : "Send assistant"}</button></div>
+        <div className="dialog-actions"><button className="button secondary" type="button" onClick={close} disabled={joining}>Cancel</button><button className="button primary" type="submit" disabled={joining}>{joining ? "Saving…" : calendarSelection?.willSchedule || joinTiming === "scheduled" ? "Schedule assistant" : "Send assistant"}</button></div>
       </form>
     </Dialog.Popup>
     </Dialog.Portal>

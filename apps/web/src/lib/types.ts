@@ -326,6 +326,7 @@ export type CalendarEvent = {
 };
 export type CalendarSchedule = {
   meeting_id: string; connection_id: string; event_id: string; starts_at: string; ends_at: string;
+  provider?: string;
   status: "pending" | "joining" | "joined" | "failed" | "cancelled" | "missed"; last_error: string | null;
 };
 

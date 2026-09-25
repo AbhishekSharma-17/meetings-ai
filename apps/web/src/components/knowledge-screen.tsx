@@ -41,7 +41,11 @@ export function KnowledgeScreen({ onOpenSource, account }: {
   useEffect(() => {
     void meetingsService.listKnowledgeBases().then((items) => {
       setBases(items);
-      if (items.length) setSelectedBaseId((current) => current || items[0].id);
+      if (items.length) {
+        setSelectedBaseId((current) => current || items[0].id);
+        setShareVisibility(items[0].visibility);
+        setShareUserIds(items[0].shared_user_ids);
+      }
     }).catch(() => setError("Could not load knowledge bases."));
     if (account?.role === "owner" || account?.role === "admin") {
       void meetingsService.listProviderProfiles().then(setProfiles).catch(() => undefined);
@@ -65,11 +69,11 @@ export function KnowledgeScreen({ onOpenSource, account }: {
     return () => window.clearInterval(timer);
   }, [selectedBaseId]);
 
-  function chooseBase(id: string) {
+  function chooseBase(id: string, baseOverride?: KnowledgeBase) {
     if (id === selectedBaseId) return;
     setSelectedBaseId(id); setSearch(null); setOverview(null); setEvidenceMap(null); setIndexStatus(null); setExchanges([]); setConversations([]); setConversationId(null); setError(null);
     setConfirmDeleteConversation(false); setConfirmDeleteBase(false); setNotice(null);
-    const base = bases.find((item) => item.id === id);
+    const base = baseOverride ?? bases.find((item) => item.id === id);
     setShareVisibility(base?.visibility ?? "private");
     setShareUserIds(base?.shared_user_ids ?? []);
   }
@@ -79,7 +83,7 @@ export function KnowledgeScreen({ onOpenSource, account }: {
     try {
       const created = await meetingsService.createKnowledgeBase(newBaseName.trim());
       setBases((current) => [...current, created].sort((a, b) => a.name.localeCompare(b.name)));
-      setNewBaseName(""); chooseBase(created.id);
+      setNewBaseName(""); chooseBase(created.id, created);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not create knowledge base.");
     } finally { setCreatingBase(false); }
@@ -123,8 +127,12 @@ export function KnowledgeScreen({ onOpenSource, account }: {
     if (!selectedBaseId) return;
     setError(null);
     try {
+      if (shareVisibility === "specific" && shareUserIds.length === 0) {
+        throw new Error("Select at least one teammate for specific-person sharing.");
+      }
       const updated = await meetingsService.shareKnowledgeBase(selectedBaseId, shareVisibility, shareUserIds);
       setBases((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setNotice(`Sharing saved for ${updated.name}.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not update sharing.");
     }
@@ -211,7 +219,7 @@ export function KnowledgeScreen({ onOpenSource, account }: {
     <div className="knowledge-hero"><p className="eyebrow">CONNECTED KNOWLEDGE</p><h1 id="knowledge-title">Your meeting wiki.</h1><p className="intro">Explore connected meetings, approved decisions, and transcript evidence. Ask questions across a knowledge base and follow every answer back to its source.</p></div>
     <div className="knowledge-policy" role="note"><b>Grounded in meeting records.</b> Only completed meetings marked “Add to AI knowledge” appear here. Approved MOM facts are linked to the meeting; individual answers cite timestamped transcript turns. Review speaker names before relying on attribution.</div>
     <div className="knowledge-layout"><aside className="knowledge-library" aria-label="Knowledge bases"><div className="section-heading"><div><h2>Knowledge bases</h2><p>One client or project per base</p></div></div>{account?.role === "owner" || account?.role === "admin" ? <button className={!selectedBaseId ? "knowledge-base-option selected" : "knowledge-base-option"} onClick={() => chooseBase("")}><BookOpenText /> All opted-in meetings</button> : null}{bases.map((base) => <button key={base.id} className={selectedBaseId === base.id ? "knowledge-base-option selected" : "knowledge-base-option"} onClick={() => chooseBase(base.id)}><span><b>{base.name}</b><small>{base.meeting_count} meeting{base.meeting_count === 1 ? "" : "s"} · {base.visibility}</small></span></button>)}<form className="knowledge-create" onSubmit={(event) => void createBase(event)}><label htmlFor="knowledge-base-new">Create a knowledge base</label><div><input id="knowledge-base-new" value={newBaseName} onChange={(event) => setNewBaseName(event.target.value)} minLength={2} maxLength={120} required placeholder="e.g. Acme client" /><button type="submit" className="button secondary" disabled={creatingBase} aria-label="Create knowledge base"><Plus /></button></div></form>{selectedBase ? <>{canManageBase && (account?.role === "owner" || account?.role === "admin") ? <><label className="knowledge-model-label" htmlFor="knowledge-model">Ask AI model for {selectedBase.name}</label><select id="knowledge-model" value={selectedBase.text_profile_id ?? ""} onChange={(event) => void setTextProfile(event.target.value)}><option value="">Workspace text-generation default</option>{profiles.filter((profile) => profile.capabilities.includes("text_generation") && !profile.id.startsWith("new-")).map((profile) => <option value={profile.id} key={profile.id}>{profile.label} · {profile.model}</option>)}</select><p className="field-hint">Configure credentials in AI providers. Base-specific selection does not change MOM or transcription models.</p></> : null}{canManageBase ? <div className="knowledge-sharing"><label htmlFor="knowledge-visibility">Share this base</label><select id="knowledge-visibility" value={shareVisibility} onChange={(event) => setShareVisibility(event.target.value as "private" | "organization" | "specific")}><option value="private">Private to creator and admins</option><option value="organization">Everyone in organization</option><option value="specific">Specific teammates</option></select>{shareVisibility === "specific" ? <div className="knowledge-share-members">{members.filter((member) => member.user_id !== account?.user_id).map((member) => <label key={member.user_id}><input type="checkbox" checked={shareUserIds.includes(member.user_id)} onChange={(event) => setShareUserIds((current) => event.target.checked ? [...current, member.user_id] : current.filter((id) => id !== member.user_id))} /> {member.display_name} <small>{member.email}</small></label>)}</div> : null}<button type="button" className="button secondary" onClick={() => void saveSharing()}>Save sharing</button></div> : null}<div className="knowledge-index"><b>Semantic index</b><small>{indexStatus?.indexed_sources ? `${indexStatus.indexed_sources} source${indexStatus.indexed_sources === 1 ? "" : "s"} indexed · ${indexStatus.model ?? "embedding model"}` : "No sources indexed yet"}</small><p>Search checks indexed hits against live meeting records. Completed meeting changes queue a background refresh.</p>{indexStatus?.job_status ? <p role="status">Background index: {indexStatus.job_status}{indexStatus.next_retry_at ? ` · retry ${new Date(indexStatus.next_retry_at).toLocaleString()}` : ""}</p> : null}{indexStatus?.last_error ? <p className="form-error" role="alert">{indexStatus.last_error}</p> : null}{canManageBase ? <button type="button" className="button secondary" disabled={indexing} onClick={() => void reindexBase()}>{indexing ? "Indexing…" : "Reindex now"}</button> : null}</div><div className="knowledge-conversations"><div className="section-heading"><h2>Chats</h2><button type="button" className="text-button" onClick={() => { setConversationId(null); setExchanges([]); setMode("ask"); }}>New chat</button></div>{conversations.map((conversation) => <button key={conversation.id} onClick={() => void chooseConversation(conversation.id)} className={conversationId === conversation.id ? "knowledge-chat-option selected" : "knowledge-chat-option"}>{conversation.title}</button>)}</div></> : null}</aside><div className="knowledge-main">
-    {selectedBase && canManageBase ? <div className="knowledge-base-management" aria-label="Knowledge base controls"><span><b>{selectedBase.name} settings</b><small>Deleting removes this wiki, its saved chats and index. Meeting records stay in the workspace and are opted out of AI knowledge.</small></span>{confirmDeleteBase ? <><button type="button" className="button danger" disabled={busy} onClick={() => void deleteBase()}>Confirm delete base</button><button type="button" className="button secondary" onClick={() => setConfirmDeleteBase(false)}>Cancel</button></> : <button type="button" className="button secondary" onClick={() => setConfirmDeleteBase(true)}>Delete knowledge base</button>}</div> : null}
+    {selectedBase && canManageBase ? <div className="knowledge-base-management" aria-label="Knowledge base controls"><span><b>{selectedBase.name} access</b><small>{selectedBase.visibility === "organization" ? "Shared with everyone in this organization" : selectedBase.visibility === "specific" ? `Shared with ${selectedBase.shared_user_ids.length} selected teammate${selectedBase.shared_user_ids.length === 1 ? "" : "s"}` : "Private to the creator and workspace admins"}. Configure this knowledge base independently of other bases.</small></span><button type="button" className="button secondary" onClick={() => document.getElementById("knowledge-visibility")?.scrollIntoView({ behavior: "smooth", block: "center" })}>Manage sharing</button>{confirmDeleteBase ? <><button type="button" className="button danger" disabled={busy} onClick={() => void deleteBase()}>Confirm delete base</button><button type="button" className="button secondary" onClick={() => setConfirmDeleteBase(false)}>Cancel</button></> : <button type="button" className="button secondary" onClick={() => setConfirmDeleteBase(true)}>Delete knowledge base</button>}</div> : null}
     {selectedBase && conversationId ? <div className="knowledge-chat-management" aria-label="Saved chat controls"><span><b>Saved chat</b><small>Export includes stored answers and citations. Check them against current meeting records.</small></span><button type="button" className="button secondary" onClick={() => void exportConversation()}>Export JSON</button>{confirmDeleteConversation ? <><button type="button" className="button danger" disabled={busy} onClick={() => void deleteConversation()}>Confirm delete</button><button type="button" className="button secondary" onClick={() => setConfirmDeleteConversation(false)}>Cancel</button></> : <button type="button" className="button secondary" onClick={() => setConfirmDeleteConversation(true)}>Delete chat</button>}</div> : null}
     <form className="knowledge-query" onSubmit={(event) => void submit(event)}>
       <div className="knowledge-mode" role="group" aria-label="Knowledge mode"><button type="button" aria-pressed={mode === "search"} onClick={() => setMode("search")}><Search /> Find sources</button><button type="button" aria-pressed={mode === "ask"} onClick={() => setMode("ask")}><Sparkles /> Ask AI</button></div>

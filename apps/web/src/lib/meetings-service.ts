@@ -37,6 +37,7 @@ export interface MeetingsService {
   chatKnowledge(query: string, tags: string[], knowledgeBaseId?: string | null, conversationId?: string | null): Promise<KnowledgeChatResponse>;
   listMeetings(): Promise<Meeting[]>;
   createMeeting(input: CreateMeetingInput): Promise<MeetingDetail>;
+  scheduleMeeting(input: CreateMeetingInput, startsAt: string): Promise<MeetingDetail>;
   listCalendarConnections(): Promise<CalendarConnection[]>;
   connectCalendar(provider: CalendarConnection["provider"]): Promise<string>;
   scanCalendar(connectionId: string, period: CalendarPeriod, timezone: string): Promise<CalendarEvent[]>;
@@ -478,6 +479,22 @@ class HttpMeetingsService implements MeetingsService {
       }),
     });
     return toMeetingDetail(meeting);
+  }
+
+  async scheduleMeeting(input: CreateMeetingInput, startsAt: string): Promise<MeetingDetail> {
+    const result = await api<{ meeting: BackendMeeting }>("/v1/meetings/schedules", {
+      method: "POST",
+      body: JSON.stringify({
+        starts_at: startsAt,
+        meeting: {
+          meeting_url: input.meetingUrl, title: input.title || undefined,
+          bot_name: input.botName || "Meetings AI", delivery_settings: input.deliverySettings,
+          tags: input.tags ?? [], knowledge_enabled: input.knowledgeEnabled ?? false,
+          knowledge_base_id: input.knowledgeBaseId ?? null,
+        },
+      }),
+    });
+    return toMeetingDetail(result.meeting);
   }
 
   async listCalendarConnections(): Promise<CalendarConnection[]> {

@@ -14,10 +14,13 @@ const base = {
   updated_at: "2026-09-25T00:00:00Z",
 };
 
-async function mockApp(page: Page, options: { firstListEmpty?: boolean; failCreate?: boolean } = {}) {
+async function mockApp(page: Page, options: { firstListEmpty?: boolean; failCreate?: boolean; visibility?: "private" | "organization" | "specific" } = {}) {
   let baseLists = 0;
   let baseCreates = 0;
   let meetingBody: Record<string, unknown> | null = null;
+  let scheduledBody: Record<string, unknown> | null = null;
+  let sharingBody: Record<string, unknown> | null = null;
+  const currentBase = { ...base, visibility: options.visibility ?? "private" };
   await page.route("**/v1/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -29,11 +32,45 @@ async function mockApp(page: Page, options: { firstListEmpty?: boolean; failCrea
     } });
     if (path === "/v1/knowledge-bases" && request.method() === "GET") {
       baseLists += 1;
-      return route.fulfill({ json: options.firstListEmpty && baseLists === 1 ? [] : [base] });
+      return route.fulfill({ json: options.firstListEmpty && baseLists === 1 ? [] : [currentBase] });
     }
     if (path === "/v1/knowledge-bases" && request.method() === "POST") {
       baseCreates += 1;
       return route.fulfill({ status: 409, json: { detail: "a knowledge base with this name already exists" } });
+    }
+    if (path === `/v1/knowledge-bases/${base.id}/sharing` && request.method() === "PUT") {
+      sharingBody = request.postDataJSON();
+      currentBase.visibility = sharingBody.visibility as typeof currentBase.visibility;
+      currentBase.shared_user_ids = sharingBody.user_ids as string[];
+      return route.fulfill({ json: currentBase });
+    }
+    if (path === "/v1/meetings/schedules" && request.method() === "POST") {
+      scheduledBody = request.postDataJSON();
+      return route.fulfill({ status: 201, json: { schedule: {
+        meeting_id: "00000000-0000-4000-8000-000000000099", provider: "manual",
+        starts_at: scheduledBody.starts_at, ends_at: scheduledBody.starts_at,
+        connection_id: "manual", event_id: "test", status: "pending", last_error: null,
+      }, meeting: {
+        id: "00000000-0000-4000-8000-000000000099", title: "Scheduled test",
+        meeting_url: scheduledBody.meeting.meeting_url, platform: "google_meet",
+        status: "created", bot_name: "Meetings AI",
+        created_at: "2026-09-25T00:00:00Z", updated_at: "2026-09-25T00:00:00Z",
+      } } });
+    }
+    if (path === "/v1/meetings/00000000-0000-4000-8000-000000000099" && request.method() === "GET") {
+      return route.fulfill({ json: {
+        id: "00000000-0000-4000-8000-000000000099", title: "Scheduled test",
+        meeting_url: "https://meet.google.com/abc-defg-hij", platform: "google_meet",
+        status: "created", bot_name: "Meetings AI",
+        created_at: "2026-09-25T00:00:00Z", updated_at: "2026-09-25T00:00:00Z",
+      } });
+    }
+    if (path === "/v1/calendar/schedules/00000000-0000-4000-8000-000000000099" && request.method() === "GET" && scheduledBody) {
+      return route.fulfill({ json: {
+        meeting_id: "00000000-0000-4000-8000-000000000099", provider: "manual",
+        starts_at: scheduledBody.starts_at, ends_at: scheduledBody.starts_at,
+        connection_id: "manual", event_id: "test", status: "pending", last_error: null,
+      } });
     }
     if (path === "/v1/meetings" && request.method() === "POST") {
       meetingBody = request.postDataJSON();
@@ -56,9 +93,13 @@ async function mockApp(page: Page, options: { firstListEmpty?: boolean; failCrea
       id: base.organization_id, display_name: "GenAI Protos", contact_email: null,
       status: "active", created_at: base.created_at, updated_at: base.updated_at,
     } });
+    if (path === "/v1/workspace/members") return route.fulfill({ json: [
+      { user_id: base.created_by, display_name: "Workspace owner", email: "developer@genaiprotos.com", role: "owner", status: "active" },
+      { user_id: "00000000-0000-4000-8000-000000000088", display_name: "Team member", email: "member@example.test", role: "member", status: "active" },
+    ] });
     return route.fulfill({ status: 404, json: { detail: "test route not mocked" } });
   });
-  return { get baseCreates() { return baseCreates; }, get meetingBody() { return meetingBody; } };
+  return { get baseCreates() { return baseCreates; }, get meetingBody() { return meetingBody; }, get scheduledBody() { return scheduledBody; }, get sharingBody() { return sharingBody; } };
 }
 
 async function submitWithBaseName(page: Page) {
@@ -98,4 +139,32 @@ test("checks participant delivery before creating a knowledge base or meeting", 
   await expect(page.getByRole("alert")).toContainText("Add at least one participant email address");
   expect(mock.baseCreates).toBe(0);
   expect(mock.meetingBody).toBeNull();
+});
+
+test("queues a future manual meeting without joining immediately", async ({ page }) => {
+  const mock = await mockApp(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "New meeting" }).click();
+  await page.getByLabel("Meeting link").fill("https://meet.google.com/abc-defg-hij");
+  await page.getByLabel("At the meeting start time").check();
+  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const localTime = new Date(tomorrow.getTime() - tomorrow.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+  await page.getByLabel(/Meeting start/).fill(localTime);
+  await page.getByRole("button", { name: "Schedule assistant" }).click();
+  await expect(page.getByText("Scheduled assistant · pending")).toBeVisible();
+  expect(mock.scheduledBody).toMatchObject({ meeting: { meeting_url: "https://meet.google.com/abc-defg-hij" } });
+  expect(mock.meetingBody).toBeNull();
+});
+
+test("shows and changes sharing for the selected knowledge base", async ({ page }) => {
+  const mock = await mockApp(page, { visibility: "organization" });
+  await page.goto("/");
+  await page.getByRole("button", { name: "AI knowledge" }).click();
+  await expect(page.getByLabel("Share this base")).toHaveValue("organization");
+  await expect(page.getByText("Shared with everyone in this organization")).toBeVisible();
+  await page.getByLabel("Share this base").selectOption("specific");
+  await page.getByLabel(/Team member/).check();
+  await page.getByRole("button", { name: "Save sharing" }).click();
+  await expect(page.getByText("Sharing saved for Mobius_meet.")).toBeVisible();
+  expect(mock.sharingBody).toEqual({ visibility: "specific", user_ids: ["00000000-0000-4000-8000-000000000088"] });
 });

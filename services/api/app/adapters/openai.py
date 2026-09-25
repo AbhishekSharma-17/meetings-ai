@@ -82,6 +82,14 @@ class OpenAIAdapter:
             "OpenAI",
             self.transport,
         )
+        if body.get("status") == "incomplete":
+            details = body.get("incomplete_details")
+            reason = details.get("reason") if isinstance(details, dict) else None
+            if reason == "max_output_tokens":
+                raise ProviderExecutionError("OpenAI MOM response exceeded the output token limit; increase the limit or shorten the transcript")
+            raise ProviderExecutionError(f"OpenAI MOM response was incomplete ({reason or 'unknown reason'})")
+        if body.get("status") not in {None, "completed"}:
+            raise ProviderExecutionError(f"OpenAI MOM response ended with status {body['status']}")
         text = _responses_text(body)
         usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
         return TextGenerationResult(

@@ -1,5 +1,6 @@
 """Calendar discovery is user-scoped and only returns supported meeting links."""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -175,3 +176,62 @@ def test_missed_schedule_does_not_join_an_expired_call(tmp_path) -> None:
         asyncio.run(app.state.calendar_schedule.tick())
         assert client.get(f"/v1/calendar/schedules/{meeting_id}").json()["status"] == "missed"
         assert client.get(f"/v1/meetings/{meeting_id}").json()["status"] == "created"
+
+
+def test_manual_meeting_waits_for_its_start_and_can_be_cancelled(tmp_path) -> None:
+    from unittest.mock import AsyncMock
+
+    app = create_app(database_url=f"sqlite+pysqlite:///{tmp_path / 'manual-schedule.db'}",
+                     credential_key="test-only-credential-key")
+    start = datetime.now(UTC) + timedelta(hours=2)
+    with TestClient(app) as client:
+        created = client.post("/v1/meetings/schedules", json={
+            "starts_at": start.isoformat(),
+            "meeting": {"meeting_url": "https://meet.google.com/abc-defg-hij", "title": "Scheduled customer call"},
+        })
+        assert created.status_code == 201, created.text
+        meeting_id = created.json()["meeting"]["id"]
+        assert created.json()["schedule"]["provider"] == "manual"
+        assert created.json()["schedule"]["status"] == "pending"
+        join = AsyncMock()
+        app.state.calendar_schedule.meetings.join = join
+        asyncio.run(app.state.calendar_schedule.tick())
+        join.assert_not_awaited()
+        assert client.post(f"/v1/calendar/schedules/{meeting_id}/cancel").json()["status"] == "cancelled"
+
+
+def test_manual_schedule_joins_when_start_arrives(tmp_path) -> None:
+    from unittest.mock import AsyncMock
+
+    app = create_app(database_url=f"sqlite+pysqlite:///{tmp_path / 'manual-due.db'}",
+                     credential_key="test-only-credential-key")
+    with TestClient(app) as client:
+        created = client.post("/v1/meetings/schedules", json={
+            "starts_at": (datetime.now(UTC) + timedelta(hours=2)).isoformat(),
+            "meeting": {"meeting_url": "https://meet.google.com/abc-defg-hij"},
+        })
+        assert created.status_code == 201, created.text
+        meeting_id = created.json()["meeting"]["id"]
+        with app.state.database.session_factory.begin() as session:
+            session.execute(update(CalendarScheduleRow).where(CalendarScheduleRow.meeting_id == meeting_id).values(
+                starts_at=datetime.now(UTC) - timedelta(seconds=1),
+            ))
+        join = AsyncMock()
+        app.state.calendar_schedule.meetings.join = join
+        asyncio.run(app.state.calendar_schedule.tick())
+        join.assert_awaited_once()
+        assert client.get(f"/v1/calendar/schedules/{meeting_id}").json()["status"] == "joined"
+
+
+def test_manual_schedule_rejects_past_or_naive_times_without_creating_meeting(tmp_path) -> None:
+    app = create_app(database_url=f"sqlite+pysqlite:///{tmp_path / 'invalid-manual.db'}",
+                     credential_key="test-only-credential-key")
+    with TestClient(app) as client:
+        for starts_at in [(datetime.now(UTC) - timedelta(minutes=1)).isoformat(),
+                          (datetime.now(UTC) + timedelta(hours=2)).replace(tzinfo=None).isoformat()]:
+            response = client.post("/v1/meetings/schedules", json={
+                "starts_at": starts_at,
+                "meeting": {"meeting_url": "https://meet.google.com/abc-defg-hij"},
+            })
+            assert response.status_code == 400, response.text
+        assert client.get("/v1/meetings").json()["count"] == 0

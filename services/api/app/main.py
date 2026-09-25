@@ -43,7 +43,7 @@ from .adapters.vexa import VexaAPIError, VexaCaptureAdapter
 from .adapters.resend import EmailDeliveryError, ResendAdapter
 from .adapters.base import ProviderExecutionError
 from .composio_calendar import CalendarConnection, CalendarConnectRequest, CalendarConnectResponse, CalendarEventsResponse, CalendarError, CalendarProvider, CalendarRange, ComposioCalendar, calendar_callback_url
-from .calendar_schedule import CalendarScheduleError, CalendarSchedulePublic, CalendarScheduleService, ScheduleCreate
+from .calendar_schedule import CalendarScheduleError, CalendarSchedulePublic, CalendarScheduleService, ManualScheduleCreate, ScheduleCreate
 from .database import Database, SchemaVersionRow, LEGACY_ADMIN_USER_ID, LEGACY_ORGANIZATION_ID
 from .accounts import AccountError, AccountPublic, AccountService, Actor, ChangePasswordRequest, InviteRequest, InviteResult, MemberRolePatch, OrganizationCreateRequest, OrganizationOption, ProfilePatch
 from .meeting_service import MeetingConflictError, MeetingService, MeetingValidationError
@@ -722,6 +722,14 @@ def create_app(
             scheduled, meeting = await calendar_schedule.create(request.state.actor, payload)
             return {"schedule": scheduled.model_dump(mode="json"), "meeting": meeting.model_dump(mode="json")}
         except (CalendarScheduleError, CalendarError, MeetingValidationError, KnowledgeBaseNotFoundError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/v1/meetings/schedules", status_code=201)
+    def manual_schedule_create(payload: ManualScheduleCreate, request: Request) -> dict[str, object]:
+        try:
+            scheduled, meeting = calendar_schedule.create_manual(request.state.actor, payload)
+            return {"schedule": scheduled.model_dump(mode="json"), "meeting": meeting.model_dump(mode="json")}
+        except (CalendarScheduleError, MeetingValidationError, KnowledgeBaseNotFoundError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/v1/calendar/schedules/{meeting_id}/cancel", response_model=CalendarSchedulePublic)

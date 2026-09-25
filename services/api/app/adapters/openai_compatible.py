@@ -100,6 +100,8 @@ class OpenAICompatibleAdapter:
             raise ProviderExecutionError("Compatible provider returned invalid generated text") from exc
         if not isinstance(text, str) or not text:
             raise ProviderExecutionError("Compatible provider returned no generated text")
+        if choice.get("finish_reason") == "length":
+            raise ProviderExecutionError("Compatible provider MOM response exceeded the output token limit")
         usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
         try:
             structured = json.loads(text)

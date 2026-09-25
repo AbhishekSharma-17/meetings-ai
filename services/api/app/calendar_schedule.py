@@ -28,9 +28,16 @@ class ScheduleCreate(BaseModel):
     meeting: MeetingCreate
 
 
+class ManualScheduleCreate(BaseModel):
+    starts_at: datetime
+    ends_at: datetime | None = None
+    meeting: MeetingCreate
+
+
 class CalendarSchedulePublic(BaseModel):
     meeting_id: UUID
     connection_id: str
+    provider: str
     event_id: str
     starts_at: datetime
     ends_at: datetime
@@ -45,7 +52,7 @@ class CalendarScheduleError(ValueError):
 def _public(row: CalendarScheduleRow) -> CalendarSchedulePublic:
     return CalendarSchedulePublic(
         meeting_id=UUID(row.meeting_id), event_id=row.event_id,
-        connection_id=row.connection_id,
+        connection_id=row.connection_id, provider=row.provider,
         starts_at=row.starts_at, ends_at=row.ends_at,
         status=row.status, last_error=row.last_error,
     )
@@ -103,6 +110,30 @@ class CalendarScheduleService:
             session.add(row)
         return _public(row), self.meetings.to_public(meeting)
 
+    def create_manual(self, actor: Actor, payload: ManualScheduleCreate) -> tuple[CalendarSchedulePublic, MeetingPublic]:
+        now = datetime.now(UTC)
+        if payload.starts_at.tzinfo is None:
+            raise CalendarScheduleError("scheduled start must include a time zone")
+        if payload.ends_at is not None and payload.ends_at.tzinfo is None:
+            raise CalendarScheduleError("scheduled end must include a time zone")
+        starts_at = payload.starts_at.astimezone(UTC)
+        ends_at = payload.ends_at.astimezone(UTC) if payload.ends_at else starts_at + timedelta(hours=4)
+        if starts_at <= now + timedelta(minutes=1):
+            raise CalendarScheduleError("schedule at least one minute ahead, or send the assistant now")
+        if ends_at <= starts_at or ends_at > starts_at + timedelta(hours=12):
+            raise CalendarScheduleError("scheduled end must be after the start and within 12 hours")
+        meeting = self.meetings.create(payload.meeting)
+        with self.database.session_factory.begin() as session:
+            row = CalendarScheduleRow(
+                meeting_id=str(meeting.id), organization_id=str(actor.organization_id),
+                user_id=str(actor.user_id), connection_id="manual", provider="manual",
+                event_id=str(meeting.id), starts_at=starts_at, ends_at=ends_at,
+                status="pending", attempts=0, last_error=None,
+                created_at=now, updated_at=now,
+            )
+            session.add(row)
+        return _public(row), self.meetings.to_public(meeting)
+
     def cancel(self, actor: Actor, meeting_id: UUID) -> CalendarSchedulePublic:
         with self.database.session_factory.begin() as session:
             row = session.get(CalendarScheduleRow, str(meeting_id))
@@ -127,7 +158,7 @@ class CalendarScheduleService:
         with self.database.session_factory() as session:
             rows = session.execute(select(CalendarScheduleRow.organization_id, CalendarScheduleRow.meeting_id, CalendarScheduleRow.starts_at, CalendarScheduleRow.ends_at).where(
                 CalendarScheduleRow.status == "pending",
-                CalendarScheduleRow.starts_at <= now + timedelta(minutes=1),
+                CalendarScheduleRow.starts_at <= now,
             )).all()
         for organization_id, meeting_id, starts_at, ends_at in rows:
             starts_at = starts_at.replace(tzinfo=starts_at.tzinfo or UTC)

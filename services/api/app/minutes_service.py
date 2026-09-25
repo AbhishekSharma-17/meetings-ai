@@ -81,10 +81,12 @@ class MinutesService:
             raise MinutesConflictError("a finalized transcript is required before generating MOM")
 
         source_revision = self.repository.get_transcript_revision(meeting_id)
+        first_start = min(segment.start_seconds for segment in finalized)
         transcript = "\n".join(
-            f"[{segment.segment_id} @ {segment.start_seconds:.1f}s] "
-            f"{segment.speaker or 'Unidentified speaker'}: "
-            f"{segment.text.strip()}"
+            f"ID={segment.segment_id}\n"
+            f"TIME={max(0, segment.start_seconds - first_start):.1f}s into meeting\n"
+            f"SPEAKER={segment.speaker or 'Unidentified speaker'}\n"
+            f"TEXT={segment.text.strip()}"
             for segment in finalized
         )
         transcript = transcript[:160_000]
@@ -105,7 +107,9 @@ class MinutesService:
                 "For an unidentified questioner use null.\n\n"
                 f"Transcript:\n{transcript}"
             ),
-            max_output_tokens=2500,
+            # This includes reasoning tokens as well as visible JSON. A short
+            # cap can truncate a valid draft for a multi-speaker meeting.
+            max_output_tokens=12000,
             response_schema=_minutes_response_schema(),
             metadata={"meeting_id": str(meeting_id), "capability": "text_generation"},
         )
@@ -113,6 +117,7 @@ class MinutesService:
             profile, result = await self.providers.generate_text(request)
             payload = result.structured_output or _parse_json(result.text)
             draft = MeetingMinutesDraft.model_validate(payload)
+            _normalize_generated_evidence(draft, finalized)
             _validate_generated_evidence(draft, finalized)
         except (ProviderExecutionError, ProviderSelectionError, ValidationError, ValueError) as exc:
             raise MinutesGenerationError(f"MOM generation failed: {exc}") from exc
@@ -250,7 +255,10 @@ def _parse_json(text: str) -> dict[str, object]:
     fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", candidate, re.DOTALL | re.IGNORECASE)
     if fenced:
         candidate = fenced.group(1)
-    value = json.loads(candidate)
+    try:
+        value = json.loads(candidate)
+    except json.JSONDecodeError as exc:
+        raise ValueError("provider returned incomplete or invalid MOM JSON; retry with a larger output budget") from exc
     if not isinstance(value, dict):
         raise ValueError("provider returned a non-object MOM")
     return value
@@ -338,6 +346,21 @@ def _validate_references(draft: MeetingMinutesDraft, segments: list[object]) -> 
             raise MinutesGenerationError(
                 f"action owner {action.owner} is not supported by cited transcript evidence"
             )
+
+
+def _normalize_generated_evidence(draft: MeetingMinutesDraft, segments: list[object]) -> None:
+    """Remove a copied timestamp only when the remaining ID exactly exists."""
+    valid_ids = {segment.segment_id for segment in segments if segment.segment_id}
+    for claim in [*draft.speaker_contributions, *draft.questions_asked, *draft.action_items]:
+        normalized = []
+        for raw in claim.evidence_segment_ids:
+            candidate = raw.strip().removeprefix("[").removesuffix("]")
+            if candidate not in valid_ids:
+                id_part, separator, _ = candidate.partition(" @ ")
+                if separator and id_part in valid_ids:
+                    candidate = id_part
+            normalized.append(candidate)
+        claim.evidence_segment_ids = normalized
 
 
 def _validate_generated_evidence(draft: MeetingMinutesDraft, segments: list[object]) -> None:

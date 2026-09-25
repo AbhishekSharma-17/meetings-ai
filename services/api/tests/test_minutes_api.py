@@ -1,11 +1,13 @@
 import asyncio
 import json
 import re
+from types import SimpleNamespace
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 from meetings_contracts import (
+    MeetingMinutesDraft,
     MeetingStatus,
     MeetingTranscriptSegment,
     ProviderType,
@@ -15,12 +17,14 @@ from meetings_contracts import (
 from app.adapters.resend import EmailDeliveryError, ResendAdapter
 from app.adapters.vexa import VexaCaptureAdapter
 from app.main import create_app
+from app.minutes_service import MinutesGenerationError, _normalize_generated_evidence, _validate_references
 
 
 class FakeTextAdapter:
     async def generate_text(self, profile, request):
-        assert "Anna: We approved the internal MVP" in request.prompt
-        segment_id = re.search(r"\[([^ ]+) @", request.prompt).group(1)
+        assert request.max_output_tokens == 12000
+        assert "SPEAKER=Anna\nTEXT=We approved the internal MVP" in request.prompt
+        segment_id = re.search(r"ID=([^\n]+)", request.prompt).group(1)
         payload = {
             "title": "Internal MVP review",
             "executive_summary": "The team approved continued internal validation.",
@@ -204,3 +208,21 @@ def test_minutes_require_finished_capture_and_transcript() -> None:
         response = client.post(f"/v1/meetings/{meeting['id']}/minutes/generate")
         assert response.status_code == 409
         assert "stop the meeting capture" in response.json()["detail"]
+
+
+def test_generated_evidence_only_normalizes_a_real_id_with_copied_timestamp() -> None:
+    segment = SimpleNamespace(segment_id="csrc-201:1:1790332177958", speaker="Anna", text="We approved the plan.", completed=True)
+    draft = MeetingMinutesDraft(
+        title="Review", executive_summary="The plan was approved.",
+        speaker_contributions=[{
+            "speaker": "Anna", "summary": "Approved the plan.",
+            "evidence_segment_ids": ["csrc-201:1:1790332177958 @ 1790332178.0s"],
+        }],
+    )
+    _normalize_generated_evidence(draft, [segment])
+    assert draft.speaker_contributions[0].evidence_segment_ids == [segment.segment_id]
+    _validate_references(draft, [segment])
+    draft.speaker_contributions[0].evidence_segment_ids = ["invented @ 1790332178.0s"]
+    _normalize_generated_evidence(draft, [segment])
+    with pytest.raises(MinutesGenerationError, match="unavailable transcript segment"):
+        _validate_references(draft, [segment])

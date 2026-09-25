@@ -18,8 +18,8 @@ class DraftAdapter:
 
     async def generate_text(self, profile, request):
         self.calls += 1
-        assert "Anna:" in request.prompt
-        segment_id = re.search(r"\[([^ ]+) @", request.prompt).group(1)
+        assert "SPEAKER=Anna" in request.prompt
+        segment_id = re.search(r"ID=([^\n]+)", request.prompt).group(1)
         payload = {
             "title": "Review", "executive_summary": "Review completed.",
             "discussion_points": ["The team discussed the MVP."],
