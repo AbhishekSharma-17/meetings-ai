@@ -22,6 +22,7 @@ export interface MeetingsService {
   getKnowledgeIndex(baseId: string): Promise<KnowledgeIndexStatus>;
   reindexKnowledge(baseId: string): Promise<KnowledgeIndexStatus>;
   createKnowledgeBase(name: string, description?: string): Promise<KnowledgeBase>;
+  deleteKnowledgeBase(id: string): Promise<void>;
   updateKnowledgeBase(id: string, patch: { name?: string; description?: string | null; text_profile_id?: string | null }): Promise<KnowledgeBase>;
   shareKnowledgeBase(id: string, visibility: "private" | "organization" | "specific", userIds: string[]): Promise<KnowledgeBase>;
   listKnowledgeConversations(baseId: string): Promise<KnowledgeConversation[]>;
@@ -350,6 +351,10 @@ class HttpMeetingsService implements MeetingsService {
     return api<KnowledgeBase>("/v1/knowledge-bases", {
       method: "POST", body: JSON.stringify({ name, description: description || null }),
     });
+  }
+
+  async deleteKnowledgeBase(id: string): Promise<void> {
+    return api<void>(`/v1/knowledge-bases/${id}`, { method: "DELETE" });
   }
 
   async updateKnowledgeBase(id: string, patch: { name?: string; description?: string | null; text_profile_id?: string | null }): Promise<KnowledgeBase> {

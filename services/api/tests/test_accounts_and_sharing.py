@@ -88,6 +88,7 @@ def test_invite_requires_password_change_and_sharing_limits_member_access(tmp_pa
         member_conversation_id = member_chat.json()["conversation_id"]
         assert client.delete(f"/v1/knowledge-bases/{private_base['id']}/conversations/{member_conversation_id}").status_code == 204
         assert client.get(f"/v1/knowledge-bases/{private_base['id']}/conversations").json() == []
+        assert client.delete(f"/v1/knowledge-bases/{private_base['id']}").status_code == 409
         result = client.post("/v1/knowledge/search", json={
             "query": "roadmap", "knowledge_base_id": private_base["id"],
         })

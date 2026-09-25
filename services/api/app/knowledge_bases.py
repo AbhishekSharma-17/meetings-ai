@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 
 from meetings_contracts import Capability, MeetingStatus, MinutesStatus
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 
 from .database import (
     Database, KnowledgeBaseAccessRow, KnowledgeBaseRow, KnowledgeConversationRow, KnowledgeMessageRow, KnowledgeEmbeddingRow,
@@ -227,6 +227,35 @@ class KnowledgeBaseService:
             row.updated_at = datetime.now(UTC)
             session.flush()
             return self._public(session, row)
+
+    def delete_base(self, base_id: UUID, actor: Actor | None = None) -> None:
+        """Remove the wiki and its copies; keep meeting records but revoke opt-in."""
+        with self.database.session_factory.begin() as session:
+            row = self._row(session, base_id, actor)
+            self._require_manage(row, actor)
+            meeting_ids = session.execute(select(MeetingKnowledgeBaseRow.meeting_id).where(
+                MeetingKnowledgeBaseRow.knowledge_base_id == row.id,
+            )).scalars().all()
+            if meeting_ids:
+                session.execute(update(MeetingKnowledgeSettingsRow).where(
+                    MeetingKnowledgeSettingsRow.meeting_id.in_(meeting_ids),
+                    MeetingKnowledgeSettingsRow.organization_id == row.organization_id,
+                ).values(knowledge_enabled=False, updated_at=datetime.now(UTC)))
+            conversation_ids = session.execute(select(KnowledgeConversationRow.id).where(
+                KnowledgeConversationRow.knowledge_base_id == row.id,
+            )).scalars().all()
+            if conversation_ids:
+                session.execute(delete(KnowledgeMessageRow).where(
+                    KnowledgeMessageRow.conversation_id.in_(conversation_ids),
+                ))
+            session.execute(delete(KnowledgeConversationRow).where(KnowledgeConversationRow.knowledge_base_id == row.id))
+            session.execute(delete(KnowledgeEmbeddingRow).where(
+                KnowledgeEmbeddingRow.knowledge_base_id == row.id,
+                KnowledgeEmbeddingRow.organization_id == row.organization_id,
+            ))
+            session.execute(delete(KnowledgeBaseAccessRow).where(KnowledgeBaseAccessRow.knowledge_base_id == row.id))
+            session.execute(delete(MeetingKnowledgeBaseRow).where(MeetingKnowledgeBaseRow.knowledge_base_id == row.id))
+            session.delete(row)
 
     def assign_meeting(self, meeting_id: UUID, base_id: UUID | None) -> None:
         self.repository.get_meeting(meeting_id)

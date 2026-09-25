@@ -22,8 +22,8 @@ The current local capture slice establishes:
 - application-level organization isolation for meetings, providers, knowledge,
   workspace settings, and background MOM processing; hosted database RLS and
   production identity lifecycle are not yet complete;
-- named knowledge bases, per-base AI model choice, source-linked saved chats
-  with per-user JSON export and deletion,
+- named knowledge bases with confirmed deletion, per-base AI model choice,
+  source-linked saved chats with per-user JSON export and deletion,
   and private/organization/specific-teammate sharing;
 - provider profiles for transcription, text generation and embeddings;
 - meeting tags and opt-in AI knowledge with source-linked hybrid search and

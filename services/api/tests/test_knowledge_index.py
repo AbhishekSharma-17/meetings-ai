@@ -1,11 +1,13 @@
 """Semantic retrieval uses indexed vectors only while canonical evidence agrees."""
 
 from fastapi.testclient import TestClient
+from sqlalchemy import func, select
 from meetings_contracts import (
     EmbeddingResult, MeetingStatus, MeetingTranscriptSegment, ProviderType,
 )
 
 from app.adapters.base import ProviderExecutionError
+from app.database import KnowledgeConversationRow, KnowledgeEmbeddingRow, KnowledgeMessageRow
 from app.main import create_app
 
 
@@ -118,3 +120,39 @@ def test_index_fingerprint_rejects_edited_transcript_and_missing_provider(tmp_pa
         assert client.get(f"/v1/knowledge-bases/{base_id}/index").json()["indexed_sources"] == 1
         assert client.delete(f"/v1/provider-profiles/{profile['id']}").status_code == 204
         assert client.get(f"/v1/knowledge-bases/{base_id}/index").json()["indexed_sources"] == 0
+
+
+def test_delete_base_purges_knowledge_copies_and_preserves_meeting(tmp_path) -> None:
+    app = create_app(
+        database_url=f"sqlite+pysqlite:///{tmp_path / 'delete-base.db'}",
+        credential_key="test-credential-key",
+    )
+    app.state.profile_service.adapters[ProviderType.OPENAI] = FakeEmbeddingAdapter()
+    with TestClient(app) as client:
+        profile = client.post("/v1/provider-profiles", json={
+            "name": "Semantic model", "provider_type": "openai",
+            "execution_location": "cloud", "api_key": "test-key",
+            "capabilities": [{"capability": "embeddings", "model": "fake-embed"}],
+        }).json()
+        assert client.put("/v1/provider-defaults/embeddings", json={
+            "policy": "cloud_only", "cloud_profile_id": profile["id"],
+        }).status_code == 200
+        base_id = client.post("/v1/knowledge-bases", json={"name": "To remove"}).json()["id"]
+        meeting_id = _meeting(client, app, base_id, "Ship the new client portal.")
+        assert client.post(f"/v1/knowledge-bases/{base_id}/reindex").json()["indexed_sources"] == 1
+        saved = client.post("/v1/knowledge/chat", json={
+            "query": "unmentioned topic", "knowledge_base_id": base_id,
+        })
+        assert saved.status_code == 200
+        conversation_id = saved.json()["conversation_id"]
+        assert client.delete(f"/v1/knowledge-bases/{base_id}").status_code == 204
+        assert client.get(f"/v1/knowledge-bases/{base_id}").status_code == 404
+        assert client.get(f"/v1/knowledge-bases/{base_id}/conversations/{conversation_id}").status_code == 404
+        meeting = client.get(f"/v1/meetings/{meeting_id}")
+        assert meeting.status_code == 200
+        assert meeting.json()["knowledge_enabled"] is False
+        assert meeting.json()["knowledge_base_id"] is None
+        assert client.get(f"/v1/meetings/{meeting_id}/transcript").status_code == 200
+        with app.state.database.session_factory() as session:
+            for table in (KnowledgeEmbeddingRow, KnowledgeConversationRow, KnowledgeMessageRow):
+                assert session.execute(select(func.count()).select_from(table)).scalar_one() == 0

@@ -199,6 +199,7 @@ def create_app(
                         or (method == "GET" and path in {"/v1/workspace", "/v1/workspace/members", "/v1/workspaces"})
                         or (method == "POST" and (path == "/v1/workspaces" or re.fullmatch(r"/v1/workspaces/[0-9a-f-]+/switch", path)))
                         or (path.startswith("/v1/knowledge-bases") and method in {"GET", "POST", "PATCH"})
+                        or (method == "DELETE" and re.fullmatch(r"/v1/knowledge-bases/[0-9a-f-]+", path))
                         or (method == "DELETE" and re.fullmatch(r"/v1/knowledge-bases/[0-9a-f-]+/conversations/[0-9a-f-]+", path))
                         or (method == "PUT" and re.fullmatch(r"/v1/knowledge-bases/[0-9a-f-]+/sharing", path))
                         or (path in {"/v1/knowledge/search", "/v1/knowledge/chat"} and method == "POST")
@@ -395,6 +396,16 @@ def create_app(
             return knowledge_bases.get(base_id, request.state.actor)
         except KnowledgeBaseNotFoundError as exc:
             raise HTTPException(status_code=404, detail="knowledge base not found") from exc
+
+    @app.delete("/v1/knowledge-bases/{base_id}", status_code=204)
+    def delete_knowledge_base(base_id: UUID, request: Request) -> Response:
+        try:
+            knowledge_bases.delete_base(base_id, request.state.actor)
+        except KnowledgeBaseNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="knowledge base not found") from exc
+        except KnowledgeBaseConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return Response(status_code=204)
 
     @app.get("/v1/knowledge-bases/{base_id}/overview", response_model=KnowledgeWikiOverview)
     def get_knowledge_overview(base_id: UUID, request: Request) -> KnowledgeWikiOverview:

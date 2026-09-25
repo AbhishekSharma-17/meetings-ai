@@ -440,9 +440,14 @@ test("AI knowledge links tagged evidence to the exact transcript turn", async ({
   let searchPayload: Record<string, unknown> | null = null;
   let indexedSources = 0;
   let chatDeleted = false;
+  let baseDeleted = false;
   await page.route("**/v1/knowledge-bases**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === "/v1/knowledge-bases") return route.fulfill({ json: [base] });
+    if (pathname === `/v1/knowledge-bases/${baseId}` && route.request().method() === "DELETE") {
+      baseDeleted = true;
+      return route.fulfill({ status: 204, body: "" });
+    }
     if (pathname === `/v1/knowledge-bases/${baseId}/conversations`) return route.fulfill({ json: [] });
     if (pathname === `/v1/knowledge-bases/${baseId}/conversations/00000000-0000-4000-8000-000000000077`) {
       if (route.request().method() === "DELETE") {
@@ -525,6 +530,10 @@ test("AI knowledge links tagged evidence to the exact transcript turn", async ({
   await page.getByRole("button", { name: "Confirm delete" }).click();
   await expect(page.getByText("Saved chat deleted. Downloaded copies are not affected.")).toBeVisible();
   expect(chatDeleted).toBe(true);
+  await page.getByRole("button", { name: "Delete knowledge base" }).click();
+  await page.getByRole("button", { name: "Confirm delete base" }).click();
+  await expect(page.getByText("Knowledge base deleted. Meeting records remain, but their AI knowledge opt-in was turned off.")).toBeVisible();
+  expect(baseDeleted).toBe(true);
 });
 
 test("join failures open the durable meeting record with a retry path", async ({ page }) => {

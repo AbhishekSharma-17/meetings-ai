@@ -44,6 +44,12 @@ rows, but cannot revoke downloaded copies. Existing saved answer text is **not**
 automatically revoked on meeting opt-out; workspace retention policy and
 automated deletion remain to build.
 
+Deleting a knowledge base removes its sharing entries, index rows, and all
+saved conversations and messages in one transaction. The underlying meetings,
+transcripts, and MOMs remain, but their AI knowledge opt-in is switched off and
+the base assignment is removed. Only a base creator or workspace admin can do
+this. Downloaded copies cannot be recalled.
+
 Creators and admins can share a base with everyone in their organization or
 specific members. Members can search only accessible named bases and open only
 completed, cited meeting transcripts in those bases. Admins retain access to
