@@ -95,6 +95,44 @@ test("workspace profile can be edited", async ({ page }) => {
   await capture(page, "11-workspace-settings.png");
 });
 
+test("owner can change a member role and remove workspace access", async ({ page }) => {
+  const ownerId = "00000000-0000-4000-8000-000000000002";
+  const memberId = "00000000-0000-4000-8000-000000000088";
+  let members = [
+    { user_id: ownerId, display_name: "Workspace owner", email: "owner@example.test", role: "owner", status: "active" },
+    { user_id: memberId, display_name: "Team Member", email: "member@example.test", role: "member", status: "active" },
+  ];
+  await page.route("**/v1/workspace**", async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname === "/v1/workspace") return route.fulfill({ json: {
+      id: "00000000-0000-4000-8000-000000000001", slug: "test-workspace",
+      display_name: "Test Workspace", contact_email: null, status: "active",
+      created_at: "2026-09-24T00:00:00Z", updated_at: "2026-09-24T00:00:00Z",
+      tenant_isolation_enabled: true,
+    } });
+    if (pathname === "/v1/workspace/members") return route.fulfill({ json: members });
+    if (pathname === `/v1/workspace/members/${memberId}/role` && route.request().method() === "PATCH") {
+      const role = route.request().postDataJSON().role;
+      members = members.map((member) => member.user_id === memberId ? { ...member, role } : member);
+      return route.fulfill({ json: { ...members[1], organization_id: "00000000-0000-4000-8000-000000000001", must_change_password: false } });
+    }
+    if (pathname === `/v1/workspace/members/${memberId}` && route.request().method() === "DELETE") {
+      members = members.filter((member) => member.user_id !== memberId);
+      return route.fulfill({ status: 204, body: "" });
+    }
+    return route.fallback();
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
+  await page.getByRole("combobox", { name: "Role for Team Member" }).click();
+  await page.getByRole("option", { name: "Admin" }).click();
+  await expect(page.getByText("Member role updated.")).toBeVisible();
+  await page.getByRole("button", { name: "Remove", exact: true }).click();
+  await page.getByRole("button", { name: "Confirm remove" }).click();
+  await expect(page.getByText("Member access removed from this workspace.")).toBeVisible();
+  await expect(page.getByText("Team Member", { exact: true })).toHaveCount(0);
+});
+
 test("owner can invite a teammate and share a named knowledge base", async ({ page }) => {
   const memberId = "00000000-0000-4000-8000-000000000088";
   const baseId = "00000000-0000-4000-8000-000000000066";
@@ -145,7 +183,7 @@ test("owner can invite a teammate and share a named knowledge base", async ({ pa
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
   await page.getByLabel("Name", { exact: true }).fill("Team Member");
   await page.getByLabel("Work email").fill("teammate@example.com");
-  await page.getByRole("button", { name: "Generate temporary password" }).click();
+  await page.getByRole("button", { name: "Add teammate" }).click();
   await expect(page.getByText("one-time-test-password")).toBeVisible();
   await expect(page.getByText("Team Member", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "AI knowledge" }).click();

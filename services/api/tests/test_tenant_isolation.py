@@ -187,6 +187,7 @@ def test_owner_can_create_and_switch_workspace_without_data_leaking(tmp_path, mo
         assert added.status_code == 201
         assert added.json()["temporary_password"] is None
         assert added.json()["account"]["user_id"] == teammate.json()["account"]["user_id"]
+        assert client.post(f"/v1/workspace/members/{teammate.json()['account']['user_id']}/temporary-password").status_code == 409
         assert client.post("/v1/workspace/invite", json={
             "email": "teammate@example.test", "display_name": "Team Mate", "role": "viewer",
         }).status_code == 409
@@ -209,3 +210,8 @@ def test_owner_can_create_and_switch_workspace_without_data_leaking(tmp_path, mo
             assert {item["id"] for item in options} == {original, second}
             assert member.post(f"/v1/workspaces/{second}/switch").json()["role"] == "viewer"
             assert member.get("/v1/workspace").json()["id"] == second
+            assert member.post("/v1/auth/change-password", json={
+                "current_password": "replacement-password-for-test",
+                "new_password": "another-replacement-password-for-test",
+            }).status_code == 200
+            assert member.get("/v1/auth/me").json()["organization_id"] == second

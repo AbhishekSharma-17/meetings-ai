@@ -18,7 +18,7 @@ The current local capture slice establishes:
 - per-meeting internal recipients, optional participant opt-in, and recap delivery through Resend;
 - local owner and teammate email/password accounts, admin-generated one-time
   temporary passwords, first-login rotation, workspace creation/switching,
-  and knowledge-specific access;
+  role changes, immediate workspace removal, and knowledge-specific access;
 - application-level organization isolation for meetings, providers, knowledge,
   workspace settings, and background MOM processing; hosted database RLS and
   production identity lifecycle are not yet complete;

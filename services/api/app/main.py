@@ -43,7 +43,7 @@ from .adapters.vexa import VexaAPIError, VexaCaptureAdapter
 from .adapters.resend import EmailDeliveryError, ResendAdapter
 from .adapters.base import ProviderExecutionError
 from .database import Database, SchemaVersionRow, LEGACY_ADMIN_USER_ID, LEGACY_ORGANIZATION_ID
-from .accounts import AccountError, AccountPublic, AccountService, Actor, ChangePasswordRequest, InviteRequest, InviteResult, OrganizationCreateRequest, OrganizationOption
+from .accounts import AccountError, AccountPublic, AccountService, Actor, ChangePasswordRequest, InviteRequest, InviteResult, MemberRolePatch, OrganizationCreateRequest, OrganizationOption
 from .meeting_service import MeetingConflictError, MeetingService, MeetingValidationError
 from .knowledge_service import KnowledgeAccessError, KnowledgeAnswerError, KnowledgeChatResponse, KnowledgeQuery, KnowledgeSearchResponse, KnowledgeService
 from .knowledge_bases import KnowledgeBaseConflictError, KnowledgeBaseCreate, KnowledgeBaseNotFoundError, KnowledgeBasePatch, KnowledgeBasePublic, KnowledgeBaseService, KnowledgeConversationPublic, KnowledgeShareRequest, KnowledgeWikiOverview
@@ -338,6 +338,21 @@ def create_app(
             return accounts.reset_temporary_password(request.state.actor, user_id)
         except AccountError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.patch("/v1/workspace/members/{user_id}/role", response_model=AccountPublic)
+    def change_member_role(user_id: UUID, payload: MemberRolePatch, request: Request) -> AccountPublic:
+        try:
+            return accounts.change_member_role(request.state.actor, user_id, payload)
+        except AccountError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.delete("/v1/workspace/members/{user_id}", status_code=204)
+    def remove_member(user_id: UUID, request: Request) -> Response:
+        try:
+            accounts.remove_member(request.state.actor, user_id)
+        except AccountError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return Response(status_code=204)
 
     @app.get("/v1/workspace", response_model=WorkspacePublic)
     def get_workspace() -> WorkspacePublic:

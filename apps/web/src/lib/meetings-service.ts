@@ -7,6 +7,8 @@ export interface MeetingsService {
   changePassword(currentPassword: string, newPassword: string): Promise<void>;
   inviteMember(email: string, displayName: string, role: "admin" | "member" | "viewer"): Promise<InviteResult>;
   resetMemberPassword(userId: string): Promise<InviteResult>;
+  changeMemberRole(userId: string, role: CurrentAccount["role"]): Promise<CurrentAccount>;
+  removeMember(userId: string): Promise<void>;
   logout(): Promise<void>;
   getWorkspace(): Promise<Workspace>;
   listWorkspaces(): Promise<WorkspaceOption[]>;
@@ -281,6 +283,16 @@ class HttpMeetingsService implements MeetingsService {
 
   async resetMemberPassword(userId: string): Promise<InviteResult> {
     return api<InviteResult>(`/v1/workspace/members/${userId}/temporary-password`, { method: "POST" });
+  }
+
+  async changeMemberRole(userId: string, role: CurrentAccount["role"]): Promise<CurrentAccount> {
+    return api<CurrentAccount>(`/v1/workspace/members/${userId}/role`, {
+      method: "PATCH", body: JSON.stringify({ role }),
+    });
+  }
+
+  async removeMember(userId: string): Promise<void> {
+    await api<void>(`/v1/workspace/members/${userId}`, { method: "DELETE" });
   }
 
   async logout(): Promise<void> {

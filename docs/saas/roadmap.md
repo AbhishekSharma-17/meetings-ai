@@ -9,7 +9,7 @@ testing is deferred. Billing or signup must not be enabled before isolation.
 | 0. Core meeting workflow | Bot dispatch, transcript, reviewed MOM, manual delivery | Persisted meeting and credential records | Built locally; live outcomes still need validation |
 | 1. Workspace foundation | Edit organization profile, see people and roles | Organization, user, membership and credential records | Built locally |
 | 2. Tenant isolation | Private organization data | Ownership records for meetings/providers, organization defaults, scoped API/worker and knowledge queries, cross-tenant denial tests | Application API boundary and workspace create/switch built; hosted RLS remains |
-| 3. Accounts and roles | Email/password login, admin-generated temporary passwords, first-login rotation and owner/admin/member/viewer boundaries | Local sessions, database-backed sign-in throttling and payload-free workspace audit are built; external OIDC and full lifecycle controls remain | Partial |
+| 3. Accounts and roles | Email/password login, admin-generated temporary passwords, first-login rotation and owner/admin/member/viewer boundaries | Local sessions, sign-in throttling, audit, role changes and membership removal are built; external OIDC and invitation acceptance remain | Local lifecycle built; production identity pending |
 | 4. Team operations | Calendar scheduling, shared templates, delivery policies, retention controls | Durable queue, policy enforcement, deletion/export, observability and backups | Planned |
 | 5. Agentic knowledge | Named bases, meeting assignment, private/org/specific sharing, saved chats, selectable text model, source-linked Q&A | Current retrieval reads canonical records; semantic indexing, re-index/delete, query planning and linked topic pages remain | Source-linked lexical workflow built; deeper agent planned |
 | 6. Commercial SaaS | Plans, usage visibility, billing, self-serve setup | Metered usage, quotas, payment webhooks, dunning, tax/invoicing choices | Planned; no gateway selected |
@@ -28,9 +28,11 @@ The workspace contact email is metadata only. It does not alter the Resend
 sender or recipients. Local account roles gate admin routes and knowledge
 sharing inside their organization. Users can create/switch workspaces from the
 profile menu, and an existing account can be added to another workspace without
-replacing its password. The local password system still needs a production
-identity lifecycle, membership removal/role editing, and hosted RLS tests before
-public customer onboarding.
+replacing its password. Owners can promote other owners/admins, admins can
+manage members/viewers, and removal immediately invalidates that workspace's
+active session. Cross-workspace accounts cannot have their global password
+reset by a single workspace's admin. The local password system still needs a
+production identity lifecycle and hosted RLS tests before public onboarding.
 
 Do not connect a public Supabase project or expose its tables until grants and
 RLS policies are written and tested for two tenants. Keep the FastAPI policy

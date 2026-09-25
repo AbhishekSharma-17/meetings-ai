@@ -11,10 +11,10 @@ from hashlib import scrypt
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from .database import (
-    Database, LEGACY_ADMIN_USER_ID, LEGACY_ORGANIZATION_ID,
+    Database, KnowledgeBaseAccessRow, KnowledgeBaseRow, LEGACY_ADMIN_USER_ID, LEGACY_ORGANIZATION_ID,
     OrganizationMembershipRow, OrganizationRow, UserCredentialRow, UserRow,
 )
 
@@ -85,6 +85,17 @@ class InviteResult(BaseModel):
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str = Field(min_length=12, max_length=200)
+
+
+class MemberRolePatch(BaseModel):
+    role: str
+
+    @field_validator("role")
+    @classmethod
+    def allowed_role(cls, value: str) -> str:
+        if value not in {"owner", "admin", "member", "viewer"}:
+            raise ValueError("role must be owner, admin, member, or viewer")
+        return value
 
 
 class OrganizationCreateRequest(BaseModel):
@@ -207,6 +218,8 @@ class AccountService:
     def invite(self, requester: Actor, data: InviteRequest) -> InviteResult:
         if not requester.is_admin:
             raise AccountError("only admins can invite people")
+        if data.role == "admin" and requester.role != "owner":
+            raise AccountError("only an owner can assign an admin role")
         now = datetime.now(UTC)
         with self.database.session_factory.begin() as session:
             existing = session.execute(select(UserRow).where(func.lower(UserRow.email) == data.email)).scalar_one_or_none()
@@ -261,6 +274,13 @@ class AccountService:
             credential = session.get(UserCredentialRow, str(user_id))
             if user is None or membership is None or credential is None:
                 raise AccountError("member not found")
+            if membership.role == "owner" or (membership.role == "admin" and requester.role != "owner"):
+                raise AccountError("you cannot reset this member's password")
+            membership_count = session.execute(select(func.count()).select_from(OrganizationMembershipRow).where(
+                OrganizationMembershipRow.user_id == str(user_id)
+            )).scalar_one()
+            if membership_count != 1:
+                raise AccountError("password reset is unavailable for accounts in multiple workspaces")
             credential.password_hash = _hash_password(temporary)
             credential.must_change_password = True
             credential.session_version += 1
@@ -289,7 +309,59 @@ class AccountService:
             credential.updated_at = datetime.now(UTC)
             user.status = "active"
             user.updated_at = credential.updated_at
-            return self._actor(session, user, credential)
+            return self._actor(session, user, credential, actor.organization_id)
+
+    def change_member_role(self, requester: Actor, user_id: UUID, data: MemberRolePatch) -> AccountPublic:
+        with self.database.session_factory.begin() as session:
+            membership = self._managed_membership(session, requester, user_id)
+            if data.role in {"owner", "admin"} and requester.role != "owner":
+                raise AccountError("only an owner can assign an admin or owner role")
+            if membership.role == "owner" and data.role != "owner":
+                self._require_another_owner(session, requester.organization_id)
+            membership.role = data.role
+            user = session.get(UserRow, str(user_id))
+            credential = session.get(UserCredentialRow, str(user_id))
+            if user is None or credential is None:
+                raise AccountError("member account is unavailable")
+            return self.public(self._actor(session, user, credential, requester.organization_id))
+
+    def remove_member(self, requester: Actor, user_id: UUID) -> None:
+        with self.database.session_factory.begin() as session:
+            membership = self._managed_membership(session, requester, user_id)
+            if membership.role == "owner":
+                self._require_another_owner(session, requester.organization_id)
+            session.execute(delete(KnowledgeBaseAccessRow).where(
+                KnowledgeBaseAccessRow.user_id == str(user_id),
+                KnowledgeBaseAccessRow.knowledge_base_id.in_(
+                    select(KnowledgeBaseRow.id).where(KnowledgeBaseRow.organization_id == str(requester.organization_id))
+                ),
+            ))
+            session.delete(membership)
+
+    @staticmethod
+    def _managed_membership(session, requester: Actor, user_id: UUID) -> OrganizationMembershipRow:
+        if not requester.is_admin:
+            raise AccountError("only admins can manage people")
+        if requester.user_id == user_id:
+            raise AccountError("you cannot change your own membership")
+        session.execute(select(OrganizationRow).where(
+            OrganizationRow.id == str(requester.organization_id)
+        ).with_for_update()).scalar_one()
+        membership = session.get(OrganizationMembershipRow, (str(requester.organization_id), str(user_id)))
+        if membership is None:
+            raise AccountError("member not found")
+        if membership.role in {"owner", "admin"} and requester.role != "owner":
+            raise AccountError("only an owner can manage admins and owners")
+        return membership
+
+    @staticmethod
+    def _require_another_owner(session, organization_id: UUID) -> None:
+        owners = session.execute(select(func.count()).select_from(OrganizationMembershipRow).where(
+            OrganizationMembershipRow.organization_id == str(organization_id),
+            OrganizationMembershipRow.role == "owner",
+        )).scalar_one()
+        if owners <= 1:
+            raise AccountError("a workspace must retain at least one owner")
 
     @staticmethod
     def public(actor: Actor) -> AccountPublic:
