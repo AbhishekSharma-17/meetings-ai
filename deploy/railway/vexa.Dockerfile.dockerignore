@@ -1,0 +1,7 @@
+# This image is only four patched Python files atop the pinned upstream image.
+# Never upload app secrets, recordings, node_modules, or the rest of the Vexa tree.
+**
+!vendor/vexa/core/gateway/services/gateway/src/gateway/app.py
+!vendor/vexa/core/meetings/services/meeting-api/src/meeting_api/bot_spawn/router.py
+!vendor/vexa/core/meetings/services/meeting-api/src/meeting_api/bot_spawn/service.py
+!vendor/vexa/core/meetings/services/meeting-api/src/meeting_api/bot_spawn/signed_stt.py
