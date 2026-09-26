@@ -1,6 +1,12 @@
-# This image is only four patched Python files atop the pinned upstream image.
+# This image includes four patched Python files and redistribution notices.
 # Never upload app secrets, recordings, node_modules, or the rest of the Vexa tree.
 **
+!LICENSE
+!NOTICE
+!THIRD_PARTY_NOTICES.md
+!vendor/vexa/LICENSE
+!vendor/vexa/THIRD_PARTY_LICENSES.md
+!vendor/vexa/licenses/**
 !vendor/vexa/core/gateway/services/gateway/src/gateway/app.py
 !vendor/vexa/core/meetings/services/meeting-api/src/meeting_api/bot_spawn/router.py
 !vendor/vexa/core/meetings/services/meeting-api/src/meeting_api/bot_spawn/service.py

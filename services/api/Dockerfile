@@ -11,6 +11,7 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 COPY packages/contracts /app/packages/contracts
 COPY services/api /app/services/api
+COPY LICENSE NOTICE THIRD_PARTY_NOTICES.md /app/licenses/meetings-ai/
 COPY apps/web/public/brand/meetings-ai-avatar-1024.png /app/brand/meetings-ai-avatar-1024.png
 
 EXPOSE 8000

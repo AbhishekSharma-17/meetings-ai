@@ -1,0 +1,20 @@
+Meetings AI
+Copyright 2026 GenAI Protos and Meetings AI contributors.
+
+Original Meetings AI material is provided under the Apache License, Version 2.0.
+See LICENSE. This notice is informational and does not modify that license.
+
+This project uses Vexa, an Apache-2.0-licensed meeting capture project:
+https://github.com/Vexa-ai/vexa
+Copyright and attribution for Vexa remain with its respective contributors.
+The pinned Meetings AI fork is maintained at:
+https://github.com/AbhishekSharma-17/vexa
+
+The vendor/vexa submodule retains its upstream LICENSE, third-party notices,
+and component license files. Meetings AI modifications to that fork include
+signed per-bot transcription configuration, gateway capability reporting,
+tests, and local deployment adjustments. See THIRD_PARTY_NOTICES.md.
+
+Other libraries, container contents, models and provider marks remain subject
+to their respective licenses or terms. No endorsement by the Apache Software
+Foundation, Vexa, or the named service providers is implied.

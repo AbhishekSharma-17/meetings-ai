@@ -1,291 +1,179 @@
 # Meetings AI
 
-Meetings AI is a provider-agnostic meeting agent built around a pinned Vexa capture subsystem. The product will join Google Meet, Zoom and Microsoft Teams, produce a versioned transcript and evidence-backed MOM, deliver approved recaps, and compile governed organizational knowledge.
+<img src="apps/web/public/brand/meetings-ai-avatar-1024.png" alt="Meetings AI logo" width="96" />
 
-## Current implementation slice
+**Turn meetings into reviewed minutes, actionable follow-ups, and searchable team knowledge.**
 
-The current local capture slice establishes:
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Product API](https://github.com/AbhishekSharma-17/meetings-ai/actions/workflows/api.yml/badge.svg)](https://github.com/AbhishekSharma-17/meetings-ai/actions/workflows/api.yml)
+[![Web UI](https://github.com/AbhishekSharma-17/meetings-ai/actions/workflows/web-ui.yml/badge.svg)](https://github.com/AbhishekSharma-17/meetings-ai/actions/workflows/web-ui.yml)
 
-- the product web application and manual meeting journey;
-- a FastAPI product API with PostgreSQL persistence;
-- product meeting creation, Vexa bot dispatch, lifecycle refresh and idempotent stop;
-- exact-meeting transcript reads with a durable cached fallback;
-- stable segment IDs, upstream speaker provenance, and persistent per-turn speaker corrections;
-- separate invitee and heard-speaker views, with explicit speaker-to-email confirmation;
-- automatic post-meeting MOM drafting through the selected text-generation provider;
-- evidence-linked speaker contributions, questions asked, and action items in the MOM;
-- persisted human review, explicit approval, and sent-version locking;
-- per-meeting internal recipients, optional participant opt-in, and recap delivery through Resend;
-- local owner and teammate email/password accounts, admin-generated one-time
-  temporary passwords, first-login rotation, workspace creation/switching,
-  self-service display names and passwords, role changes, immediate workspace
-  removal, and knowledge-specific access;
-- application-level organization isolation for meetings, providers, knowledge,
-  workspace settings, and background MOM processing; hosted database RLS and
-  production identity lifecycle are not yet complete;
-- named knowledge bases with confirmed deletion, per-base AI model choice,
-  source-linked saved chats with per-user JSON export and deletion,
-  and private/organization/specific-teammate sharing;
-- an evidence map of literal topics and speaker labels linked to exact transcript
-  turns, distinguishing confirmed email identities from unverified labels;
-- provider profiles for transcription, text generation and embeddings;
-- meeting tags and opt-in AI knowledge with source-linked hybrid search and
-  draft Q&A through the configured text-generation provider;
-- Vexa-native, OpenAI and OpenAI-compatible provider boundaries;
-- write-only credential handling and capability validation;
-- a pinned local Vexa `v0.12.27` checkout for the ARM64 Lite witness path.
-- terminal-meeting deletion that requests Vexa artifact erasure before removing
-  the product transcript, MOM, indexed copies, and chats citing the meeting;
-- independent deletion of an unsent MOM draft or approval while retaining its
-  transcript; sent recaps require deleting the full meeting record;
-- durable, retryable background knowledge indexing, linked wiki meetings by
-  explicit tags or confirmed speakers, and bounded query planning for complex
-  Ask AI questions;
-- workspace-scoped operations counts and opt-in retention policies for old
-  meetings, saved chats, and audit events (off by default).
-- per-user, read-only Google Calendar and Outlook Calendar connections through
-  Composio; review supported meeting links from today, tomorrow, this week,
-  or next week before creating a capture;
-- scheduled assistant joins for selected future calendar events, with durable
-  status and cancellation. The local scheduler runs in one API process; it
-  does not auto-send a recap or enroll everyone on a calendar invitation.
-- persisted per-user calendar snapshots across multiple Google, Outlook,
-  Calendly, and Zoom accounts, with a month view, source labels, custom 1–90
-  day syncs, attendee details, and manual resync;
-- an organization briefing profile and PDF, DOCX, Markdown, or text documents
-  as private meeting-prep context, combined with optionally cited public
-  research and a configurable synthesis provider.
+Meetings AI is a self-hostable, provider-agnostic meeting workspace maintained by GenAI Protos and contributors. It combines a Next.js interface, a FastAPI API, PostgreSQL persistence, and a pinned [Vexa](https://github.com/Vexa-ai/vexa) capture subsystem.
 
-The Vexa capture and OpenAI MOM paths are active locally. Resend delivery is wired
-to the approved-MOM workflow. The API exposes `GET /v1/integrations/resend/status`
-and the MOM screen shows whether an API key and sender are configured. A configured
-sender does **not** prove domain verification: Resend must accept a real send.
-The app no longer silently falls back to `onboarding@resend.dev`; set
-`RESEND_FROM_EMAIL` explicitly. Approved-MOM sends carry a deterministic
-idempotency key to avoid duplicate provider sends during retries. The recap uses
-an HTML and plain-text template; the logo is an inline image. When the sender
-chooses to include the transcript, it is attached as a timestamped Markdown
-file rather than appended to the message body. Internal segment IDs are kept
-out of the recipient-facing recap.
+Connect meeting sources, schedule an assistant, review a timestamped transcript, approve an evidence-backed recap, and build shared knowledge from selected meetings. Cloud AI providers are optional choices, not hardcoded requirements; compatible and local transcription routes remain supported.
 
-For a local email witness, configure a Resend key from the account that owns the
-sending domain, set `RESEND_FROM_EMAIL`, restart the API, then review and approve
-a MOM and send it to an address you control. A send-only Resend key cannot manage
-or inspect domains. The current local sender is `meetings@genaiprotos.com`, and
-the API uses a domain-scoped send-only key in the ignored `.env.local` file. On
-2026-09-23, the product sent an approved MOM to `abhishek@genaiprotos.com`;
-Resend reported it delivered. The domain still has a failed click-tracking CNAME
-record, which should be fixed before relying on click tracking. The `meetings@`
-address is a sender on the verified root domain, not a separate mailbox; Resend
-receiving is disabled for this domain, so replies need a separately configured
-inbox or reply-to route.
-All provider credentials belong in the ignored local secret file and must be rotated
-if they have appeared in a chat or task transcript.
+[Quick start](#quick-start) · [Configuration](#configuration) · [Deployment](docs/deployment/self-hosting.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Attribution](THIRD_PARTY_NOTICES.md)
 
-See the [local capture verification record](docs/status/2026-09-09-capture-mvp.md)
-for the exact checks already passed and the next incomplete slices.
-The [build roadmap](docs/roadmap.md) tracks the remaining live validation,
-runtime integration, UI/UX work, and later SaaS features.
+## Capabilities
 
-## Provider model
+| Area | Available in the application |
+| --- | --- |
+| Meeting capture | Manual meeting links, Vexa dispatch, lifecycle controls, scheduled calendar joins, durable records |
+| Transcript review | Timestamped turns, speaker corrections, explicit speaker-to-email confirmation, export |
+| Minutes and follow-up | Automatic post-capture drafts, selectable formats and focus fields, review, approval, delivery retries |
+| Email | Branded Resend recaps, internal recipients, explicit participant opt-in, optional Markdown transcript attachment |
+| Meeting sources | Multiple Google Calendar, Outlook, Calendly and Zoom connections, account aliases/disconnect, saved calendar snapshots |
+| Team workspaces | Email/password accounts, memberships and roles, invitations, first-login password change, workspace switching |
+| AI configuration | Named transcription, text-generation and embedding profiles, encrypted server-side credentials, model selection |
+| Knowledge | Named bases, explicit opt-in, sharing controls, source-linked wiki views, saved chat and streaming answer endpoint |
+| Meeting preparation | Company profile, uploaded context documents, optional public research and saved briefings |
+| Operations | Audit/job views, retention controls, token usage and explicitly estimated costs |
 
-Provider selection is exposed in the product. Text generation uses the selected
-provider for MOM drafts and knowledge answers. A selected transcription profile
-is signed into the next Vexa bot run; existing bots retain their prior route.
-Embeddings are configurable, and the OpenAI/OpenAI-compatible batch runtime can
-build a manually refreshed index for each named knowledge base. Without an index,
-search remains lexical. Indexed results are checked against current meeting
-records before use; this is not yet a background or large-scale vector service.
+### Scope and readiness
 
-- Transcription, text generation and embeddings have separate provider profiles.
-- Profiles declare capabilities such as streaming, timestamps, diarization, structured output and tool calling.
-- MOM drafts record the text-generation profile and model that produced them.
-- Credentials are resolved only on the server and are never returned by the settings API.
-- Text-generation fallback follows an explicit selected policy. A local route
-  does not silently forward meeting content to a cloud provider.
+This repository contains a working application and deployment configuration, not a guarantee of production readiness for every environment.
 
-See [ADR 0001](docs/adr/0001-provider-agnostic-ai.md).
+- Meet, Zoom and Teams capture depends on platform admission rules, the selected Vexa runtime and host resources. Each platform needs a consented live acceptance test.
+- Speaker labels are best-effort capture attribution, not verified identity. Review corrections and confirm email mappings before relying on named claims.
+- Invitees are not verified attendees. Email is sent only after explicit review/approval and a send action; calendar sync does not automatically email invitees.
+- Semantic retrieval currently stores embedding arrays as JSON in PostgreSQL and scores them in the API. Installing the vector extension does not make this pgvector-indexed search.
+- The linked wiki combines canonical meeting evidence, explicit relationships and bounded search planning. It is not a fully generated entity graph or unlimited-memory agent.
+- Application tenant checks exist; hosted database RLS, comprehensive security/tenant acceptance, account recovery/SSO, distributed jobs and billing remain open work.
+- Automated/mocked tests do not establish OAuth consent, diarization quality, live email delivery or retrieval accuracy.
+- Current workers require a single API replica. Review the deployment release gates before scaling.
 
-## Local prerequisites
+See [acceptance checks](docs/validation/mvp-acceptance.md) and the [deployment checklist](docs/deployment/self-hosting.md#release-checklist). Some historical status documents describe older snapshots; inspect current code when they disagree.
 
-- Docker 28+
-- Node.js 22+
-- Python 3.12+
-- A host capable of reaching the selected meeting and AI providers
-
-This development host is ARM64. The standard Vexa bot image is AMD64-only; the initial witness uses Vexa Lite, which supports ARM64 and is best limited to one browser bot at a time.
-For local development, `make vexa-up` uses the local
-`Systran/faster-whisper-small.en` CPU model by default. Set
-`VEXA_STT_MODE=remote` in the ignored `.env.local` file to instead use the
-`TRANSCRIPTION_SERVICE_URL`, `_TOKEN`, and `TRANSCRIPTION_MODEL` values in the
-ignored `vendor/vexa/.env` file. The current local remote route is OpenRouter's
-`microsoft/mai-transcribe-2`; it was checked with a short synthetic audio clip,
-not a live multi-speaker meeting. The previous local Whisper containers remain
-available for rollback. The matching OpenRouter transcription profile is saved
-as the product default. Changing that default now routes the next bot through
-the selected profile; existing bots keep their current route. STT text accuracy
-does not guarantee correct speaker attribution; use the human-reviewed transcript
-and the multi-speaker evaluation.
-
-The custom local Vexa fork now accepts a signed, five-minute per-bot STT route.
-When a transcription profile is selected, Meetings AI sends its endpoint,
-model, and server-side credential together for the next bot only; Vexa must
-advertise this capability and attest the selected profile in its join response.
-Existing bots keep their invocation route. Set one random
-`VEXA_STT_OVERRIDE_SECRET` in the ignored `.env.local`; `make vexa-up` passes it
-to Vexa Lite and Compose passes it to the product API. Without it, a selected
-profile blocks joining rather than silently falling back. No selected profile
-still uses Vexa's deployment STT default. This route has automated coverage,
-but needs a real meeting witness. See [capture acceptance](docs/validation/mvp-acceptance.md).
-
-## Secrets
-
-Copy `.env.example` to `.env.local` and insert newly rotated credentials there. Do not paste credentials into source files, commits, issues or task transcripts. See [the secrets runbook](docs/security/secrets.md).
-`make compose-up` automatically loads `.env.local` when it exists.
-The local Compose stack enables the post-meeting draft worker and owner login.
-Set `MEETINGS_AI_ADMIN_EMAIL`, `MEETINGS_AI_ADMIN_PASSWORD`, and a distinct
-`MEETINGS_AI_SESSION_SECRET` in `.env.local`. The admin password seeds the
-PostgreSQL owner account only if it has no credential; changing the password
-in the UI does not make an older `.env.local` value valid again. On this host
-the existing password is in the ignored `.env.local`; do not paste it into
-chat. Open `http://localhost:3020` and sign in with the admin email and that
-password. In Workspace, an admin can add teammates. When Resend is configured,
-an invitation email contains a one-time temporary password and sign-in link;
-otherwise the password is shown to the admin once for private sharing. New
-users must change it before accessing the app.
-After a meeting finishes, a background
-poller finalizes the transcript and drafts the MOM. It never sends an email
-automatically: review, approve, and click **Send recap** to deliver. The worker
-only auto-processes meetings created after this feature was enabled; older records
-retain manual MOM generation. It is currently single-process;
-multi-replica deployment requires a queued worker.
-If automatic drafting fails, the meeting screen shows the error and offers an
-immediate retry after capture completes. A sent recap is locked; a future
-versioned correction workflow is required to change it without losing the
-record of what recipients received.
-
-Speaker attribution is best-effort from Vexa, not guaranteed identity recognition.
-An unknown or technical speaker label stays **Unidentified speaker** until reviewed.
-The UI shows the capture label, lets an admin correct one turn or all turns with
-the same label, and keeps those corrections when the transcript refreshes. Named
-MOM claims cite exact transcript segments; changing the transcript or a speaker
-invalidates approval until the MOM is regenerated. Invitee emails are never
-automatically matched to voices or added to recap recipients. A confirmed
-speaker-email mapping is separate from the explicit recap delivery setting.
-For a multi-speaker acceptance test, label the actual speaker for each segment
-in a JSON file and run `python3 scripts/speaker_eval.py transcript.json reference.json`.
-Use **Download transcript JSON** in the meeting view, then create a reference
-file such as `{"segment-id-1":"Alice","segment-id-2":"Bob"}` from a human
-review of the audio. Keep both files private: they contain meeting content and
-identity information.
-The report measures turn-level speaker attribution—not audio diarization error
-rate—and should be reviewed alongside the audio and MOM evidence links.
-
-Database startup applies additive schema steps 3 → 21 and preserves existing
-rows. It refuses an unversioned, future, or incomplete schema instead of
-silently stamping it current. `/health` is process liveness; `/ready` verifies
-the database and current schema and is used by Compose. Back up PostgreSQL
-before any future schema upgrade. In `APP_ENV=production`, startup also rejects
-development credentials, SQLite, an HTTP web origin, and missing Vexa/STT
-secrets; see [non-live readiness](docs/validation/nonlive-readiness.md).
-The **Workspace** screen stores the current organization's profile and shows
-members, roles, and account status. Admins can create or reset temporary
-passwords. Members can see only shared knowledge bases and completed cited
-transcripts; provider and meeting management remain admin-only. API records are
-scoped to the signed-in organization, with a two-organization denial test.
-Self-serve organization creation, switching, hosted RLS, and public signup are
-not built; see the [SaaS build sequence](docs/saas/roadmap.md).
-
-The **AI knowledge** screen supports named client/project knowledge bases,
-meeting assignment, tags, and explicit opt-in. Search reads finalized
-transcript turns and approved/sent MOM facts; Ask AI drafts source-linked
-answers through either a per-base text profile or the workspace default.
-Chats inside a named base are saved per user. A creator or admin can keep a
-base private, share it with this organization, or choose specific teammates.
-The meeting page can edit tags, assignment, and opt-in. A base creator or admin
-can manually reindex for hybrid lexical/semantic search; changes to canonical
-records purge that meeting's stored vectors until reindexed. The evidence map
-links literal tags and speaker labels to timestamped turns. A model-inferred
-topic graph, planning agent, background indexing, saved-chat retention policy,
-and measured retrieval quality remain to build. See the
-[knowledge flow and limits](docs/knowledge/architecture.md).
-Do not expose this as a public multi-customer SaaS before hosted database
-policies, account lifecycle, and security hardening are complete.
-
-## Calendar discovery
-
-For the current hosted service layout and deployment checks, see the
-[Railway runbook](docs/deployment/railway.md).
-
-Set `COMPOSIO_API_KEY`, `COMPOSIO_GOOGLE_CALENDAR_AUTH_CONFIG_ID`, and
-`COMPOSIO_OUTLOOK_AUTH_CONFIG_ID` in the ignored `.env.local`; Compose passes
-them only to the API. Auth configurations should request calendar read-only
-scopes and restrict tools to event listing. Set `APP_BASE_URL` to the deployed
-HTTPS app origin in production. In local development the connect action uses
-the browser-visible `localhost` port, including a forwarded port on another
-device, instead of assuming the DGX's `localhost:3020` is reachable from that
-browser. Run `make compose-up`, sign in, and open **Calendar**. Its
-**Integrations** tab shows connected accounts; the calendar displays the last
-saved snapshot and supports manual sync for a custom range of up to 90 days.
-Snapshots are stored per user and workspace in the application database, so
-meetings remain visible after a hard reload or browser restart. The Calendar
-remembers each user's date range, account filter, and selected month locally;
-the current Calendar/Meeting prep section is also restored on a tab reload.
-Previously synced accounts refresh in the background when their snapshot is
-older than five minutes or the selected date range was not covered. A failed
-refresh leaves the saved snapshot visible and reports the error. New accounts
-still need their first explicit sync, and **Sync now** forces an immediate
-update.
-Multiple accounts can be synced together, and overlapping events retain
-separate source labels. Each user connects their own account and explicitly
-chooses an event. Discovery skips cancelled and unsupported-link events.
-Outlook Calendar supplies Teams join links in event data; a separate Teams
-connection is not needed for those calendar events. Zoom scans currently
-return upcoming hosted meetings only, not historical ones. Future events
-create a scheduled record; the single-process worker joins about one minute
-before the start, unless the join is cancelled. It marks meetings missed
-instead of joining after a long outage. Meetings starting immediately use the
-existing manual join flow. Live provider consent and event scans still need
-validation with real connected accounts.
-
-In **Organization & people**, admins can save company overview, services,
-products, positioning, website, and documents. The sidebar's dedicated
-**Meeting prep** section lists upcoming synced events; Calendar's **Prepare
-for meeting** action opens the same workspace with an event selected. It adds
-target-company hints, public profile links, and a manual objective. With
-public research enabled, a configured OpenAI text profile uses the Responses
-web-search tool; final synthesis may use any configured text provider. Private
-company documents are sent only to the synthesis provider, never to web
-search. Saved briefings link public claims to source URLs. Scanned PDFs need
-OCR before upload. Meeting retention also removes old calendar snapshots and
-their prep reports; company documents require manual deletion. Web-search
-tool charges are not included in token-only cost estimates.
-
-The calendar integration has no mailbox access, Gmail inbox scanning, or
-automatic attendee-email delivery. The selected calendar event is re-read by
-the server before scheduling, so the browser cannot substitute its own link.
-
-## Source layout
+## Architecture
 
 ```text
-apps/web/                 Next.js product UI
-services/api/             FastAPI product API
-services/api/app/post_meeting_worker.py  single-process draft reconciler
-services/worker/          queued workflows (production slice)
-services/stt-bridge/      provider-normalized audio boundary (next slice)
-packages/contracts/       application-owned provider and meeting schemas
-packages/email-templates/ reusable branded templates (later slice)
-integrations/             Vexa, provider and email adapters
-vendor/vexa/              pinned public Meetings AI fork/submodule
+Browser → Next.js web → same-origin /v1 proxy → FastAPI API → PostgreSQL
+                                                ├─ Vexa → meeting platform / STT
+                                                ├─ selected generation / embedding provider
+                                                ├─ Composio → connected meeting sources
+                                                └─ Resend → approved email delivery
 ```
 
-## Vexa pin
+The API owns access checks, credential resolution and provider calls. The browser never receives integration keys or private service URLs. Vexa receives a short-lived signed transcription route for each new bot; changing defaults does not switch an active capture.
 
-- Tag: `v0.12.27`
-- Upstream base commit: `cbaf88c6530d5e41368fc2df80e33c53240bd49e`
-- Local Meetings AI fork commit: `1a8084e9a7f57a79902ed9bad9ae3b5c11c01e10`
-- Upstream: <https://github.com/Vexa-ai/vexa>
+| Directory | Purpose |
+| --- | --- |
+| `apps/web/` | Next.js, React and TypeScript interface |
+| `services/api/` | FastAPI, SQLAlchemy, integrations and in-process workers |
+| `packages/contracts/` | Provider and meeting contracts |
+| `vendor/vexa/` | Pinned capture fork; independent upstream license and notices |
+| `deploy/railway/` | Railway Vexa overlay |
+| `docs/` | Architecture, deployment, security and validation guides |
+| `scripts/` | Supporting evaluation scripts |
+| `supabase/` | Supporting scaffolding; not a required hosting service |
 
-Meetings AI fork: <https://github.com/AbhishekSharma-17/vexa>. The custom
-revision is published on the `meetings-ai-integration` branch and the product
-submodule points to that exact commit. Clone this repository with submodules.
+## Quick start
+
+### Prerequisites
+
+- Git with submodules, Docker with Compose, and network access to the meeting platforms/providers you select.
+- Node.js 22+ and Python 3.12+ for development and tests.
+- Sufficient CPU/RAM for browser capture. Vexa Lite supports the ARM64 development path; validate image architecture and concurrency before choosing a host.
+
+### 1. Clone and configure
+
+```sh
+git clone --recurse-submodules https://github.com/AbhishekSharma-17/meetings-ai.git
+cd meetings-ai
+cp .env.example .env.local
+```
+
+Edit the ignored `.env.local` before starting. Set a private admin password, session secret, credential encryption key, Vexa API key and shared STT override secret. Generate independent secrets, for example:
+
+```sh
+python3 -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+Run that command separately for each secret. Keep the credential encryption key stable: replacing it without a migration makes stored provider keys unreadable. The admin password seeds an account only once; later password changes are stored in the database.
+
+### 2. Start capture and the application
+
+```sh
+make vexa-up
+make compose-up
+```
+
+Follow the pinned [Vexa Lite instructions](vendor/vexa/deploy/lite/README.md) to initialize its API access and obtain `VEXA_API_KEY`; do not assume the product admin password authenticates Vexa. Update `.env.local` and recreate the product API after changing configuration. The product and Vexa must share `VEXA_STT_OVERRIDE_SECRET`.
+
+Open **http://localhost:3020**. The local API listens on **http://localhost:8320**; `/health` checks process liveness and `/ready` checks database/schema readiness. Local Compose credentials and loopback bindings are for development only.
+
+The default local transcription path uses faster-whisper. For a remote path, follow the Vexa configuration guide and set `VEXA_STT_MODE=remote`; alternatively configure a compatible transcription profile through the product UI. Preserve the local path when adding providers.
+
+### 3. Configure and validate
+
+1. Sign in using your configured admin account and change its password as appropriate.
+2. Add transcription, text-generation and embedding profiles in **AI providers**.
+3. Optionally connect meeting sources through **Calendar → Integrations**, then sync a bounded date range.
+4. Use a meeting whose participants consent to recording. Admit the assistant and announce the disclosure.
+5. Review speakers and transcript, generate/review the MOM, and approve before sending a recap.
+6. Opt the meeting into a knowledge base, index it, and verify chat citations against the actual transcript.
+
+Recording notice: “Meetings AI has joined and will record and transcribe this conversation.” Operators are responsible for consent, applicable recording rules and their organization's privacy policy.
+
+## Configuration
+
+Use [.env.example](.env.example) as the variable inventory and [the security guide](docs/security/secrets.md) for handling secrets.
+
+| Purpose | Variables / setup |
+| --- | --- |
+| Runtime and database | `APP_ENV`, `DATABASE_URL`, `WEB_ORIGIN`, `APP_BASE_URL` |
+| Admin and sessions | `MEETINGS_AI_ADMIN_EMAIL`, `MEETINGS_AI_ADMIN_PASSWORD`, `MEETINGS_AI_SESSION_SECRET` |
+| Stored credentials | `PROVIDER_CREDENTIAL_KEY` |
+| Vexa | `VEXA_BASE_URL`, `VEXA_API_KEY`, matching `VEXA_STT_OVERRIDE_SECRET` |
+| Model providers | Configure profiles in the UI; credentials remain server-side |
+| Calendar discovery | `COMPOSIO_API_KEY` and the selected `COMPOSIO_*_AUTH_CONFIG_ID` values |
+| Email | `RESEND_API_KEY`, explicit `RESEND_FROM_EMAIL`, optional sender name |
+| Web proxy | `API_INTERNAL_BASE_URL` on the web service |
+
+Some variables apply to standalone/hosted execution; local Compose sets several defaults explicitly. Read `compose.yaml` instead of assuming every `.env.local` variable is forwarded automatically.
+
+Composio-managed OAuth is supported. Google consent can fail when an auth config overrides scopes with ones not verified for the managed client. Use a verified configuration and a fresh app-user connection; default scopes can be broader than the application's read-only behavior. A dashboard test connection is not an application-user connection.
+
+Resend requires an authorized sender domain. A configured sender or accepted request is not proof of inbox delivery. Receiving replies requires a separate mailbox/reply route.
+
+## Deployment
+
+[Self-hosting guide](docs/deployment/self-hosting.md) covers Railway service layout, configuration, migrations, DNS, upgrades and release checks. [Existing deployment runbook](docs/deployment/railway.md) records this project's hosted topology.
+
+Railway can run the complete stack; Vercel and Supabase are not required. Keep API, capture and database services private and expose only the web application. Use production secrets, PostgreSQL, HTTPS, database backups, bounded resource/concurrency limits and a verified sender.
+
+There is no one-click deployment guarantee: Vexa initialization, provider credentials, OAuth configuration and live validation are operator steps.
+
+## Development and testing
+
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r services/api/requirements.txt
+npm --prefix apps/web ci
+make check
+npm --prefix apps/web run test:e2e
+```
+
+Install Playwright's browser dependencies when needed:
+
+```sh
+cd apps/web
+npx playwright install --with-deps chromium
+```
+
+Development servers: `make api-dev` and `make web-dev`. Read the frontend agent instructions and bundled Next.js docs before changing framework code.
+
+GitHub Actions checks API/migrations and frontend lint, types, build and smoke rendering. Run relevant browser tests separately; these are not substitutes for live integration acceptance. Do not attach real meeting transcripts or credentials to public test artifacts.
+
+## Contributing and support
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Use GitHub issues for reproducible bugs and feature proposals, and [SECURITY.md](SECURITY.md) for private vulnerability reporting. There is no guaranteed support SLA.
+
+## License and acknowledgments
+
+Original Meetings AI code and documentation are licensed under [Apache License 2.0](LICENSE), unless a file states otherwise. Copyright © 2026 GenAI Protos and Meetings AI contributors.
+
+Meeting capture builds on **Vexa**, maintained by Vexa contributors. The fork is pinned at `1a8084e9a7f57a79902ed9bad9ae3b5c11c01e10`; it adds signed per-bot STT routing and associated capability/test changes. Upstream licenses and notices remain intact.
+
+See [NOTICE](NOTICE) and [third-party attribution](THIRD_PARTY_NOTICES.md). Dependencies, model weights, container contents and hosted services retain their own licenses or terms. Apache 2.0 does not grant rights to third-party trademarks, and Meetings AI is not affiliated with or endorsed by the named service providers.

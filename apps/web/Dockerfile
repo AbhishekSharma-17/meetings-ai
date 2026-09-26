@@ -6,6 +6,7 @@ COPY apps/web/package.json apps/web/package-lock.json ./
 RUN npm ci
 
 COPY apps/web ./
+COPY LICENSE NOTICE THIRD_PARTY_NOTICES.md /app/licenses/meetings-ai/
 ARG API_INTERNAL_BASE_URL=http://api:8000
 ENV API_INTERNAL_BASE_URL=$API_INTERNAL_BASE_URL
 RUN npm run build
