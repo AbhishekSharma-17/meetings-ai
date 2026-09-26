@@ -22,7 +22,7 @@ import { ProvidersIcon } from "./ui-icons";
 import { ThemeSwitcher } from "./theme-switcher";
 import { Dialog } from "@base-ui/react/dialog";
 import { Popover } from "@base-ui/react/popover";
-import { Activity, Building2, CalendarDays, Check, ChevronsUpDown, FileCheck2, House, LogOut, Menu, Mic, NotebookPen, Sparkles, UserRound, Users, Video, X } from "lucide-react";
+import { BrainCircuit, Building2, CalendarDays, ChartNoAxesCombined, Check, ChevronsUpDown, FileCheck2, House, LogOut, Menu, MessagesSquare, Mic, NotebookPen, UserRound, Users, Video, X } from "lucide-react";
 import { initials } from "@/lib/meeting-status";
 import { EmptyState, LoadingRow } from "./ui/feedback";
 
@@ -216,9 +216,9 @@ export function AppShell() {
           {view === "dashboard" ? <Dashboard meetings={meetings} account={account} onNewMeeting={() => { setCalendarSelection(null); setDialogOpen(true); }} onOpenCalendar={() => setView("calendar")} onOpenProviders={() => setView("providers")} onOpenKnowledge={() => setView("knowledge")} onOpenMeetings={() => setView("meetings")} onOpenMeeting={openMeeting} /> : null}
           {view === "meetings" && identity ? <MeetingsLibrary key={identity} identity={identity} meetings={meetings} onOpen={openMeeting} onNew={() => { setCalendarSelection(null); setDialogOpen(true); }} onCalendar={() => setView("calendar")} /> : null}
           {view === "calendar" && account && account.role !== "viewer" ? <CalendarWorkspace key={identity} calendarIdentity={`${account.organization_id}:${account.user_id}`} preferredConnectionId={preferredCalendarConnectionId} onPreferredConnectionApplied={() => setPreferredCalendarConnectionId(null)} canSchedule={account.role === "owner" || account.role === "admin"} onChoose={(selection) => { setCalendarSelection(selection); setDialogOpen(true); }} onPrepare={(event) => { setPrepEvent(event); setView("prep"); }} onNewMeeting={account.role === "owner" || account.role === "admin" ? () => { setCalendarSelection(null); setDialogOpen(true); } : undefined} /> : null}
-          {view === "prep" && account && account.role !== "viewer" && identity ? <MeetingPrepWorkspace key={identity} identity={identity} initialEvent={prepEvent} onOpenCalendar={() => setView("calendar")} onOpenOrganization={() => setView("workspace")} /> : null}
+          {view === "prep" && account && account.role !== "viewer" && identity ? <MeetingPrepWorkspace key={identity} identity={identity} initialEvent={prepEvent} onOpenCalendar={() => setView("calendar")} onOpenOrganization={() => setView("workspace")} onOpenProviders={account.role === "owner" || account.role === "admin" ? () => setView("providers") : undefined} /> : null}
           {view === "providers" ? providersLoadError ? <section className="page narrow"><EmptyState icon={<ProvidersIcon />} title="AI providers are unavailable" action={<button className="button secondary" onClick={() => void meetingsService.listProviderProfiles().then((nextProfiles) => { setProfiles(nextProfiles); setProvidersLoadError(null); }).catch(() => undefined)}>Retry</button>}><span role="alert">{providersLoadError}</span></EmptyState></section> : identity ? <ProviderSettings key={identity} identity={identity} profiles={profiles} onProfilesChange={setProfiles} /> : null : null}
-          {view === "knowledge" && identity ? <KnowledgeScreen key={identity} identity={identity} account={account} onOpenSource={openMeeting} /> : null}
+          {view === "knowledge" && identity ? <KnowledgeScreen key={identity} identity={identity} account={account} onOpenSource={openMeeting} onOpenProviders={account?.role === "owner" || account?.role === "admin" ? () => setView("providers") : undefined} /> : null}
           {view === "observability" && (account?.role === "owner" || account?.role === "admin") ? <ObservabilityScreen /> : null}
           {view === "workspace" ? workspace
             ? <WorkspaceSettings workspace={workspace} workspaces={workspaces} account={account} onWorkspaceChange={setWorkspace} onSwitchWorkspace={switchWorkspace} onCreateWorkspace={createWorkspace} />
@@ -264,15 +264,40 @@ function LoginLayout({ children }: { children: ReactNode }) {
       <p className="login-footnote">Recordings start only after the host is told: “Meetings AI has joined and will record and transcribe this conversation.”</p>
     </div>
     <aside className="login-showcase" aria-label="What Meetings AI does">
-      <h2>From conversation to clarity, without losing the evidence.</h2>
-      <p>An assistant that joins your calls, drafts reviewed minutes, and turns every approved meeting into searchable team knowledge.</p>
+      <div className="login-showcase-copy">
+        <h2>From conversation to clarity, without losing the evidence.</h2>
+        <p>An assistant that joins your calls, drafts reviewed minutes, and turns every approved meeting into searchable team knowledge.</p>
+      </div>
+      <LoginVignette />
       <div className="login-steps">
-        <div className="login-step"><span className="step-icon"><Mic aria-hidden="true" /></span><span><b>Capture</b><small>Send the assistant to Meet, Zoom or Teams for a timestamped, speaker-attributed transcript.</small></span></div>
-        <div className="login-step"><span className="step-icon"><FileCheck2 aria-hidden="true" /></span><span><b>Review & share</b><small>Edit the drafted minutes, confirm owners and send an approved recap.</small></span></div>
-        <div className="login-step"><span className="step-icon"><Sparkles aria-hidden="true" /></span><span><b>Ask your meetings</b><small>Chat across a knowledge base and follow every answer back to its source.</small></span></div>
+        <div className="login-step"><span className="step-icon"><Mic aria-hidden="true" /></span><span><b>Capture</b><small>Meet, Zoom, Teams</small></span></div>
+        <div className="login-step"><span className="step-icon"><FileCheck2 aria-hidden="true" /></span><span><b>Review</b><small>Approved recaps</small></span></div>
+        <div className="login-step"><span className="step-icon"><MessagesSquare aria-hidden="true" /></span><span><b>Ask</b><small>Cited answers</small></span></div>
       </div>
     </aside>
   </main>;
+}
+
+/** Decorative product vignette on the sign-in page: a call being transcribed into minutes. */
+function LoginVignette() {
+  const lines = [
+    { who: "PN", name: "Priya", text: "Let’s ship SSO in the October release." },
+    { who: "ML", name: "Marcus", text: "Audit logs can move to November." },
+    { who: "DO", name: "Dana", text: "I’ll share the design doc by Friday." },
+  ];
+  return <div className="login-vignette" aria-hidden="true">
+    <div className="vignette-call">
+      <div className="vignette-head"><span className="vignette-rec"><i />Recording</span><b>Acme · Q4 roadmap</b><span className="vignette-wave">{Array.from({ length: 9 }, (_, index) => <i key={index} style={{ animationDelay: `${index * 0.11}s` }} />)}</span></div>
+      <ul className="vignette-lines">{lines.map((line, index) => <li key={line.who} style={{ animationDelay: `${0.6 + index * 1.4}s` }}><span className="avatar sm">{line.who}</span><span><b>{line.name}</b>{line.text}</span></li>)}</ul>
+    </div>
+    <div className="vignette-mom">
+      <div className="vignette-mom-head"><FileCheck2 /><b>Minutes draft</b><span className="vignette-badge">Ready to review</span></div>
+      <ul>
+        <li style={{ animationDelay: "5.2s" }}><Check /><span><small>Decision</small>SSO ships in October</span></li>
+        <li style={{ animationDelay: "6s" }}><Check /><span><small>Action · Dana · Fri</small>Share the SSO design doc</span></li>
+      </ul>
+    </div>
+  </div>;
 }
 
 function SidebarPanel({ view, onNavigate, workspaces, account, liveCount, onSignOut, onSwitchWorkspace, className }: { view: View; onNavigate(view: View): void; workspaces: WorkspaceOption[]; account: CurrentAccount | null; liveCount: number; onSignOut(): void; onSwitchWorkspace(id: string): Promise<void>; className: string }) {
@@ -298,13 +323,13 @@ function SidebarPanel({ view, onNavigate, workspaces, account, liveCount, onSign
       </div>
       <div className="sidebar-group">
         <p className="sidebar-label">Intelligence</p>
-        {item("knowledge", "AI knowledge", <Sparkles />)}
+        {item("knowledge", "AI knowledge", <BrainCircuit />)}
         {canUseCalendar ? item("prep", "Meeting prep", <NotebookPen />) : null}
       </div>
       {canManageMeetings ? <div className="sidebar-group">
         <p className="sidebar-label">Administration</p>
         {item("providers", "AI providers", <ProvidersIcon />)}
-        {item("observability", "Observability", <Activity />)}
+        {item("observability", "Observability", <ChartNoAxesCombined />)}
       </div> : null}
     </nav>
     <div className="sidebar-spacer" />

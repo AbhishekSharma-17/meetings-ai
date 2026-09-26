@@ -373,3 +373,81 @@ test("workspace creation lives in Organization & people, not the profile menu", 
   await page.getByRole("button", { name: "Create workspace" }).click();
   await expect.poll(() => createdName).toBe("Novaala");
 });
+
+const multiAccounts = [
+  { id: "ca-work", provider: "googlecalendar", status: "ACTIVE", label: "Work calendar" },
+  { id: "ca-outlook", provider: "outlook", status: "ACTIVE", label: "outlook@example.test" },
+  { id: "ca-calendly", provider: "calendly", status: "ACTIVE", label: "Sales bookings" },
+];
+
+function multiAccountEvents() {
+  const at = (hour: number) => { const value = new Date(); value.setHours(hour, 0, 0, 0); return value; };
+  const event = (id: string, connection: string, provider: string, title: string, hour: number, url: string, platform: string, invitee: string) => ({
+    id: `00000000-0000-4000-8000-0000000004${id}`, synced_at: new Date().toISOString(), connection_id: connection, provider,
+    event_id: `event-${id}`, title, starts_at: at(hour).toISOString(), ends_at: at(hour + 1).toISOString(),
+    meeting_url: url, platform, invitees: [{ name: invitee.split("@")[0], email: invitee, response_status: null }],
+  });
+  return [
+    event("01", "ca-work", "googlecalendar", "Acme weekly check-in", 12, "https://meet.google.com/abc-defg-hij", "google_meet", "asha@acme.example"),
+    event("02", "ca-outlook", "outlook", "Acme weekly check-in", 12, "https://meet.google.com/abc-defg-hij", "google_meet", "asha@acme.example"),
+    event("03", "ca-calendly", "calendly", "Northwind pricing call", 15, "https://teams.microsoft.com/l/meetup-join/19%3ameeting_abc%40thread.v2/0", "teams", "lena@northwind.example"),
+  ];
+}
+
+test("all connected accounts sync together and one meeting from two accounts shows both sources", async ({ page }) => {
+  const scans: unknown[] = [];
+  await page.route("**/v1/calendar/connections", (route) => route.fulfill({ json: multiAccounts }));
+  await page.route("**/v1/calendar/synced?**", (route) => route.fulfill({ json: { events: multiAccountEvents(), syncs: [] } }));
+  await page.route("**/v1/calendar/sync", async (route) => {
+    scans.push(route.request().postDataJSON().connection_ids);
+    await route.fulfill({ json: { events: multiAccountEvents(), syncs: [], errors: {} } });
+  });
+  await page.goto("/");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Calendar" }).click();
+  await expect(page.getByRole("combobox", { name: "Account" })).toContainText("All connected accounts");
+  await page.getByRole("button", { name: "Sync now" }).click();
+  await expect.poll(() => scans).toEqual([[]]);
+  await expect(page.getByRole("button", { name: /2 meetings, from 3 accounts/ })).toBeVisible();
+  const rows = page.locator(".calendar-agenda-event");
+  await expect(rows).toHaveCount(2);
+  const merged = rows.filter({ hasText: "Acme weekly check-in" });
+  await expect(merged.getByRole("img", { name: "Google Calendar · Work calendar" })).toBeAttached();
+  await expect(merged.getByRole("img", { name: "Outlook Calendar · outlook@example.test" })).toBeAttached();
+  await merged.click();
+  await expect(page.locator(".calendar-event-detail")).toContainText("Google Meet");
+  await expect(page.locator(".calendar-detail-sources li")).toHaveCount(2);
+  await rows.filter({ hasText: "Northwind pricing call" }).click();
+  await expect(page.locator(".calendar-event-detail")).toContainText("Scheduled via Calendly");
+  await expect(page.locator(".calendar-event-detail")).toContainText("Microsoft Teams");
+});
+
+test("each connected account can be synced on its own from Integrations", async ({ page }) => {
+  let scanned: unknown = null;
+  await page.route("**/v1/calendar/connections", (route) => route.fulfill({ json: multiAccounts }));
+  await page.route("**/v1/calendar/sync", async (route) => {
+    scanned = route.request().postDataJSON().connection_ids;
+    await route.fulfill({ json: { events: [], syncs: [{ connection_id: "ca-outlook", last_synced_at: new Date().toISOString(), range_start: new Date().toISOString(), range_end: new Date().toISOString(), truncated: false }], errors: {} } });
+  });
+  await page.goto("/");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Calendar" }).click();
+  await page.getByRole("tab", { name: /Integrations/ }).click();
+  await page.getByRole("button", { name: "Sync outlook@example.test" }).click();
+  await expect.poll(() => scanned).toEqual(["ca-outlook"]);
+  await expect(page.locator(".calendar-account-row", { hasText: "outlook@example.test" })).toContainText("Synced");
+});
+
+test("meeting prep search filters by title, invitee or company and offers a way back", async ({ page }) => {
+  await page.route("**/v1/calendar/synced?**", (route) => route.fulfill({ json: { events: multiAccountEvents(), syncs: [] } }));
+  await page.goto("/");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Meeting prep" }).click();
+  const list = page.getByRole("complementary", { name: "Meetings to prepare" });
+  await expect(list.getByRole("button", { name: /Acme weekly check-in/ })).toHaveCount(1);
+  const search = page.getByLabel("Search upcoming meetings");
+  await search.fill("northwind"); // invitee company domain
+  await expect(list.getByRole("button", { name: /Northwind pricing call/ })).toBeVisible();
+  await expect(list.getByRole("button", { name: /Acme weekly check-in/ })).toHaveCount(0);
+  await search.fill("globex");
+  await expect(page.getByText("No matching meetings")).toBeVisible();
+  await page.getByRole("button", { name: "Clear search" }).click();
+  await expect(list.getByRole("button", { name: /Acme weekly check-in/ })).toBeVisible();
+});

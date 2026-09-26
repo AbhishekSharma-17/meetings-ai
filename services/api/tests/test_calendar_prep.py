@@ -128,19 +128,23 @@ def test_company_brief_documents_and_context_only_prep(tmp_path):
         async def synthesize(request, profile_id=None):
             assert "We build useful software." in request.prompt
             assert "Our enterprise service" in request.prompt
-            return None, TextGenerationResult(text="", provider="test", model="test-model", structured_output={
-                "executive_brief": "Discuss the planned discovery call.", "findings": [],
-                "relevant_offerings": ["AI research"], "talking_points": ["Ask about requirements"],
-                "questions_to_ask": ["What matters most?"], "watchouts": [], "people_notes": [],
-            })
+            return None, TextGenerationResult(text="", provider="test", model="test-model", structured_output=_v2_output(
+                executive_brief="Discuss the planned discovery call.",
+                alignment={"fit_summary": "Good fit", "relevant_services": [
+                    {"service": "AI research", "why": "They asked", "talking_point": "Offer a scan", "source_ids": []}]},
+                talking_points=["Ask about requirements"], questions_to_ask=["What matters most?"],
+            ))
 
         app.state.profile_service.generate_text = synthesize
         generated = client.post(f"/v1/calendar/events/{event_id}/prep", json={
             "research_enabled": False, "context": "Focus on a useful introduction",
         })
         assert generated.status_code == 200, generated.text
+        assert generated.json()["report_version"] == 2
         assert generated.json()["public_research_performed"] is False
         assert generated.json()["relevant_offerings"] == ["AI research"]
+        origins = {source["origin"] for source in generated.json()["sources"]}
+        assert origins == {"organization_brief", "our_documents"}
         assert client.get(f"/v1/calendar/events/{event_id}/prep").json()["id"] == generated.json()["id"]
         assert client.delete(f"/v1/workspace/brief/documents/{upload.json()['id']}").status_code == 204
         assert client.get("/v1/workspace/brief/documents").json() == []
@@ -161,47 +165,64 @@ def test_company_brief_documents_and_context_only_prep(tmp_path):
         assert client.get("/v1/workspace/brief").json()["overview"] == "We build useful software."
 
 
-def test_public_research_uses_search_citations_without_private_brief(tmp_path):
+def test_public_research_uses_exa_without_private_brief_or_calendar_details(tmp_path):
     app = _app(tmp_path, FakeCalendar())
     captured = []
 
     def respond(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
-        captured.append(payload)
-        return httpx.Response(200, json={"status": "completed", "output": [{
-            "type": "message", "content": [{"type": "output_text", "text": "Acme sells widgets.",
-                "annotations": [{"type": "url_citation", "url": "https://acme.example/about", "title": "About Acme"}]}],
-        }], "usage": {"input_tokens": 30, "output_tokens": 10}})
+        captured.append((request.url.path, payload))
+        if request.url.path == "/contents":
+            return httpx.Response(200, json={"results": [], "costDollars": {"total": 0.0}})
+        if payload.get("category") == "people":
+            return httpx.Response(200, json={"results": [], "costDollars": {"total": 0.007}})
+        return httpx.Response(200, json={"results": [{
+            "id": "a", "url": "https://acme.example/about", "title": "About Acme",
+            "highlights": ["Acme sells widgets."], "publishedDate": "2026-09-01T00:00:00.000Z",
+        }], "costDollars": {"total": 0.008}})
 
-    app.state.meeting_prep.transport = httpx.MockTransport(respond)
+    app.state.meeting_prep.exa_transport = httpx.MockTransport(respond)
+    app.state.meeting_prep.environ = {"EXA_API_KEY": "exa-test-key"}
     with TestClient(app) as client:
         saved = client.put("/v1/workspace/brief", json={
             "website": "https://ours.example", "overview": "SECRET-PRIVATE-CONTEXT",
         })
         assert saved.status_code == 200
-        configured = client.post("/v1/provider-profiles", json={
-            "name": "Research", "provider_type": "openai", "execution_location": "cloud", "api_key": "test-key",
-            "capabilities": [{"capability": "text_generation", "model": "gpt-test"}],
-        })
-        assert configured.status_code == 201, configured.text
         event_id = _sync(client).json()["events"][0]["id"]
 
-        async def synthesize(request, profile_id=None):
+        async def synthesize(request, profile_id=None, **_):
+            if request.metadata["purpose"] == "meeting_prep_planning":
+                return None, TextGenerationResult(text="", provider="test", model="test-model",
+                                                  structured_output={"queries": [], "learning_goals": []})
             assert "SECRET-PRIVATE-CONTEXT" in request.prompt
-            return None, TextGenerationResult(text="", provider="test", model="test-model", structured_output={
-                "executive_brief": "Acme discovery.",
-                "findings": [{"statement": "Acme sells widgets.", "source_ids": ["S1"]}],
-                "relevant_offerings": [], "talking_points": [], "questions_to_ask": [],
-                "watchouts": [], "people_notes": [],
-            })
+            return None, TextGenerationResult(text="", provider="test", model="test-model", structured_output=_v2_output(
+                executive_brief="Acme discovery.",
+                company={"name": "acme.example", "website": "https://acme.example", "what_they_do": "Acme sells widgets.",
+                         "industry": "", "size_signals": "", "headquarters": "", "source_ids": ["W1"]},
+            ))
 
         app.state.profile_service.generate_text = synthesize
         report = client.post(f"/v1/calendar/events/{event_id}/prep", json={"research_enabled": True})
         assert report.status_code == 200, report.text
         assert report.json()["sources"][0]["url"] == "https://acme.example/about"
-        assert report.json()["findings"][0]["source_ids"] == ["S1"]
-        assert captured[0]["tools"][0]["type"] == "web_search"
-        assert "SECRET-PRIVATE-CONTEXT" not in captured[0]["input"]
-        assert "Private launch roadmap" not in captured[0]["input"]
-        assert "Acme discovery" not in captured[0]["input"]
-        assert "asha@acme.example" not in captured[0]["input"]
+        assert report.json()["findings"][0]["source_ids"] == ["W1"]
+        assert report.json()["target_company"] == "acme.example"
+        sent = json.dumps([body for _, body in captured])
+        assert captured and all(path in {"/search", "/contents"} for path, _ in captured)
+        assert "SECRET-PRIVATE-CONTEXT" not in sent
+        assert "Private launch roadmap" not in sent
+        assert "Acme discovery" not in sent
+        assert "asha@acme.example" not in sent and "@" not in sent
+
+
+def _v2_output(**overrides):
+    base = {
+        "executive_brief": "", "company": {"name": None, "website": None, "what_they_do": "", "industry": "",
+                                           "size_signals": "", "headquarters": "", "source_ids": []},
+        "recent_developments": [], "ai_landscape": {"summary": "", "initiatives": [], "vendors": [],
+                                                    "end_clients": [], "source_ids": []},
+        "alignment": {"fit_summary": "", "relevant_services": []}, "attendees": [],
+        "meeting_narrative": {"recommended_focus": "", "by_persona": [], "opening": "", "agenda_suggestions": []},
+        "talking_points": [], "questions_to_ask": [], "watchouts": [],
+    }
+    return {**base, **overrides}

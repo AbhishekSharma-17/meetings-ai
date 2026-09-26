@@ -9,7 +9,8 @@ import { Badge } from "./ui/feedback";
 import { SettingsToast } from "./settings-toast";
 import { roleLabel, WorkspacePeople, type InviteRole } from "./workspace-people";
 import { WorkspaceBrief } from "./workspace-brief";
-import { AuditCard, OperationsCard, RetentionCard } from "./workspace-admin-cards";
+import { OperationsCard, RetentionCard } from "./workspace-admin-cards";
+import { ActivityCard } from "./workspace-activity";
 
 type SectionLink = { id: string; label: string; adminOnly?: boolean };
 const sectionLinks: SectionLink[] = [
@@ -43,6 +44,8 @@ export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceC
   const [inviting, setInviting] = useState(false);
   const [memberBusy, setMemberBusy] = useState<string | null>(null);
   const [pendingRemovalId, setPendingRemovalId] = useState<string | null>(null);
+  const [meetingTitles, setMeetingTitles] = useState<ReadonlyMap<string, string>>(new Map());
+  const [baseNames, setBaseNames] = useState<ReadonlyMap<string, string>>(new Map());
   const canManage = account?.role === "owner" || account?.role === "admin";
 
   useEffect(() => {
@@ -50,6 +53,15 @@ export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceC
       setError("Could not load workspace members.");
     });
   }, []);
+
+  // Admin cards name meetings and knowledge bases instead of showing record ids. Best effort only.
+  useEffect(() => {
+    if (!canManage) return;
+    void Promise.allSettled([meetingsService.listMeetings(), meetingsService.listKnowledgeBases()]).then(([meetings, bases]) => {
+      if (meetings.status === "fulfilled") setMeetingTitles(new Map(meetings.value.map((item) => [item.id, item.title])));
+      if (bases.status === "fulfilled") setBaseNames(new Map(bases.value.map((item) => [item.id, item.name])));
+    });
+  }, [canManage]);
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -166,8 +178,8 @@ export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceC
         </section>
         <WorkspaceBrief workspaceId={workspace.id} canManage={canManage} />
         {canManage ? <RetentionCard onSaved={setMessage} /> : null}
-        {canManage ? <OperationsCard /> : null}
-        {canManage ? <AuditCard members={members} /> : null}
+        {canManage ? <OperationsCard meetingTitles={meetingTitles} /> : null}
+        {canManage ? <ActivityCard members={members} meetingTitles={meetingTitles} baseNames={baseNames} /> : null}
       </div>
     </div>
     <SettingsToast notice={notice} onDismiss={() => { setError(null); setMessage(null); }} />

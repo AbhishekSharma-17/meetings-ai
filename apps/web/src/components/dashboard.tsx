@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { CurrentAccount, Meeting } from "@/lib/types";
 import { attentionStatuses, inProgressStatuses, meetingStatusLabel, platformMonogram } from "@/lib/meeting-status";
-import { ArrowRight, CalendarDays, CircleAlert, CircleCheck, FileText, Mic, Plus, Radio, Sparkles, Video } from "lucide-react";
+import { ArrowRight, CalendarDays, CircleAlert, CircleCheck, FileText, Mic, Plus, Radio, BrainCircuit, Video } from "lucide-react";
 import { ProvidersIcon } from "./ui-icons";
 import { PageHeader } from "./ui/page-header";
 import { EmptyState } from "./ui/feedback";
@@ -61,7 +61,7 @@ export function Dashboard({ meetings, account, onNewMeeting, onOpenCalendar, onO
             </ol>
           </section>
           <button type="button" className="card dashboard-shortcut" onClick={onOpenKnowledge}>
-            <span className="flow-icon brand"><Sparkles aria-hidden="true" /></span>
+            <span className="flow-icon brand"><BrainCircuit aria-hidden="true" /></span>
             <span><b>Ask your meetings</b><small>Chat with opted-in meetings and follow every answer to its source.</small></span>
             <ArrowRight className="shortcut-arrow" aria-hidden="true" />
           </button>

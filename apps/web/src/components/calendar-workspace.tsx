@@ -8,6 +8,7 @@ import { meetingsService } from "@/lib/meetings-service";
 import type { CachedCalendarEvent, CalendarConnection, CalendarSchedule, CalendarSnapshot } from "@/lib/types";
 import type { CalendarSelection } from "./calendar-import-dialog";
 import { CalendarIntegrations } from "./calendar-integrations";
+import { findEntry, mergeCalendarEvents, type CalendarEntry } from "./calendar-events";
 import { DayAgenda, EventDetail, MonthGrid, dayKey, eventDay } from "./calendar-month";
 import { browserTimeZone, calendarProviderNames } from "./calendar-providers";
 import { Alert } from "./ui/feedback";
@@ -88,6 +89,7 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
   const restoredEventId = useRef(initial.selectedEventId);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [syncingIds, setSyncingIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const autoRefreshKey = useRef<string | null>(null);
   const rangeDays = (Date.parse(`${endDate}T00:00:00Z`) - Date.parse(`${startDate}T00:00:00Z`)) / 86_400_000 + 1;
@@ -154,15 +156,19 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
 
   const active = connections.filter((item) => item.status === "ACTIVE");
   const visibleEvents = useMemo(() => snapshot.events.filter((item) => accountFilter === "all" || item.connection_id === accountFilter), [snapshot.events, accountFilter]);
-  const eventsByDay = useMemo(() => {
-    const groups = new Map<string, CachedCalendarEvent[]>();
-    for (const event of visibleEvents) {
-      const key = eventDay(event.starts_at, timezone);
-      groups.set(key, [...(groups.get(key) ?? []), event]);
+  // Copies of one meeting from several accounts collapse into one entry per day.
+  const visibleEntries = useMemo(() => mergeCalendarEvents(visibleEvents), [visibleEvents]);
+  const entriesByDay = useMemo(() => {
+    const groups = new Map<string, CalendarEntry[]>();
+    for (const entry of visibleEntries) {
+      const key = eventDay(entry.event.starts_at, timezone);
+      groups.set(key, [...(groups.get(key) ?? []), entry]);
     }
     return groups;
-  }, [visibleEvents, timezone]);
-  const dayEvents = eventsByDay.get(selectedDay) ?? [];
+  }, [visibleEntries, timezone]);
+  const dayEntries = entriesByDay.get(selectedDay) ?? [];
+  const selectedEntry = findEntry(visibleEntries, selectedEvent?.id) ?? (selectedEvent ? { id: selectedEvent.id, event: selectedEvent, sources: [selectedEvent] } : null);
+  const syncing = busy || syncingIds.length > 0;
   const monthDays = useMemo(() => {
     const first = new Date(month.getFullYear(), month.getMonth(), 1);
     const gridStart = new Date(first); gridStart.setDate(1 - first.getDay());
@@ -171,7 +177,7 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
   const lastSynced = snapshot.syncs
     .filter((item) => accountFilter === "all" || item.connection_id === accountFilter)
     .reduce<string | null>((latest, item) => !latest || item.last_synced_at > latest ? item.last_synced_at : latest, null);
-  const selectedScheduled = selectedEvent ? schedules.some((item) => item.connection_id === selectedEvent.connection_id && item.event_id === selectedEvent.event_id && new Date(item.starts_at).getTime() === new Date(selectedEvent.starts_at).getTime()) : false;
+  const selectedScheduled = selectedEntry ? selectedEntry.sources.some((source) => schedules.some((item) => item.connection_id === source.connection_id && item.event_id === source.event_id && new Date(item.starts_at).getTime() === new Date(source.starts_at).getTime())) : false;
 
   function changeMonth(offset: number) {
     const next = new Date(month.getFullYear(), month.getMonth() + offset, 1);
@@ -187,15 +193,27 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
     setSelectedDay(dayKey(new Date())); setSelectedEvent(null);
   }
 
+  function applySync(next: CalendarSnapshot) {
+    setSnapshot(next);
+    if (next.errors && Object.keys(next.errors).length) setError(Object.entries(next.errors).map(([id, message]) => `${connections.find((item) => item.id === id)?.label ?? id}: ${message}`).join(" · "));
+    setSelectedEvent((current) => current ? next.events.find((item) => item.id === current.id) ?? null : null);
+  }
+
+  // An empty connection list asks the API to sync every active account of this
+  // user in one request ("All connected accounts"); one id syncs that account only.
   async function sync() {
     setBusy(true); setError(null);
-    try {
-      const next = await meetingsService.syncCalendar(startDate, endDate, timezone, accountFilter === "all" ? [] : [accountFilter]);
-      setSnapshot(next);
-      if (next.errors && Object.keys(next.errors).length) setError(Object.entries(next.errors).map(([id, message]) => `${connections.find((item) => item.id === id)?.label ?? id}: ${message}`).join(" · "));
-      setSelectedEvent((current) => current ? next.events.find((item) => item.id === current.id) ?? null : null);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Calendar sync failed."); }
+    try { applySync(await meetingsService.syncCalendar(startDate, endDate, timezone, accountFilter === "all" ? [] : [accountFilter])); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Calendar sync failed."); }
     finally { setBusy(false); }
+  }
+
+  async function syncAccount(connectionId: string) {
+    if (!rangeValid) { setError("Choose a valid date range of 1 to 90 days."); return; }
+    setSyncingIds((current) => [...current, connectionId]); setError(null);
+    try { applySync(await meetingsService.syncCalendar(startDate, endDate, timezone, [connectionId])); }
+    catch (cause) { setError(`${connections.find((item) => item.id === connectionId)?.label ?? "Account"}: ${cause instanceof Error ? cause.message : "Calendar sync failed."}`); }
+    finally { setSyncingIds((current) => current.filter((id) => id !== connectionId)); }
   }
 
   async function connect(provider: CalendarConnection["provider"], alias: string) {
@@ -229,6 +247,7 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
     onChoose({ event, period: "this_week", timezone, eventDate: eventDay(event.starts_at, timezone), willSchedule: new Date(event.starts_at).getTime() > Date.now() + 60_000 });
   }
 
+  const syncScope = accountFilter === "all" ? `all ${active.length} connected account${active.length === 1 ? "" : "s"}` : connections.find((item) => item.id === accountFilter)?.label ?? "this account";
   const accountOptions = [{ value: "all", label: "All connected accounts" }, ...active.map((item) => ({ value: item.id, label: `${calendarProviderNames[item.provider]} · ${item.label}` }))];
   return <section className="page wide calendar-workspace" aria-labelledby="calendar-workspace-title">
     <PageHeader
@@ -236,7 +255,7 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
       title="Calendar"
       description="Meetings from your connected calendars, saved between visits."
       actions={<>
-        <button type="button" className="button secondary" disabled={busy || !active.length || !rangeValid} onClick={() => void sync()}><RefreshCw aria-hidden="true" className={busy ? "calendar-spin" : undefined} /> {busy ? "Syncing…" : "Sync now"}</button>
+        <button type="button" className="button secondary" title={`Sync ${syncScope}`} disabled={syncing || !active.length || !rangeValid} onClick={() => void sync()}><RefreshCw aria-hidden="true" className={busy ? "calendar-spin" : undefined} /> {busy ? "Syncing…" : "Sync now"}</button>
         {onNewMeeting && canSchedule ? <button type="button" className="button primary" onClick={onNewMeeting}><Plus aria-hidden="true" /> New meeting</button> : null}
       </>}
     />
@@ -256,7 +275,7 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
             <button type="button" className="button ghost sm" onClick={goToToday}>Today</button>
           </div>
           <div className="calendar-toolbar-end">
-            {lastSynced ? <span className="calendar-sync-status">Synced {new Date(lastSynced).toLocaleString(undefined, { ...shortDate, hour: "numeric", minute: "2-digit" })}</span> : null}
+            {lastSynced ? <span className="calendar-sync-status">{accountFilter === "all" && active.length > 1 ? `${active.length} accounts · ` : ""}Synced {new Date(lastSynced).toLocaleString(undefined, { ...shortDate, hour: "numeric", minute: "2-digit" })}</span> : null}
             <RangePicker startDate={startDate} endDate={endDate} timezone={timezone} onStartChange={(value) => { setStartDate(value); setSelectedEvent(null); }} onEndChange={(value) => { setEndDate(value); setSelectedEvent(null); }} />
             <UiSelect id="calendar-account-filter" label="Account" hideLabel size="sm" className="calendar-account-select" value={accountFilter} onChange={setAccountFilter} options={accountOptions} disabled={!active.length} />
           </div>
@@ -264,16 +283,16 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
         {loaded && !active.length ? <Alert tone="brand" className="calendar-connect-hint" actions={<button type="button" className="button secondary sm" onClick={() => setTab("integrations")}>Connect a calendar</button>}>No calendars connected yet. Connect one to see your meetings here.</Alert> : null}
         {!rangeValid ? <p className="form-error" role="alert">Choose a valid date range of 1 to 90 days.</p> : null}
         <div className="calendar-layout">
-          <MonthGrid month={month} days={monthDays} selectedDay={selectedDay} eventsByDay={eventsByDay} onSelectDay={(key) => { setSelectedDay(key); setSelectedEvent(null); }} />
+          <MonthGrid month={month} days={monthDays} selectedDay={selectedDay} entriesByDay={entriesByDay} connections={connections} onSelectDay={(key) => { setSelectedDay(key); setSelectedEvent(null); }} />
           <div className="calendar-side">
-            <DayAgenda selectedDay={selectedDay} dayEvents={dayEvents} rangeEvents={visibleEvents} selectedEventId={selectedEvent?.id ?? null} hasAccounts={active.length > 0} timezone={timezone} onSelectEvent={setSelectedEvent} onJumpToEvent={(event, day) => { setSelectedDay(day); setSelectedEvent(event); }} />
-            <EventDetail event={selectedEvent} canSchedule={canSchedule} alreadyScheduled={selectedScheduled} onSchedule={() => { if (selectedEvent) scheduleSelected(selectedEvent); }} onPrepare={() => { if (selectedEvent) onPrepare(selectedEvent); }} />
+            <DayAgenda selectedDay={selectedDay} dayEntries={dayEntries} rangeEntries={visibleEntries} selectedEventId={selectedEvent?.id ?? null} hasAccounts={active.length > 0} connections={connections} onSelectEntry={(entry) => setSelectedEvent(entry.event)} onJumpToEntry={(entry) => { setSelectedDay(eventDay(entry.event.starts_at, timezone)); setSelectedEvent(entry.event); }} />
+            <EventDetail entry={selectedEntry} connections={connections} canSchedule={canSchedule} alreadyScheduled={selectedScheduled} onSchedule={() => { if (selectedEvent) scheduleSelected(selectedEvent); }} onPrepare={() => { if (selectedEvent) onPrepare(selectedEvent); }} />
           </div>
         </div>
       </Tabs.Panel>
 
       <Tabs.Panel value="integrations">
-        <CalendarIntegrations connections={connections} syncs={snapshot.syncs} busy={busy} onConnect={(provider, alias) => void connect(provider, alias)} onRename={rename} onDisconnect={disconnect} />
+        <CalendarIntegrations connections={connections} syncs={snapshot.syncs} busy={busy} syncingIds={syncingIds} canSync={rangeValid} onSync={(connectionId) => void syncAccount(connectionId)} onConnect={(provider, alias) => void connect(provider, alias)} onRename={rename} onDisconnect={disconnect} />
       </Tabs.Panel>
     </Tabs.Root>
   </section>;

@@ -72,10 +72,16 @@ def test_reindex_enables_semantic_match_and_opt_out_excludes_stale_vectors(tmp_p
         assert result["sources"][0]["meeting_id"] == meeting_id
         assert result["sources"][0]["segment_id"] == "turn-1"
 
+        # Unchanged chunks keep their vectors, so a failure only surfaces when something
+        # new must be embedded; the existing index must survive that failure.
+        second_id = _meeting(client, app, base_id, "The launch checklist is ready.")
         fake.fail = True
         assert client.post(f"/v1/knowledge-bases/{base_id}/reindex").status_code == 409
         assert client.get(f"/v1/knowledge-bases/{base_id}/index").json()["indexed_sources"] == 1
         fake.fail = False
+        assert client.patch(f"/v1/meetings/{second_id}/knowledge", json={
+            "knowledge_enabled": False, "tags": [],
+        }).status_code == 200
 
         assert client.patch(f"/v1/meetings/{meeting_id}/knowledge", json={
             "knowledge_enabled": False, "tags": [],

@@ -3,8 +3,13 @@
 import type { ReactNode } from "react";
 import { Send } from "lucide-react";
 import type { ResendStatus } from "@/lib/types";
+import { EmailChips } from "./ui/email-chips";
 import { Alert } from "./ui/feedback";
 import { SwitchField } from "./ui/switch";
+
+/** The panel keeps recipients as one comma-separated string; the chips edit it as a list. */
+const toList = (value: string) => [...new Set(value.split(/[,;\n]+/).map((item) => item.trim()).filter(Boolean))];
+const toText = (list: string[]) => list.join(", ");
 
 function senderProblem(status: ResendStatus | null, statusError: boolean): string {
   if (statusError) return "Could not check email delivery configuration. Refresh and try again.";
@@ -39,8 +44,8 @@ export function RecapDeliveryCard({ recipients, participantRecipients, sharePart
       {!resendStatus?.can_attempt_send ? <Alert tone="warning" role="status">{senderProblem(resendStatus, resendStatusError)}</Alert>
         : <p className="field-hint" role="status">Sender: {resendStatus.sender}. Domain verification is confirmed only when Resend accepts a send.</p>}
       <div className="field-row">
-        <div className="field"><label htmlFor="mom-internal-recipients">Internal team recipients</label><textarea id="mom-internal-recipients" rows={2} placeholder="team@company.com" value={recipients} onChange={(event) => onRecipientsChange(event.target.value)} /></div>
-        <div className="field"><label htmlFor="mom-participant-recipients">Participant recipients</label><textarea id="mom-participant-recipients" rows={2} placeholder="Optional, exact email addresses" value={participantRecipients} onChange={(event) => onParticipantRecipientsChange(event.target.value)} /></div>
+        <EmailChips id="mom-internal-recipients" label="Internal team recipients" value={toList(recipients)} onChange={(list) => onRecipientsChange(toText(list))} placeholder="team@company.com" />
+        <EmailChips id="mom-participant-recipients" label="Participant recipients" labelSuffix={<span className="optional">optional</span>} value={toList(participantRecipients)} onChange={(list) => onParticipantRecipientsChange(toText(list))} placeholder="Exact addresses only" />
       </div>
       <div className="mom-delivery-switches">
         <SwitchField id="mom-share-participants" label="Also send to listed participants" checked={shareParticipants} onChange={onShareParticipantsChange} />

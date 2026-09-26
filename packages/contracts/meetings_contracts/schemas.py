@@ -47,13 +47,21 @@ class ProfileCreate(BaseModel):
     base_url: HttpUrl | None = None
     capabilities: Annotated[list[CapabilityConfig], Field(min_length=1)]
     api_key: SecretStr | None = Field(default=None, repr=False)
+    # Use a saved workspace key (vault) instead of pasting one. Mutually
+    # exclusive with api_key; the server resolves the secret at call time.
+    credential_id: UUID | None = None
+    # Also save a pasted api_key to the workspace vault and link it (owner only).
+    save_to_vault: bool = False
+    credential_label: Annotated[str | None, Field(default=None, min_length=1, max_length=100)]
 
     @model_validator(mode="after")
     def validate_provider(self) -> "ProfileCreate":
         capability_names = [item.capability for item in self.capabilities]
         if len(set(capability_names)) != len(capability_names):
             raise ValueError("each capability may be configured only once")
-        if self.provider_type is ProviderType.OPENAI_COMPATIBLE and self.base_url is None:
+        _validate_credential_choice(self.api_key, self.credential_id, self.save_to_vault)
+        if self.provider_type is ProviderType.OPENAI_COMPATIBLE and self.base_url is None \
+                and self.credential_id is None:
             raise ValueError("base_url is required for an OpenAI-compatible provider")
         if self.provider_type is ProviderType.VEXA_NATIVE and self.base_url is None:
             raise ValueError("base_url is required for a Vexa-native provider")
@@ -75,6 +83,9 @@ class ProfileUpdate(BaseModel):
     base_url: HttpUrl | None = None
     capabilities: Annotated[list[CapabilityConfig] | None, Field(default=None, min_length=1)]
     api_key: SecretStr | None = Field(default=None, repr=False)
+    credential_id: UUID | None = None
+    save_to_vault: bool = False
+    credential_label: Annotated[str | None, Field(default=None, min_length=1, max_length=100)]
 
     @model_validator(mode="after")
     def validate_capabilities(self) -> "ProfileUpdate":
@@ -82,7 +93,15 @@ class ProfileUpdate(BaseModel):
             names = [item.capability for item in self.capabilities]
             if len(set(names)) != len(names):
                 raise ValueError("each capability may be configured only once")
+        _validate_credential_choice(self.api_key, self.credential_id, self.save_to_vault)
         return self
+
+
+def _validate_credential_choice(api_key: SecretStr | None, credential_id: UUID | None, save_to_vault: bool) -> None:
+    if api_key is not None and credential_id is not None:
+        raise ValueError("choose a saved key or paste a new one, not both")
+    if save_to_vault and api_key is None:
+        raise ValueError("save_to_vault requires a pasted api_key")
 
 
 class ProfilePublic(BaseModel):
@@ -96,6 +115,9 @@ class ProfilePublic(BaseModel):
     capabilities: list[CapabilityConfig]
     credential_configured: bool
     credential_hint: str | None = None
+    # Set when the profile uses a saved workspace key rather than its own.
+    credential_id: UUID | None = None
+    credential_label: str | None = None
     created_at: datetime
     updated_at: datetime
 

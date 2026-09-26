@@ -249,12 +249,25 @@ class MeetingService:
         ]
         self.repository.replace_transcript(meeting.id, segments)
         resolved = self.repository.get_transcript(meeting.id)
+        self._record_transcription_usage(meeting, resolved)
         return MeetingTranscriptResponse(
             meeting_id=meeting.id,
             vexa_meeting_id=meeting.vexa_meeting_id,
             status=meeting.status,
             segments=resolved,
             segment_count=len(resolved),
+        )
+
+    def _record_transcription_usage(self, meeting: Meeting, segments: "list[MeetingTranscriptSegment]") -> None:
+        """Once a capture is final, log its speech-to-text usage (idempotent per bot session)."""
+        ledger = getattr(self.providers, "usage", None) if self.providers else None
+        if ledger is None or not meeting.transcribe_enabled or meeting.vexa_meeting_id is None \
+                or meeting.status is not MeetingStatus.COMPLETED:
+            return
+        ledger.record_transcription(
+            meeting_id=meeting.id, capture_id=meeting.vexa_meeting_id,
+            route=self.repository.get_transcription_route(meeting.id), segments=segments,
+            joined_at=meeting.joined_at, stopped_at=meeting.stopped_at,
         )
 
     async def participants(self, meeting_id: UUID) -> MeetingParticipantsResponse:

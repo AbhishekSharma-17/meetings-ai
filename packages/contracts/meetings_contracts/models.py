@@ -33,6 +33,10 @@ class ProviderProfile:
     id: UUID = field(default_factory=uuid4)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    # A linked workspace vault key; when set, api_key is resolved from the vault
+    # at load time and is never persisted on the profile itself.
+    credential_id: UUID | None = None
+    credential_label: str | None = None
 
     def supports(self, capability: Capability) -> bool:
         return bool(self.models.get(capability))

@@ -36,7 +36,7 @@ This repository contains a working application and deployment configuration, not
 - Meet, Zoom and Teams capture depends on platform admission rules, the selected Vexa runtime and host resources. Each platform needs a consented live acceptance test.
 - Speaker labels are best-effort capture attribution, not verified identity. Review corrections and confirm email mappings before relying on named claims.
 - Invitees are not verified attendees. Email is sent only after explicit review/approval and a send action; calendar sync does not automatically email invitees.
-- Semantic retrieval currently stores embedding arrays as JSON in PostgreSQL and scores them in the API. Installing the vector extension does not make this pgvector-indexed search.
+- Semantic retrieval uses context-enriched chunks with pgvector embeddings and HNSW indexes in PostgreSQL, fused with keyword search and re-checked against live access rules (SQLite falls back to in-process scoring).
 - The linked wiki combines canonical meeting evidence, explicit relationships and bounded search planning. It is not a fully generated entity graph or unlimited-memory agent.
 - Application tenant checks exist; hosted database RLS, comprehensive security/tenant acceptance, account recovery/SSO, distributed jobs and billing remain open work.
 - Automated/mocked tests do not establish OAuth consent, diarization quality, live email delivery or retrieval accuracy.

@@ -24,6 +24,8 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from .vector_type import VECTOR_INDEX_DIMENSIONS, EmbeddingVector
+
 
 class Base(DeclarativeBase):
     pass
@@ -536,6 +538,144 @@ class MeetingMomGuidanceRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class ProviderCredentialRow(Base):
+    """A reusable, encrypted API key owned by one workspace (OpenAI, OpenRouter, Exa, ...)."""
+
+    __tablename__ = "provider_credentials"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+    provider_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    label: Mapped[str] = mapped_column(String(100), nullable=False)
+    base_url: Mapped[str | None] = mapped_column(Text)
+    credential_ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
+    hint: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_by: Mapped[str | None] = mapped_column(String(36))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ProviderProfileCredentialRow(Base):
+    """Links a provider profile to a vault credential instead of its own key."""
+
+    __tablename__ = "provider_profile_credentials"
+
+    profile_id: Mapped[str] = mapped_column(String(36), ForeignKey("provider_profiles.id"), primary_key=True)
+    credential_id: Mapped[str] = mapped_column(String(36), ForeignKey("provider_credentials.id"), nullable=False, index=True)
+
+
+class OrganizationAiSettingsRow(Base):
+    """Owner-controlled, workspace-wide AI choices (Ask AI chat, vision OCR, research)."""
+
+    __tablename__ = "organization_ai_settings"
+
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), primary_key=True)
+    chat_profile_id: Mapped[str | None] = mapped_column(String(36))
+    chat_model: Mapped[str | None] = mapped_column(String(200))
+    vision_profile_id: Mapped[str | None] = mapped_column(String(36))
+    vision_model: Mapped[str | None] = mapped_column(String(200))
+    research_credential_id: Mapped[str | None] = mapped_column(String(36))
+    research_profile_id: Mapped[str | None] = mapped_column(String(36))
+    research_model: Mapped[str | None] = mapped_column(String(200))
+    updated_by: Mapped[str | None] = mapped_column(String(36))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class UsageEventRow(Base):
+    """One billable or metered call: LLM, embedding, vision, transcription or web research."""
+
+    __tablename__ = "usage_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(30), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(60), nullable=False)
+    provider: Mapped[str] = mapped_column(String(40), nullable=False)
+    model: Mapped[str] = mapped_column(String(200), nullable=False)
+    input_tokens: Mapped[int | None] = mapped_column(Integer)
+    output_tokens: Mapped[int | None] = mapped_column(Integer)
+    units: Mapped[float | None] = mapped_column(Float)
+    unit_type: Mapped[str | None] = mapped_column(String(30))
+    estimated_usd: Mapped[float | None] = mapped_column(Float)
+    price_source: Mapped[str | None] = mapped_column(String(60))
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    meeting_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    knowledge_base_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    prep_event_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    actor_user_id: Mapped[str | None] = mapped_column(String(36))
+    details: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class KnowledgeDocumentRow(Base):
+    """An uploaded or fetched document, scoped to the workspace brief, a prep, or a knowledge base."""
+
+    __tablename__ = "knowledge_documents"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+    scope: Mapped[str] = mapped_column(String(30), nullable=False)
+    scope_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    source_url: Mapped[str | None] = mapped_column(Text)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    page_count: Mapped[int | None] = mapped_column(Integer)
+    ocr_page_count: Mapped[int | None] = mapped_column(Integer)
+    extracted_text: Mapped[str] = mapped_column(Text, nullable=False)
+    summary: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str | None] = mapped_column(String(36))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class KnowledgeChunkRow(Base):
+    """A retrievable, context-enriched passage with its embedding (pgvector in production)."""
+
+    __tablename__ = "knowledge_chunks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+    scope: Mapped[str] = mapped_column(String(30), nullable=False)
+    scope_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    source_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    source_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    document_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    meeting_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    context: Mapped[str] = mapped_column(Text, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    token_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    details: Mapped[dict] = mapped_column(JSON, nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    profile_id: Mapped[str | None] = mapped_column(String(36))
+    model: Mapped[str | None] = mapped_column(String(200))
+    dimensions: Mapped[int | None] = mapped_column(Integer)
+    embedding: Mapped[list[float] | None] = mapped_column(EmbeddingVector())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    embedded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class MeetingPrepInputRow(Base):
+    """What the organizer supplied before generating a briefing (company, website, links, notes)."""
+
+    __tablename__ = "meeting_prep_inputs"
+
+    calendar_event_id: Mapped[str] = mapped_column(String(36), ForeignKey("calendar_event_cache.id"), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+    target_company: Mapped[str | None] = mapped_column(String(200))
+    company_website: Mapped[str | None] = mapped_column(Text)
+    links: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    notes: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_by: Mapped[str | None] = mapped_column(String(36))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class SchemaVersionRow(Base):
     __tablename__ = "schema_version"
 
@@ -577,6 +717,10 @@ SCHEMA_TABLES_BY_VERSION: dict[int, tuple[str, ...]] = {
     19: ("meeting_mom_guidance",),
     20: ("meeting_sources",),
     21: ("calendar_event_cache", "calendar_sync_state", "organization_briefs", "organization_brief_documents", "meeting_preps"),
+    22: (
+        "provider_credentials", "provider_profile_credentials", "organization_ai_settings",
+        "usage_events", "knowledge_documents", "knowledge_chunks", "meeting_prep_inputs",
+    ),
 }
 
 SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
@@ -623,6 +767,13 @@ SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
     "organization_briefs": ("organization_id", "website", "overview", "services", "products", "differentiators", "positioning", "updated_at"),
     "organization_brief_documents": ("id", "organization_id", "filename", "content_type", "extracted_text", "uploaded_at"),
     "meeting_preps": ("id", "organization_id", "user_id", "calendar_event_id", "context", "profile_urls", "report", "created_at"),
+    "provider_credentials": ("id", "organization_id", "provider_type", "label", "base_url", "credential_ciphertext", "hint", "created_by", "created_at", "updated_at", "last_used_at"),
+    "provider_profile_credentials": ("profile_id", "credential_id"),
+    "organization_ai_settings": ("organization_id", "chat_profile_id", "chat_model", "vision_profile_id", "vision_model", "research_credential_id", "research_profile_id", "research_model", "updated_by", "updated_at"),
+    "usage_events": ("id", "organization_id", "kind", "purpose", "provider", "model", "input_tokens", "output_tokens", "units", "unit_type", "estimated_usd", "price_source", "duration_ms", "status", "meeting_id", "knowledge_base_id", "prep_event_id", "actor_user_id", "details", "created_at"),
+    "knowledge_documents": ("id", "organization_id", "scope", "scope_id", "filename", "content_type", "source_url", "size_bytes", "page_count", "ocr_page_count", "extracted_text", "summary", "status", "error", "created_by", "created_at", "indexed_at"),
+    "knowledge_chunks": ("id", "organization_id", "scope", "scope_id", "source_type", "source_id", "document_id", "meeting_id", "position", "title", "context", "content", "token_count", "details", "fingerprint", "profile_id", "model", "dimensions", "embedding", "created_at", "embedded_at"),
+    "meeting_prep_inputs": ("calendar_event_id", "organization_id", "target_company", "company_website", "links", "notes", "updated_by", "updated_at"),
 }
 
 
@@ -662,10 +813,50 @@ def _validate_database_schema(connection, version: int) -> None:
             )
 
 
+def _migrate_to_v22(connection) -> None:
+    """Carry legacy usage and brief documents into the richer v22 tables; add pgvector indexes."""
+    connection.execute(insert(UsageEventRow).from_select(
+        ["id", "organization_id", "kind", "purpose", "provider", "model", "input_tokens", "output_tokens",
+         "units", "unit_type", "estimated_usd", "price_source", "duration_ms", "status", "meeting_id",
+         "knowledge_base_id", "prep_event_id", "actor_user_id", "details", "created_at"],
+        select(
+            ModelUsageRow.id, ModelUsageRow.organization_id,
+            text("CASE WHEN model_usage.purpose LIKE '%embedding%' THEN 'embedding' ELSE 'llm' END"),
+            ModelUsageRow.purpose, ModelUsageRow.provider, ModelUsageRow.model,
+            ModelUsageRow.input_tokens, ModelUsageRow.output_tokens, text("NULL"), text("'tokens'"),
+            ModelUsageRow.estimated_usd, text("'legacy_ledger'"), text("NULL"), text("'succeeded'"),
+            ModelUsageRow.meeting_id, ModelUsageRow.knowledge_base_id, text("NULL"), text("NULL"),
+            text("'{}'"), ModelUsageRow.created_at,
+        ),
+    ))
+    connection.execute(insert(KnowledgeDocumentRow).from_select(
+        ["id", "organization_id", "scope", "scope_id", "filename", "content_type", "source_url", "size_bytes",
+         "page_count", "ocr_page_count", "extracted_text", "summary", "status", "error", "created_by",
+         "created_at", "indexed_at"],
+        select(
+            OrganizationBriefDocumentRow.id, OrganizationBriefDocumentRow.organization_id,
+            text("'organization'"), text("NULL"), OrganizationBriefDocumentRow.filename,
+            OrganizationBriefDocumentRow.content_type, text("NULL"),
+            text("length(organization_brief_documents.extracted_text)"), text("NULL"), text("0"),
+            OrganizationBriefDocumentRow.extracted_text, text("NULL"), text("'pending'"), text("NULL"),
+            text("NULL"), OrganizationBriefDocumentRow.uploaded_at, text("NULL"),
+        ),
+    ))
+    if connection.dialect.name == "postgresql":
+        for dimensions in VECTOR_INDEX_DIMENSIONS:
+            if dimensions > 2000:
+                continue  # HNSW on vector supports up to 2,000 dimensions; larger models use exact scans.
+            connection.execute(text(
+                f"CREATE INDEX IF NOT EXISTS knowledge_chunks_embedding_{dimensions}_hnsw "
+                f"ON knowledge_chunks USING hnsw ((embedding::vector({dimensions})) vector_cosine_ops) "
+                f"WHERE dimensions = {dimensions}"
+            ))
+
+
 class Database:
     """Upgrades known schemas and rejects unknown or incomplete ones."""
 
-    SCHEMA_VERSION = 21
+    SCHEMA_VERSION = 22
 
     def __init__(self, url: str) -> None:
         engine_options: dict[str, object] = {"pool_pre_ping": True}
@@ -709,6 +900,9 @@ class Database:
                     )
                 _validate_database_schema(connection, current)
             for version in range(current + 1, self.SCHEMA_VERSION + 1):
+                if version == 22 and connection.dialect.name == "postgresql":
+                    # knowledge_chunks.embedding is a pgvector column; the type must exist first.
+                    connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
                 for name in SCHEMA_TABLES_BY_VERSION[version]:
                     Base.metadata.tables[name].create(connection, checkfirst=True)
                 if version == 8:
@@ -758,6 +952,8 @@ class Database:
                             started_at=None, completed_at=None, next_retry_at=None,
                             last_error=None,
                         ))
+                if version == 22:
+                    _migrate_to_v22(connection)
                 _validate_database_schema(connection, version)
                 connection.execute(insert(SchemaVersionRow).values(
                     version=version, applied_at=datetime.now(UTC),

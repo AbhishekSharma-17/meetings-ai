@@ -55,21 +55,18 @@ test("provider and meeting-list selections survive page changes and reload", asy
   await expect(page.getByPlaceholder("Search meetings")).toHaveValue("Acme");
 });
 
-test("knowledge base and chat model survive navigation", async ({ page }) => {
+test("knowledge base selection survives navigation and reload", async ({ page }) => {
   await page.goto("/");
   const navigation = page.getByRole("navigation", { name: "Main navigation" });
   await navigation.getByRole("button", { name: "AI knowledge" }).click();
   await page.getByRole("button", { name: /Client B/ }).click();
   await expect(page.getByRole("button", { name: /Client B/ })).toHaveClass(/selected/);
-  await page.locator(".knowledge-model-trigger").click();
-  await page.getByRole("option", { name: /Sol/ }).click();
   await navigation.getByRole("button", { name: "Meetings" }).click();
   await navigation.getByRole("button", { name: "AI knowledge" }).click();
   await expect(page.getByRole("button", { name: /Client B/ })).toHaveClass(/selected/);
-  await expect(page.locator(".knowledge-model-trigger")).toContainText("Sol");
   await page.reload();
   await expect(page.getByRole("button", { name: /Client B/ })).toHaveClass(/selected/);
-  await expect(page.locator(".knowledge-model-trigger")).toContainText("Sol");
+  await expect(page.locator(".knowledge-model-trigger")).toContainText("Workspace model");
 });
 
 test("preferences are isolated when the signed-in user changes", async ({ page }) => {

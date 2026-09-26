@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Link2 } from "lucide-react";
+import { Link2, RefreshCw } from "lucide-react";
 import type { CalendarConnection, CalendarSyncState } from "@/lib/types";
 import { AccountRow, CalendarAliasDialog, ProviderGrid, connectionStatusLabel } from "./calendar-connections";
 import type { CalendarProvider } from "./calendar-providers";
@@ -10,10 +10,15 @@ import { Badge, EmptyState } from "./ui/feedback";
 const syncFormat: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" };
 
 /** Integrations tab: connect sources, then name, rename or disconnect each account. */
-export function CalendarIntegrations({ connections, syncs, busy, onConnect, onRename, onDisconnect }: {
+export function CalendarIntegrations({ connections, syncs, busy, syncingIds, canSync, onSync, onConnect, onRename, onDisconnect }: {
   connections: CalendarConnection[];
   syncs: CalendarSyncState[];
   busy: boolean;
+  /** Accounts with a per-row sync in flight. */
+  syncingIds: string[];
+  /** False while the calendar's date range is invalid. */
+  canSync: boolean;
+  onSync(connectionId: string): void;
   onConnect(provider: CalendarProvider, alias: string): void;
   onRename(connectionId: string, alias: string): Promise<boolean>;
   onDisconnect(connectionId: string): Promise<boolean>;
@@ -39,7 +44,7 @@ export function CalendarIntegrations({ connections, syncs, busy, onConnect, onRe
 
     <section className="card calendar-accounts" aria-labelledby="calendar-accounts-title">
       <div className="card-header">
-        <div><h3 id="calendar-accounts-title">Accounts</h3><p>Rename an account to tell it apart, or disconnect it.</p></div>
+        <div><h3 id="calendar-accounts-title">Accounts</h3><p>Sync, rename or disconnect each account on its own.</p></div>
         <span className="section-count">{connections.length} total</span>
       </div>
       {connections.length ? <ul className="calendar-account-list">
@@ -47,10 +52,15 @@ export function CalendarIntegrations({ connections, syncs, busy, onConnect, onRe
           const sync = syncs.find((state) => state.connection_id === item.id);
           const editing = editTarget === item.id;
           const confirming = disconnectTarget === item.id;
+          const rowSyncing = syncingIds.includes(item.id);
+          const syncLabel = rowSyncing ? "Syncing…" : sync ? `Synced ${new Date(sync.last_synced_at).toLocaleString(undefined, syncFormat)}` : "Not synced yet";
           const meta = item.status === "ACTIVE"
-            ? <small>{sync ? `Synced ${new Date(sync.last_synced_at).toLocaleString(undefined, syncFormat)}` : "Not synced yet"}</small>
+            ? <small role={rowSyncing ? "status" : undefined}>{syncLabel}</small>
             : <Badge tone="warning" dot>{connectionStatusLabel(item.status)}</Badge>;
           const actions = editing || confirming ? null : <>
+            {item.status === "ACTIVE" ? <button type="button" className="button ghost icon sm calendar-row-sync" aria-label={`Sync ${item.label}`} title={`Sync ${item.label}`} aria-busy={rowSyncing || undefined} disabled={busy || rowSyncing || !canSync} onClick={() => onSync(item.id)}>
+              <RefreshCw aria-hidden="true" className={rowSyncing ? "calendar-spin" : undefined} />
+            </button> : null}
             <button type="button" className="button ghost sm" disabled={busy} onClick={() => startRename(item)}>Rename</button>
             <button type="button" className="button ghost sm calendar-disconnect-button" disabled={busy} onClick={() => { setEditTarget(null); setDisconnectTarget(item.id); }}>Disconnect</button>
           </>;

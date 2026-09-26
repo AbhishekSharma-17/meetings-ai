@@ -1,14 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { KeyRound, Plus, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
 import { useUiPreference } from "@/lib/ui-preferences";
-import type { ProfileKind, ProviderProfile } from "@/lib/types";
+import type { AiSettingsView, ProfileKeyChoice, ProfileKind, ProviderProfile, VaultCredential } from "@/lib/types";
 import { PageHeader } from "./ui/page-header";
 import { Badge, EmptyState } from "./ui/feedback";
 import { SettingsToast, type SettingsNotice } from "./settings-toast";
 import { ProviderEditor } from "./provider-editor";
+import { ApiKeysCard } from "./provider-keys";
+import { WorkspaceAiCard } from "./ai-settings-card";
 import { connectionText, connectionTone, isUnsavedProfile, profileInfo, profileKinds } from "./provider-profile-info";
 
 const STACKED_LAYOUT_QUERY = "(max-width: 1100px)";
@@ -24,9 +26,38 @@ export function ProviderSettings({ identity, profiles, onProfilesChange }: { ide
   const [notice, setNotice] = useState<SettingsNotice | null>(null);
   const activeId = profiles.some((profile) => profile.id === selectedId) ? selectedId : (profiles[0]?.id ?? "");
   const selected = profiles.find((profile) => profile.id === activeId);
+  const [credentials, setCredentials] = useState<VaultCredential[]>([]);
+  const [keysLoading, setKeysLoading] = useState(true);
+  const [keysError, setKeysError] = useState<string | null>(null);
+  const [aiSettings, setAiSettings] = useState<AiSettingsView | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const isOwner = aiSettings?.can_edit === true;
+  const textProfiles = profiles.filter((profile) => !isUnsavedProfile(profile.id) && profile.capabilities.includes("text_generation"));
 
-  async function save(profile: ProviderProfile, apiKey?: string) {
-    const saved = await meetingsService.saveProviderProfile(profile, apiKey);
+  const refreshCredentials = useCallback(async () => {
+    try { setCredentials(await meetingsService.listCredentials()); setKeysError(null); }
+    catch (cause) { setKeysError(cause instanceof Error ? cause.message : "Saved keys could not be loaded."); }
+    finally { setKeysLoading(false); }
+  }, []);
+  const refreshAiSettings = useCallback(async () => {
+    try { setAiSettings(await meetingsService.getAiSettings()); setAiError(null); }
+    catch (cause) { setAiError(cause instanceof Error ? cause.message : "Workspace AI settings could not be loaded."); }
+  }, []);
+  useEffect(() => {
+    let active = true;
+    meetingsService.listCredentials()
+      .then((items) => { if (active) { setCredentials(items); setKeysError(null); } })
+      .catch((cause: unknown) => { if (active) setKeysError(cause instanceof Error ? cause.message : "Saved keys could not be loaded."); })
+      .finally(() => { if (active) setKeysLoading(false); });
+    meetingsService.getAiSettings()
+      .then((view) => { if (active) setAiSettings(view); })
+      .catch((cause: unknown) => { if (active) setAiError(cause instanceof Error ? cause.message : "Workspace AI settings could not be loaded."); });
+    return () => { active = false; };
+  }, []);
+
+  async function save(profile: ProviderProfile, apiKey?: string, keyChoice?: ProfileKeyChoice) {
+    const saved = await meetingsService.saveProviderProfile(profile, apiKey, keyChoice);
+    if (keyChoice) void refreshCredentials();
     onProfilesChange(profiles.map((candidate) => candidate.id === profile.id ? saved : candidate.kind === saved.kind && saved.isDefault ? { ...candidate, isDefault: false } : candidate));
     setSelectedId(saved.id);
     setNotice({ tone: "success", text: `${saved.label} saved. API keys are write-only.` });
@@ -35,6 +66,7 @@ export function ProviderSettings({ identity, profiles, onProfilesChange }: { ide
 
   async function remove(profile: ProviderProfile) {
     await meetingsService.deleteProviderProfile(profile.id);
+    void refreshCredentials(); void refreshAiSettings();
     const next = profiles.filter((candidate) => candidate.id !== profile.id).map((candidate) => candidate.kind === profile.kind && profile.isDefault ? { ...candidate, isDefault: false } : candidate);
     onProfilesChange(next);
     setSelectedId(next[0]?.id ?? "");
@@ -60,12 +92,16 @@ export function ProviderSettings({ identity, profiles, onProfilesChange }: { ide
       description="Each step of the meeting pipeline uses a named model configuration. Defaults apply to the next bot join or draft; work already running keeps its route."
       actions={<span className="provider-privacy"><ShieldCheck aria-hidden="true" /> Keys are write-only and encrypted at rest</span>}
     />
+    <div className="provider-overview">
+      <ApiKeysCard credentials={credentials} loading={keysLoading} error={keysError} canManage={isOwner} onRefresh={refreshCredentials} onNotice={setNotice} />
+      <WorkspaceAiCard view={aiSettings} error={aiError} profiles={textProfiles} exaKeys={credentials.filter((item) => item.provider_type === "exa")} onSaved={(view) => { setAiSettings(view); void refreshCredentials(); }} onNotice={setNotice} />
+    </div>
     <div className="provider-layout">
       <div className="provider-groups">
         {profileKinds.map((kind) => <ProfileGroup key={kind} kind={kind} profiles={profiles.filter((profile) => profile.kind === kind)} selectedId={activeId} onSelect={select} onAdd={() => addProfile(kind)} />)}
       </div>
       {selected
-        ? <ProviderEditor key={selected.id} identity={identity} profile={selected} onSave={save} onDelete={remove} onChange={(profile) => onProfilesChange(profiles.map((candidate) => candidate.id === selected.id ? profile : candidate))} onNotice={setNotice} />
+        ? <ProviderEditor key={selected.id} identity={identity} profile={selected} credentials={credentials} canSaveKeys={isOwner} onSave={save} onDelete={remove} onChange={(profile) => onProfilesChange(profiles.map((candidate) => candidate.id === selected.id ? profile : candidate))} onNotice={setNotice} />
         : <div className="provider-editor-empty"><EmptyState icon={<SlidersHorizontal />} title="Add your first configuration">Use an Add button to set up transcription, minutes or embeddings.</EmptyState></div>}
     </div>
     <SettingsToast notice={notice} onDismiss={() => setNotice(null)} />
@@ -73,6 +109,7 @@ export function ProviderSettings({ identity, profiles, onProfilesChange }: { ide
 }
 
 function credentialText(profile: ProviderProfile): string {
+  if (profile.credentialId && profile.credentialLabel) return profile.credentialLabel;
   if (profile.apiKeyConfigured) return profile.credentialHint ?? "Key saved";
   return profile.executionLocation === "local" ? "Key optional" : "No key";
 }
@@ -97,7 +134,7 @@ function ProfileGroup({ kind, profiles, selectedId, onSelect, onAdd }: { kind: P
             </span>
             <span className="provider-row-meta">
               <span className="tag">{profile.executionLocation === "local" ? "Local" : "Cloud"}</span>
-              <span className="provider-row-key"><KeyRound aria-hidden="true" />{credentialText(profile)}</span>
+              <span className="provider-row-key" title={profile.credentialLabel ? `Saved key ${profile.credentialLabel} ${profile.credentialHint ?? ""}`.trim() : undefined}><KeyRound aria-hidden="true" /><span>{credentialText(profile)}</span></span>
               {unsaved ? <Badge tone="warning" dot>Not saved</Badge> : <Badge tone={connectionTone[profile.connectionState]} dot>{connectionText[profile.connectionState]}</Badge>}
             </span>
           </button>

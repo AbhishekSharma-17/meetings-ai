@@ -17,6 +17,7 @@ check 'hex colours in components' '#[0-9a-fA-F]{3,8}\b' -g '!src/components/bran
 check 'native select' '<select\b'
 check 'hand-built confirm dialog' 'window\.confirm\('
 check 'per-icon stroke width' 'strokeWidth='
+check 'sparkle icons (product decision: never use them)' '\b(Sparkles|Sparkle|WandSparkles)\b'
 check 'colour-name utilities' '\b(bg|text|border|ring)-(slate|gray|blue|purple|teal|green|red|orange)-[0-9]'
 if rg -n '#[0-9a-fA-F]{3,8}\b|box-shadow:[^;]*[0-9]+px' src/app/styles.css; then
   printf 'FAIL hardcoded colour or shadow in token stylesheet\n'

@@ -4,7 +4,7 @@ from hashlib import sha256
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from meetings_contracts import (
     ActionItem,
@@ -38,6 +38,7 @@ from .database import (
     MeetingKnowledgeSettingsRow,
     MeetingKnowledgeBaseRow,
     MeetingMomGuidanceRow,
+    KnowledgeChunkRow,
     KnowledgeEmbeddingRow,
     KnowledgeIndexJobRow,
     KnowledgeBaseRow,
@@ -51,6 +52,9 @@ from .database import (
     ProviderTenantRow,
     OrganizationProviderDefaultRow,
     MeetingTenantRow,
+    OrganizationAiSettingsRow,
+    ProviderCredentialRow,
+    ProviderProfileCredentialRow,
     ProviderProfileRow,
     TranscriptSegmentRow,
     TranscriptSegmentMetadataRow,
@@ -106,6 +110,11 @@ class SQLAlchemyRepository:
             KnowledgeEmbeddingRow.meeting_id == str(meeting_id),
             KnowledgeEmbeddingRow.organization_id == str(current_organization_id()),
         ))
+        # Chunks hold copies of meeting text: drop them whenever canonical evidence changes.
+        session.execute(delete(KnowledgeChunkRow).where(
+            KnowledgeChunkRow.meeting_id == str(meeting_id),
+            KnowledgeChunkRow.organization_id == str(current_organization_id()),
+        ))
         SQLAlchemyRepository._queue_knowledge_index(session, meeting_id)
 
     @staticmethod
@@ -157,7 +166,7 @@ class SQLAlchemyRepository:
             rows = session.query(ProviderProfileRow).join(
                 ProviderTenantRow, ProviderTenantRow.provider_id == ProviderProfileRow.id
             ).filter(ProviderTenantRow.organization_id == str(current_organization_id())).order_by(ProviderProfileRow.created_at).all()
-            return [self._profile_from_row(row) for row in rows]
+            return [self._profile_from_row(row, session) for row in rows]
 
     def get_profile(self, profile_id: UUID) -> ProviderProfile:
         with self.database.session_factory() as session:
@@ -165,7 +174,7 @@ class SQLAlchemyRepository:
             owner = session.get(ProviderTenantRow, str(profile_id))
             if row is None or owner is None or owner.organization_id != str(current_organization_id()):
                 raise ProfileNotFoundError(profile_id)
-            return self._profile_from_row(row)
+            return self._profile_from_row(row, session)
 
     def save_profile(self, profile: ProviderProfile) -> ProviderProfile:
         with self.database.session_factory.begin() as session:
@@ -186,9 +195,26 @@ class SQLAlchemyRepository:
             row.capabilities = {
                 capability.value: model for capability, model in profile.models.items()
             }
-            row.credential_ciphertext = self.cipher.encrypt(profile.api_key)
             row.created_at = profile.created_at
             row.updated_at = profile.updated_at
+            link = session.get(ProviderProfileCredentialRow, str(profile.id))
+            if profile.credential_id is not None:
+                credential = session.get(ProviderCredentialRow, str(profile.credential_id))
+                if credential is None or credential.organization_id != str(current_organization_id()):
+                    raise ProfileNotFoundError(profile.credential_id)
+                # A vault-backed profile never stores its own copy of the key.
+                row.credential_ciphertext = None
+                if link is None:
+                    session.flush()  # the link's foreign key needs the profile row first
+                    session.add(ProviderProfileCredentialRow(
+                        profile_id=str(profile.id), credential_id=credential.id,
+                    ))
+                else:
+                    link.credential_id = credential.id
+            else:
+                row.credential_ciphertext = self.cipher.encrypt(profile.api_key)
+                if link is not None:
+                    session.delete(link)
         return profile
 
     def delete_profile(self, profile_id: UUID) -> None:
@@ -219,10 +245,38 @@ class SQLAlchemyRepository:
                 KnowledgeEmbeddingRow.organization_id == str(current_organization_id()),
                 KnowledgeEmbeddingRow.profile_id == str(profile_id),
             ))
+            # Keep chunk text (lexical search still works); vectors from a deleted profile are unusable.
+            session.execute(update(KnowledgeChunkRow).where(
+                KnowledgeChunkRow.organization_id == str(current_organization_id()),
+                KnowledgeChunkRow.profile_id == str(profile_id),
+            ).values(embedding=None, profile_id=None, model=None, dimensions=None, embedded_at=None))
+            settings = session.get(OrganizationAiSettingsRow, str(current_organization_id()))
+            if settings is not None:
+                for prefix in ("chat", "vision", "research"):
+                    if getattr(settings, f"{prefix}_profile_id") == str(profile_id):
+                        setattr(settings, f"{prefix}_profile_id", None)
+                        setattr(settings, f"{prefix}_model", None)
+            link = session.get(ProviderProfileCredentialRow, str(profile_id))
+            if link is not None:
+                session.delete(link)
             session.delete(owner)
+            # Without ORM relationships the unit of work does not order these
+            # deletes; PostgreSQL enforces the foreign keys, so remove children first.
+            session.flush()
             session.delete(row)
 
-    def _profile_from_row(self, row: ProviderProfileRow) -> ProviderProfile:
+    def _profile_from_row(self, row: ProviderProfileRow, session: object) -> ProviderProfile:
+        api_key = self.cipher.decrypt(row.credential_ciphertext)
+        credential_id = credential_label = None
+        link = session.get(ProviderProfileCredentialRow, row.id)
+        if link is not None:
+            credential = session.get(ProviderCredentialRow, link.credential_id)
+            # A link never grants a key from another workspace.
+            if credential is not None and credential.organization_id == str(current_organization_id()):
+                api_key = self.cipher.decrypt(credential.credential_ciphertext)
+                credential_id, credential_label = UUID(credential.id), credential.label
+            else:
+                api_key = None
         return ProviderProfile(
             id=UUID(row.id),
             name=row.name,
@@ -230,9 +284,11 @@ class SQLAlchemyRepository:
             execution_location=ExecutionLocation(row.execution_location),
             base_url=row.base_url,
             models={Capability(key): value for key, value in row.capabilities.items()},
-            api_key=self.cipher.decrypt(row.credential_ciphertext),
+            api_key=api_key,
             created_at=_utc(row.created_at),
             updated_at=_utc(row.updated_at),
+            credential_id=credential_id,
+            credential_label=credential_label,
         )
 
     def save_default(self, selection: DefaultSelection) -> DefaultSelection:
@@ -318,7 +374,7 @@ class SQLAlchemyRepository:
             self._queue_knowledge_index(session, meeting_id)
             self._delete_cited_conversations(session, meeting_id)
             for model in (
-                CalendarScheduleRow, MeetingSourceRow, KnowledgeEmbeddingRow, MeetingKnowledgeBaseRow, MeetingKnowledgeSettingsRow, MeetingMomGuidanceRow,
+                CalendarScheduleRow, MeetingSourceRow, KnowledgeEmbeddingRow, KnowledgeChunkRow, MeetingKnowledgeBaseRow, MeetingKnowledgeSettingsRow, MeetingMomGuidanceRow,
                 MeetingDeliverySettingsRow, PostMeetingJobRow, TranscriptSegmentRow,
                 TranscriptSegmentMetadataRow, TranscriptSpeakerCorrectionRow,
                 MeetingSpeakerIdentityRow, TranscriptReviewStateRow, MinutesSourceRow,

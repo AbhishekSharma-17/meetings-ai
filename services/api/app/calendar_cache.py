@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from .accounts import Actor
 from .composio_calendar import CalendarEvent, CalendarError, CalendarInvitee, ComposioCalendar, calendar_date_window
-from .database import CalendarEventCacheRow, CalendarSyncStateRow, Database, MeetingPrepRow
+from .database import CalendarEventCacheRow, CalendarSyncStateRow, Database, KnowledgeDocumentRow, MeetingPrepInputRow, MeetingPrepRow
 
 
 class CalendarSyncRequest(BaseModel):
@@ -126,9 +126,14 @@ class CalendarCacheService:
                             # Keep a prepared meeting's event identity so its
                             # saved briefing is still readable after removal
                             # from the upstream calendar.
+                            # Saved prep inputs and prep uploads also keep it
+                            # (they reference the event, and are the user's work).
                             has_prep = session.execute(select(MeetingPrepRow.id).where(
                                 MeetingPrepRow.calendar_event_id == row.id,
-                            ).limit(1)).first()
+                            ).limit(1)).first() or session.get(MeetingPrepInputRow, row.id) or session.execute(
+                                select(KnowledgeDocumentRow.id).where(
+                                    KnowledgeDocumentRow.scope == "prep", KnowledgeDocumentRow.scope_id == row.id,
+                                ).limit(1)).first()
                             if not has_prep:
                                 session.delete(row)
                 sync_key = (str(actor.organization_id), str(actor.user_id), connection_id)

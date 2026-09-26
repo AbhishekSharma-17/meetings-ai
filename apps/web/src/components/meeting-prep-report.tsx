@@ -1,41 +1,25 @@
-import type { ReactNode } from "react";
 import { BriefcaseBusiness, CircleHelp, ExternalLink, Lightbulb, MessageSquareText, TriangleAlert, UserRoundSearch } from "lucide-react";
-import type { PrepReport, PrepSource } from "@/lib/types";
+import type { AnyPrepReport, PrepReport, PrepReportV2 } from "@/lib/types";
 import { Alert, Badge } from "./ui/feedback";
+import { briefingTime, Citations, hostname, ListSection, safeHref, SectionHeading } from "./prep-shared";
+import { PrepReportV2View } from "./prep-report-v2";
 
-/** Only follow web links; anything else renders as plain text. */
-function safeHref(url: string): string | undefined {
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.href : undefined;
-  } catch { return undefined; }
+export function isReportV2(report: AnyPrepReport): report is PrepReportV2 {
+  return "report_version" in report && report.report_version === 2;
 }
 
-function hostname(url: string): string {
-  try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return url; }
+/** Renders a saved briefing in whichever schema it was stored with (v1 legacy or v2). */
+export function PrepReportView({ report }: { report: AnyPrepReport }) {
+  return isReportV2(report) ? <PrepReportV2View report={report} /> : <LegacyPrepReport report={report} />;
 }
 
-function Citation({ id, source }: { id: string; source: PrepSource }) {
-  const href = safeHref(source.url);
-  if (!href) return <span className="prep-citation" title={source.title}>{id}</span>;
-  return <a className="prep-citation" href={href} target="_blank" rel="noreferrer noopener" aria-label={`Source ${id}`} title={source.title}>{id}</a>;
-}
-
-function ListSection({ title, icon, items, tone }: { title: string; icon: ReactNode; items: string[]; tone?: "warning" }) {
-  if (!items.length) return null;
-  return <section className={tone ? `prep-report-section ${tone}` : "prep-report-section"}>
-    <h3><span className="prep-section-icon" aria-hidden="true">{icon}</span>{title}</h3>
-    <ul>{items.map((item, index) => <li key={index}>{item}</li>)}</ul>
-  </section>;
-}
-
-/** A saved briefing, laid out as a short document: summary, cited findings, then what to do with it. */
-export function PrepReportView({ report }: { report: PrepReport }) {
+/** A v1 briefing, laid out as a short document: summary, cited findings, then what to do with it. */
+function LegacyPrepReport({ report }: { report: PrepReport }) {
   const sourceMap = new Map(report.sources.map((source) => [source.id, source]));
   return <article className="card prep-report" aria-labelledby="prep-report-title">
     <div className="card-header">
       <div>
-        <div className="prep-report-meta"><Badge tone="success" dot>Saved briefing</Badge><small>{new Date(report.generated_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} · {report.provider} / {report.model}</small></div>
+        <div className="prep-report-meta"><Badge tone="success" dot>Saved briefing</Badge><small>{new Date(report.generated_at).toLocaleString(undefined, briefingTime)} · {report.provider} / {report.model}</small></div>
         <h2 id="prep-report-title">{report.target_company ? `Briefing: ${report.target_company}` : "Meeting briefing"}</h2>
       </div>
     </div>
@@ -43,10 +27,10 @@ export function PrepReportView({ report }: { report: PrepReport }) {
       <p className="prep-report-lead">{report.executive_brief}</p>
       {!report.public_research_performed ? <Alert tone="neutral" role="note">Context only. No public web research was run.</Alert> : null}
       {report.findings.length ? <section className="prep-report-section">
-        <h3><span className="prep-section-icon" aria-hidden="true"><Lightbulb /></span>Public findings</h3>
+        <SectionHeading icon={<Lightbulb />}>Public findings</SectionHeading>
         <ul className="prep-findings">{report.findings.map((finding, index) => <li key={index}>
           <span>{finding.statement}</span>
-          <span className="prep-citations">{finding.source_ids.map((id) => { const source = sourceMap.get(id); return source ? <Citation key={id} id={id} source={source} /> : null; })}</span>
+          <Citations ids={finding.source_ids} sources={sourceMap} />
         </li>)}</ul>
       </section> : null}
       <div className="prep-report-grid">
@@ -60,7 +44,7 @@ export function PrepReportView({ report }: { report: PrepReport }) {
         <h3>Sources <span className="section-count">{report.sources.length}</span></h3>
         <ol>{report.sources.map((source) => {
           const href = safeHref(source.url);
-          return <li key={source.id}>
+          return <li key={source.id} id={`prep-source-${source.id}`}>
             <span className="prep-source-id">{source.id}</span>
             <span className="prep-source-copy">
               {href ? <a href={href} target="_blank" rel="noreferrer noopener">{source.title} <ExternalLink aria-hidden="true" /></a> : <b>{source.title}</b>}

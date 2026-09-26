@@ -21,8 +21,10 @@ The two product databases on that server are `meetings_ai` and
 access to the other's database. The unrelated `Postgres` service in the same
 Railway project is **not** used by Meetings AI. Product connections use
 Railway private networking. PostgreSQL's `vector` extension is installed in
-`meetings_ai`, but the current knowledge index still stores JSON vectors and
-scores them in the API; do not describe it as pgvector-backed search yet.
+`meetings_ai`; since schema v22 the knowledge index uses a pgvector column with
+partial HNSW indexes (see docs/knowledge/architecture.md). The v22 migration runs
+`CREATE EXTENSION IF NOT EXISTS vector` and is additive; take a `pg_dump` backup of
+`meetings_ai` before deploying an API release that raises the schema version.
 
 The Vexa service uses [the thin overlay Dockerfile](../../deploy/railway/vexa.Dockerfile)
 over a digest-pinned upstream Vexa Lite v0.12.27 image. It copies only the

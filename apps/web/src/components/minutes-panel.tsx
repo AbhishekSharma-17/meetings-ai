@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Check, FileText, RotateCcw, Sparkles, Trash2 } from "lucide-react";
+import { Check, FilePenLine, FileText, RotateCcw, Trash2 } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
 import type { MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MomGuidance, PostMeetingJob, ResendStatus, TranscriptSegment } from "@/lib/types";
 import { Alert, EmptyState } from "./ui/feedback";
@@ -246,7 +246,7 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
         {locked ? <Alert tone="success" title="Recap sent">This delivered MOM is locked. Corrections require a future versioned workflow.</Alert> : null}
         <MinutesFormat guidance={momGuidance} focusInput={momFocusInput} locked={locked} saving={savingGuidance} onGuidanceChange={setMomGuidance} onFocusInputChange={setMomFocusInput} onSave={() => void saveGuidance()} />
         {!minutes || !draft ? <EmptyState plain icon={<FileText />} title="No MOM draft yet." action={<div className="button-group">
-          <button className="button primary" disabled={!canGenerate || busy !== null} onClick={() => void generate()}><Sparkles aria-hidden="true" />{busy === "generate" ? "Generating…" : "Generate MOM"}</button>
+          <button className="button primary" disabled={!canGenerate || busy !== null} onClick={() => void generate()}><FilePenLine aria-hidden="true" />{busy === "generate" ? "Generating…" : "Generate MOM"}</button>
           {postMeetingJob?.enabled && postMeetingJob.last_error && meeting.status === "ready" ? <button className="button secondary" disabled={busy !== null} onClick={() => void retryAutomaticDraft()}>{busy === "retry" ? "Retrying…" : "Retry automatic draft"}</button> : null}
         </div>}>{emptyMessage({ momDeleted, postMeetingJob, canGenerate, transcriptCount, capturing: captureInProgress.has(meeting.status) })}</EmptyState>
           : locked ? <MinutesDocument draft={draft} segments={segments} />

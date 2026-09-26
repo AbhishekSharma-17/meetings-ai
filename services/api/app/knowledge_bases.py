@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, func, select, update
 
 from .database import (
-    Database, KnowledgeBaseAccessRow, KnowledgeBaseRow, KnowledgeConversationRow, KnowledgeMessageRow, KnowledgeEmbeddingRow, KnowledgeIndexJobRow,
+    Database, KnowledgeBaseAccessRow, KnowledgeBaseRow, KnowledgeConversationRow, KnowledgeMessageRow, KnowledgeEmbeddingRow, KnowledgeIndexJobRow, KnowledgeChunkRow, KnowledgeDocumentRow,
     LEGACY_ADMIN_USER_ID, MeetingKnowledgeBaseRow, MeetingTenantRow,
     MeetingKnowledgeSettingsRow, MeetingMinutesRow, MeetingRow, MeetingSpeakerIdentityRow,
     OrganizationMembershipRow,
@@ -275,6 +275,15 @@ class KnowledgeBaseService:
                 KnowledgeEmbeddingRow.knowledge_base_id == row.id,
                 KnowledgeEmbeddingRow.organization_id == row.organization_id,
             ))
+            # Every chunk and uploaded document scoped to this base goes with it.
+            session.execute(delete(KnowledgeChunkRow).where(
+                KnowledgeChunkRow.scope == "knowledge_base", KnowledgeChunkRow.scope_id == row.id,
+                KnowledgeChunkRow.organization_id == row.organization_id,
+            ))
+            session.execute(delete(KnowledgeDocumentRow).where(
+                KnowledgeDocumentRow.scope == "knowledge_base", KnowledgeDocumentRow.scope_id == row.id,
+                KnowledgeDocumentRow.organization_id == row.organization_id,
+            ))
             session.execute(delete(KnowledgeIndexJobRow).where(KnowledgeIndexJobRow.knowledge_base_id == row.id))
             session.execute(delete(KnowledgeBaseAccessRow).where(KnowledgeBaseAccessRow.knowledge_base_id == row.id))
             session.execute(delete(MeetingKnowledgeBaseRow).where(MeetingKnowledgeBaseRow.knowledge_base_id == row.id))
@@ -290,6 +299,10 @@ class KnowledgeBaseService:
                 session.execute(delete(KnowledgeEmbeddingRow).where(
                     KnowledgeEmbeddingRow.meeting_id == str(meeting_id),
                     KnowledgeEmbeddingRow.organization_id == str(current_organization_id()),
+                ))
+                session.execute(delete(KnowledgeChunkRow).where(
+                    KnowledgeChunkRow.meeting_id == str(meeting_id),
+                    KnowledgeChunkRow.organization_id == str(current_organization_id()),
                 ))
             if base_id is None:
                 if association:

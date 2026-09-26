@@ -1,14 +1,15 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Check, KeyRound, Search, Trash2 } from "lucide-react";
+import { Check, Search, Trash2 } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
 import { readUiPreference } from "@/lib/ui-preferences";
-import type { Capability, ProviderProfile, TextModelCatalog } from "@/lib/types";
+import type { Capability, ProfileKeyChoice, ProviderProfile, TextModelCatalog, VaultCredential } from "@/lib/types";
 import { UiSelect } from "./ui-select";
 import { Alert, Badge } from "./ui/feedback";
 import type { SettingsNotice } from "./settings-toast";
-import { capabilityLabel, isUnsavedProfile, profileInfo, providerOptions } from "./provider-profile-info";
+import { capabilityLabel, compatibleCredentials, isUnsavedProfile, profileInfo, providerOptions } from "./provider-profile-info";
+import { initialKeyChoice, keyChoiceChanged, keyChoicePayload, ProviderKeyField, type KeyChoiceState } from "./provider-key-field";
 
 type DraftFields = Pick<ProviderProfile, "label" | "provider" | "executionLocation" | "endpoint" | "model" | "capabilities" | "isDefault">;
 type DraftEnvelope = { baseline: string; fields: DraftFields };
@@ -40,12 +41,6 @@ function isDraftEnvelope(value: unknown): value is DraftEnvelope {
     && typeof fields.isDefault === "boolean";
 }
 
-function keyHint(draft: ProviderProfile): string {
-  if (draft.apiKeyConfigured) return `Saved key ${draft.credentialHint ?? "••••"} is encrypted and never shown again. Leave blank to keep it.`;
-  if (draft.executionLocation === "local") return "Optional if your endpoint does not require a key.";
-  return "Required for this cloud provider.";
-}
-
 const defaultLabel: Record<ProviderProfile["kind"], string> = { transcription: "transcription", mom: "MOM & actions", embedding: "knowledge embeddings" };
 
 const defaultHint: Record<ProviderProfile["kind"], string> = {
@@ -54,10 +49,12 @@ const defaultHint: Record<ProviderProfile["kind"], string> = {
   embedding: "Saved for the knowledge-base workflow.",
 };
 
-export function ProviderEditor({ identity, profile, onSave, onDelete, onChange, onNotice }: {
+export function ProviderEditor({ identity, profile, credentials, canSaveKeys, onSave, onDelete, onChange, onNotice }: {
   identity: string;
   profile: ProviderProfile;
-  onSave(profile: ProviderProfile, apiKey?: string): Promise<ProviderProfile>;
+  credentials: VaultCredential[];
+  canSaveKeys: boolean;
+  onSave(profile: ProviderProfile, apiKey?: string, keyChoice?: ProfileKeyChoice): Promise<ProviderProfile>;
   onDelete(profile: ProviderProfile): Promise<void>;
   onChange(profile: ProviderProfile): void;
   onNotice(notice: SettingsNotice): void;
@@ -67,7 +64,7 @@ export function ProviderEditor({ identity, profile, onSave, onDelete, onChange, 
     const saved = readUiPreference<DraftEnvelope | null>(draftKey, null, (value): value is DraftEnvelope | null => value === null || isDraftEnvelope(value), "session");
     return saved?.baseline === JSON.stringify(draftFields(profile)) ? { ...profile, ...draftFields({ ...profile, ...saved.fields }) } : profile;
   });
-  const [apiKey, setApiKey] = useState("");
+  const [keyChoice, setKeyChoice] = useState<KeyChoiceState>(() => initialKeyChoice(profile));
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -78,7 +75,7 @@ export function ProviderEditor({ identity, profile, onSave, onDelete, onChange, 
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const capabilities = useMemo(() => profileInfo[draft.kind].capabilities, [draft.kind]);
   const isNew = isUnsavedProfile(profile.id);
-  const hasUnsavedChanges = Boolean(apiKey) || draft.label !== profile.label || draft.provider !== profile.provider
+  const hasUnsavedChanges = keyChoiceChanged(keyChoice, profile) || draft.label !== profile.label || draft.provider !== profile.provider
     || draft.executionLocation !== profile.executionLocation || draft.endpoint !== profile.endpoint
     || draft.model !== profile.model || draft.isDefault !== profile.isDefault
     || draft.capabilities.join(",") !== profile.capabilities.join(",");
@@ -114,10 +111,13 @@ export function ProviderEditor({ identity, profile, onSave, onDelete, onChange, 
     }
   }
   async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setSaving(true);
+    event.preventDefault();
+    if (keyChoice.mode === "saved" && !compatibleCredentials(draft, credentials).some((item) => item.id === keyChoice.credentialId)) { onNotice({ tone: "warning", text: "Choose a saved key, or switch to pasting a new one." }); return; }
+    setSaving(true);
     try {
-      const saved = await onSave(draft, apiKey || undefined);
-      setDraft(saved); setApiKey("");
+      const apiKey = keyChoice.mode === "paste" ? keyChoice.apiKey || undefined : undefined;
+      const saved = await onSave(draft, apiKey, keyChoicePayload(keyChoice, profile, draft.label));
+      setDraft(saved); setKeyChoice(initialKeyChoice(saved));
       try { sessionStorage.removeItem(draftKey); } catch { /* Optional browser storage. */ }
     }
     catch (error) { onNotice({ tone: "danger", text: error instanceof Error ? error.message : "Could not save profile." }); }
@@ -192,11 +192,7 @@ export function ProviderEditor({ identity, profile, onSave, onDelete, onChange, 
           <input id="endpoint" type="url" value={draft.endpoint} onChange={(event) => update("endpoint", event.target.value)} disabled={draft.provider === "OpenAI"} placeholder="https://api.example.com/v1" aria-describedby={draft.provider === "OpenRouter" || draft.provider === "OpenAI-compatible" ? "endpoint-hint" : undefined} />
           {draft.provider === "OpenRouter" || draft.provider === "OpenAI-compatible" ? <p id="endpoint-hint" className="field-hint">For a private server, choose OpenAI-compatible and enter its URL.</p> : null}
         </div>
-        <div className="field">
-          <label htmlFor="api-key">API key <span className="optional">write-only</span></label>
-          <div className="input-with-icon"><KeyRound aria-hidden="true" /><input id="api-key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={draft.apiKeyConfigured ? "A key is already configured" : "Paste a new API key"} autoComplete="new-password" aria-describedby="api-key-hint" /></div>
-          <p id="api-key-hint" className="field-hint">{keyHint(draft)}</p>
-        </div>
+        <ProviderKeyField draft={draft} credentials={credentials} canSaveKeys={canSaveKeys} value={keyChoice} onChange={setKeyChoice} />
         <fieldset className="provider-capabilities">
           <legend>Capabilities</legend>
           <div className="cluster">{capabilities.map((capability) => <label className="check-label" key={capability}><input type="checkbox" checked={draft.capabilities.includes(capability)} onChange={() => toggleCapability(capability)} />{capabilityLabel[capability]}</label>)}</div>

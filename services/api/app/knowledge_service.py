@@ -14,6 +14,7 @@ from .adapters.base import ProviderExecutionError
 from .repository import MinutesNotFoundError, ProfileNotFoundError
 from .service import ProviderProfileService, ProviderSelectionError
 from .accounts import Actor
+from .tenant import current_organization_id
 
 
 class KnowledgeQuery(BaseModel):
@@ -21,6 +22,8 @@ class KnowledgeQuery(BaseModel):
     tags: list[str] = Field(default_factory=list, max_length=12)
     knowledge_base_id: UUID | None = None
     conversation_id: UUID | None = None
+    # Deprecated and ignored: Ask AI uses the owner's workspace AI settings.
+    # Kept so older clients that still send them are not rejected.
     text_profile_id: UUID | None = None
     model_id: str | None = Field(default=None, min_length=1, max_length=200)
     limit: int = Field(default=20, ge=1, le=50)
@@ -106,11 +109,42 @@ _STOPWORDS = {
 
 
 class KnowledgeService:
-    def __init__(self, repository: object, providers: ProviderProfileService, bases: object | None = None, index: object | None = None) -> None:
+    def __init__(self, repository: object, providers: ProviderProfileService, bases: object | None = None, index: object | None = None, ai_settings: object | None = None) -> None:
         self.repository = repository
         self.providers = providers
         self.bases = bases
         self.index = index
+        # Owner-controlled Ask AI route (AiSettingsService); clients cannot override it.
+        self.ai_settings = ai_settings
+
+    def chat_route(self, request: KnowledgeQuery, actor: Actor | None) -> tuple[UUID | None, str | None]:
+        """Pick the Ask AI provider/model server-side; request text_profile_id/model_id are ignored.
+
+        Order: workspace AI settings (owner) -> the knowledge base's provider ->
+        the workspace text-generation default (profile_id None).
+        """
+        if self.ai_settings is not None:
+            organization_id = actor.organization_id if actor is not None else current_organization_id()
+            route = self.ai_settings.chat_route(organization_id)
+            if route is not None:
+                return route
+        if request.knowledge_base_id and self.bases:
+            base = self.bases.get(request.knowledge_base_id, actor)
+            if base.text_profile_id:
+                return base.text_profile_id, None
+        return None, None
+
+    async def _generate(self, prompt: TextGenerationRequest, route: tuple[UUID | None, str | None],
+                        on_delta: Callable[[str], Awaitable[None]] | None = None):
+        profile_id, model = route
+        options: dict[str, object] = {}
+        if profile_id is not None:
+            options["profile_id"] = profile_id
+            if model:
+                options["model_override"] = model
+        if on_delta:
+            options["on_delta"] = on_delta
+        return await self.providers.generate_text(prompt, **options)
 
     def search(self, request: KnowledgeQuery, actor: Actor | None = None) -> KnowledgeSearchResponse:
         terms = [word for word in re.findall(r"\w+", request.query.lower())
@@ -224,9 +258,21 @@ class KnowledgeService:
         semantic = await self.index.rank(request, candidates, actor)
         if not semantic:
             return lexical
-        lexical_rank = {source.source_id: rank for rank, source in enumerate(lexical.sources)}
+        # Semantic hits may be multi-segment speaker turns; fold lexical hits on the same
+        # segments into that turn so one passage is not cited twice.
+        covering = {(source.meeting_id, segment_id): source.source_id for source in reversed(semantic)
+                    if source.kind == "transcript" for segment_id in source.evidence_segment_ids}
+        lexical_rank: dict[str, int] = {}
+        folded: set[str] = set()
+        for rank, source in enumerate(lexical.sources):
+            target = covering.get((source.meeting_id, source.segment_id), source.source_id) \
+                if source.kind == "transcript" else source.source_id
+            if target != source.source_id:
+                folded.add(source.source_id)
+            lexical_rank.setdefault(target, rank)
         semantic_rank = {source.source_id: rank for rank, source in enumerate(semantic)}
-        by_id = {source.source_id: source for source in [*lexical.sources, *semantic]}
+        by_id = {source.source_id: source for source in [*lexical.sources, *semantic]
+                 if source.source_id not in folded or source.source_id in semantic_rank}
         ordered = sorted(by_id.values(), key=lambda source: (
             (1 / (60 + lexical_rank[source.source_id]) if source.source_id in lexical_rank else 0)
             + (1 / (60 + semantic_rank[source.source_id]) if source.source_id in semantic_rank else 0),
@@ -310,19 +356,10 @@ class KnowledgeService:
                 },
                 "required": ["answer", "citation_ids"],
             },
-            metadata={"capability": "text_generation", "purpose": "knowledge_answer", "knowledge_base_id": str(request.knowledge_base_id) if request.knowledge_base_id else None},
+            metadata={"capability": "text_generation", "purpose": "knowledge_answer", "knowledge_base_id": str(request.knowledge_base_id) if request.knowledge_base_id else None, "actor_user_id": str(actor.user_id) if actor is not None else None},
         )
         try:
-            if request.text_profile_id:
-                profile, result = await self.providers.generate_text(prompt, profile_id=request.text_profile_id, **({"model_override": request.model_id} if request.model_id else {}), **({"on_delta": on_delta} if on_delta else {}))
-            elif request.knowledge_base_id and self.bases:
-                base = self.bases.get(request.knowledge_base_id, actor)
-                if base.text_profile_id:
-                    profile, result = await self.providers.generate_text(prompt, profile_id=base.text_profile_id, **({"model_override": request.model_id} if request.model_id else {}), **({"on_delta": on_delta} if on_delta else {}))
-                else:
-                    profile, result = await self.providers.generate_text(prompt, **({"on_delta": on_delta} if on_delta else {}))
-            else:
-                profile, result = await self.providers.generate_text(prompt, **({"on_delta": on_delta} if on_delta else {}))
+            profile, result = await self._generate(prompt, self.chat_route(request, actor), on_delta)
             payload = result.structured_output or json.loads(result.text)
             answer = payload["answer"]
             citation_ids = payload["citation_ids"]
@@ -375,8 +412,7 @@ class KnowledgeService:
             metadata={"capability": "text_generation", "purpose": "knowledge_query_plan", "knowledge_base_id": str(request.knowledge_base_id) if request.knowledge_base_id else None},
         )
         try:
-            base = self.bases.get(request.knowledge_base_id, actor) if request.knowledge_base_id and self.bases else None
-            _, result = await self.providers.generate_text(prompt, profile_id=request.text_profile_id or (base.text_profile_id if base else None), **({"model_override": request.model_id} if request.model_id else {}))
+            _, result = await self._generate(prompt, self.chat_route(request, actor))
             payload = result.structured_output or json.loads(result.text)
             queries = payload.get("search_queries", [])
             if not isinstance(queries, list):

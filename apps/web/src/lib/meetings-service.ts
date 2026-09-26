@@ -1,4 +1,4 @@
-import type { AuditEvent, BriefDocument, CalendarConnection, CalendarEvent, CalendarPeriod, CalendarSchedule, CalendarSnapshot, Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeTextProfile, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, MomGuidance, OrganizationBrief, PostMeetingJob, PrepReport, ProfileKind, ProviderProfile, ResendStatus, RetentionPolicy, SpeakerIdentity, TextModelCatalog, TranscriptSegment, TranscriptionRoute, UsageSummary, Workspace, WorkspaceCalendarConnection, WorkspaceMember, WorkspaceOperations, WorkspaceOption } from "./types";
+import type { AuditEvent, BriefDocument, CalendarConnection, CalendarEvent, CalendarPeriod, CalendarSchedule, CalendarSnapshot, Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeTextProfile, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, MomGuidance, OrganizationBrief, PostMeetingJob, PrepReport, AiSettingsInput, AiSettingsView, CredentialTestResult, ProfileKeyChoice, ProfileKind, ProviderProfile, ResendStatus, VaultCredential, VaultCredentialInput, VaultProviderType, RetentionPolicy, SpeakerIdentity, TextModelCatalog, TranscriptSegment, TranscriptionRoute, UsageSummary, Workspace, WorkspaceCalendarConnection, WorkspaceMember, WorkspaceOperations, WorkspaceOption } from "./types";
 
 export interface MeetingsService {
   getSession(): Promise<boolean>;
@@ -91,9 +91,21 @@ export interface MeetingsService {
   sendConfiguredMinutes(id: string): Promise<EmailDelivery>;
   getResendStatus(): Promise<ResendStatus>;
   listProviderProfiles(): Promise<ProviderProfile[]>;
-  saveProviderProfile(profile: ProviderProfile, apiKey?: string): Promise<ProviderProfile>;
+  saveProviderProfile(profile: ProviderProfile, apiKey?: string, keyChoice?: ProfileKeyChoice): Promise<ProviderProfile>;
   deleteProviderProfile(id: string): Promise<void>;
   testProviderConnection(profile: ProviderProfile): Promise<ProviderProfile>;
+  listCredentials(providerType?: VaultProviderType): Promise<VaultCredential[]>;
+  createCredential(input: VaultCredentialInput): Promise<VaultCredential>;
+  updateCredential(id: string, patch: { label?: string; secret?: string }): Promise<VaultCredential>;
+  deleteCredential(id: string): Promise<void>;
+  testCredential(id: string): Promise<CredentialTestResult>;
+  getAiSettings(): Promise<AiSettingsView>;
+  updateAiSettings(input: AiSettingsInput): Promise<AiSettingsView>;
+}
+
+/** Deleting a saved key that profiles or workspace settings still use (HTTP 409). */
+export class CredentialInUseError extends Error {
+  constructor(message: string, readonly usedBy: string[]) { super(message); }
 }
 
 type BackendProviderType = "openai" | "openai_compatible" | "vexa_native";
@@ -106,6 +118,8 @@ type BackendProfile = {
   capabilities: Array<{ capability: Capability; model: string }>;
   credential_configured: boolean;
   credential_hint?: string | null;
+  credential_id?: string | null;
+  credential_label?: string | null;
 };
 type BackendDefault = {
   capability: Capability;
@@ -198,6 +212,8 @@ function toFrontend(profile: BackendProfile, defaults: BackendDefault[]): Provid
     isDefault: defaults.some((item) => item.capability === capability && item.ordered_profile_ids[0] === profile.id),
     apiKeyConfigured: profile.credential_configured,
     credentialHint: profile.credential_hint ?? null,
+    credentialId: profile.credential_id ?? null,
+    credentialLabel: profile.credential_label ?? null,
   };
 }
 
@@ -834,7 +850,7 @@ class HttpMeetingsService implements MeetingsService {
     return profiles.map((profile) => toFrontend(profile, defaults));
   }
 
-  async saveProviderProfile(profile: ProviderProfile, apiKey?: string): Promise<ProviderProfile> {
+  async saveProviderProfile(profile: ProviderProfile, apiKey?: string, keyChoice?: ProfileKeyChoice): Promise<ProviderProfile> {
     const type = providerType(profile.provider);
     const payload = {
       name: profile.label,
@@ -843,6 +859,8 @@ class HttpMeetingsService implements MeetingsService {
       base_url: type === "openai" ? null : profile.endpoint || null,
       capabilities: profile.capabilities.map((capability) => ({ capability, model: profile.model })),
       ...(apiKey ? { api_key: apiKey } : {}),
+      ...(apiKey && keyChoice?.saveToVaultLabel ? { save_to_vault: true, credential_label: keyChoice.saveToVaultLabel } : {}),
+      ...(!apiKey && keyChoice && keyChoice.credentialId !== undefined ? { credential_id: keyChoice.credentialId } : {}),
     };
     const creating = profile.id.startsWith("new-");
     const saved = await api<BackendProfile>(
@@ -873,6 +891,183 @@ class HttpMeetingsService implements MeetingsService {
     const connectionState: ConnectionState = result.status === "configuration_valid" ? "configured" : "failed";
     return { ...profile, connectionState };
   }
+
+  async listCredentials(providerType?: VaultProviderType): Promise<VaultCredential[]> {
+    return api<VaultCredential[]>(`/v1/credentials${providerType ? `?provider_type=${providerType}` : ""}`);
+  }
+
+  async createCredential(input: VaultCredentialInput): Promise<VaultCredential> {
+    return api<VaultCredential>("/v1/credentials", { method: "POST", body: JSON.stringify(input) });
+  }
+
+  async updateCredential(id: string, patch: { label?: string; secret?: string }): Promise<VaultCredential> {
+    return api<VaultCredential>(`/v1/credentials/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+  }
+
+  async deleteCredential(id: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/v1/credentials/${id}`, { method: "DELETE", headers: { "content-type": "application/json" } });
+    if (response.status === 409) {
+      const payload = await response.json().catch(() => null) as { detail?: { message?: string; used_by?: unknown } } | null;
+      const usedBy = Array.isArray(payload?.detail?.used_by) ? payload.detail.used_by.filter((item): item is string => typeof item === "string") : [];
+      throw new CredentialInUseError(payload?.detail?.message ?? "This key is still in use.", usedBy);
+    }
+    if (!response.ok) {
+      if (response.status === 401) window.dispatchEvent(new Event("meetings-ai-session-expired"));
+      const payload = await response.json().catch(() => null) as unknown;
+      throw new ApiError(apiErrorMessage(payload) ?? `API request failed (${response.status})`, response.status);
+    }
+  }
+
+  async testCredential(id: string): Promise<CredentialTestResult> {
+    return api<CredentialTestResult>(`/v1/credentials/${id}/test`, { method: "POST" });
+  }
+
+  async getAiSettings(): Promise<AiSettingsView> {
+    return api<AiSettingsView>("/v1/ai/settings");
+  }
+
+  async updateAiSettings(input: AiSettingsInput): Promise<AiSettingsView> {
+    return api<AiSettingsView>("/v1/ai/settings", { method: "PUT", body: JSON.stringify(input) });
+  }
 }
 
 export const meetingsService: MeetingsService = new HttpMeetingsService();
+
+/* ---------- Meeting prep v2: inputs, documents, streamed generation, history ---------- */
+type PrepInputsT = import("./types").PrepInputs;
+type PrepHistoryT = import("./types").PrepHistory;
+type AnyPrepReportT = import("./types").AnyPrepReport;
+type PrepDocumentT = import("./types").PrepDocument;
+type PrepGenerateInputT = import("./types").PrepGenerateInput;
+type PrepStageT = import("./types").PrepStage;
+
+/** HTTP status of a failed service call (e.g. 404 for an API that is not deployed, 409 for missing setup), else null. */
+export function serviceErrorStatus(error: unknown): number | null {
+  return error instanceof ApiError ? error.status : null;
+}
+
+async function failed(response: Response): Promise<never> {
+  if (response.status === 401) window.dispatchEvent(new Event("meetings-ai-session-expired"));
+  const payload = await response.json().catch(() => null) as unknown;
+  throw new ApiError(apiErrorMessage(payload) ?? `API request failed (${response.status})`, response.status);
+}
+
+export const prepService = {
+  getLatest(eventId: string): Promise<AnyPrepReportT | null> {
+    return api<AnyPrepReportT | null>(`/v1/calendar/events/${eventId}/prep`);
+  },
+  getInputs(eventId: string): Promise<PrepInputsT> {
+    return api<PrepInputsT>(`/v1/calendar/events/${eventId}/prep/inputs`);
+  },
+  saveInputs(eventId: string, inputs: PrepInputsT): Promise<PrepInputsT> {
+    return api<PrepInputsT>(`/v1/calendar/events/${eventId}/prep/inputs`, { method: "PUT", body: JSON.stringify(inputs) });
+  },
+  getHistory(eventId: string): Promise<PrepHistoryT> {
+    return api<PrepHistoryT>(`/v1/calendar/events/${eventId}/prep/history`);
+  },
+  generate(eventId: string, input: PrepGenerateInputT): Promise<AnyPrepReportT> {
+    return api<AnyPrepReportT>(`/v1/calendar/events/${eventId}/prep`, { method: "POST", body: JSON.stringify(input) });
+  },
+  /** POST /prep/stream (SSE): progress events, then the saved report. Errors carry the HTTP status. */
+  async generateStream(eventId: string, input: PrepGenerateInputT, onStage: (stage: PrepStageT, message: string) => void): Promise<AnyPrepReportT> {
+    const response = await fetch(`${API_BASE_URL}/v1/calendar/events/${eventId}/prep/stream`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input),
+    });
+    if (!response.ok) return failed(response);
+    if (!response.body) throw new ApiError("The browser could not open the progress stream.", 0);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let final: AnyPrepReportT | null = null;
+    const receive = (frame: string) => {
+      const lines = frame.split("\n");
+      const event = lines.find((line) => line.startsWith("event:"))?.slice(6).trim();
+      const data = lines.filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
+      if (!event || !data) return;
+      const value = JSON.parse(data) as Record<string, unknown>;
+      if (event === "progress") onStage(value.stage as PrepStageT, typeof value.message === "string" ? value.message : "");
+      if (event === "final") final = value as unknown as AnyPrepReportT;
+      if (event === "error") throw new ApiError(typeof value.detail === "string" ? value.detail : "The briefing could not be completed.", typeof value.status === "number" ? value.status : 500);
+    };
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+        buffer = buffer.replace(/\r\n/g, "\n");
+        let boundary = buffer.indexOf("\n\n");
+        while (boundary !== -1) {
+          receive(buffer.slice(0, boundary));
+          buffer = buffer.slice(boundary + 2);
+          boundary = buffer.indexOf("\n\n");
+        }
+        if (done) break;
+      }
+      if (buffer.trim()) receive(buffer);
+    } finally {
+      reader.releaseLock();
+    }
+    if (!final) throw new ApiError("The briefing stream ended before the report was saved. Please try again.", 0);
+    return final;
+  },
+  listDocuments(eventId: string): Promise<PrepDocumentT[]> {
+    return api<PrepDocumentT[]>(`/v1/documents?scope=prep&scope_id=${encodeURIComponent(eventId)}`);
+  },
+  async uploadDocument(eventId: string, file: File): Promise<PrepDocumentT> {
+    const body = new FormData();
+    body.append("scope", "prep");
+    body.append("scope_id", eventId);
+    body.append("file", file);
+    const response = await fetch(`${API_BASE_URL}/v1/documents`, { method: "POST", body });
+    if (!response.ok) return failed(response);
+    return response.json() as Promise<PrepDocumentT>;
+  },
+  async deleteDocument(documentId: string): Promise<void> {
+    await api<void>(`/v1/documents/${documentId}`, { method: "DELETE" });
+  },
+};
+
+/* ---------- Usage & cost transparency and workspace storage (owners and admins) ---------- */
+type UsageSummaryDetailT = import("./types").UsageSummaryDetail;
+type UsageRangeT = import("./types").UsageRange;
+type UsageEventFiltersT = import("./types").UsageEventFilters;
+type UsageEventPageT = import("./types").UsageEventPage;
+type StorageSummaryT = import("./types").StorageSummary;
+type StorageItemT = import("./types").StorageItem;
+type StorageCategoryKeyT = import("./types").StorageCategoryKey;
+type StoragePurgeRequestT = import("./types").StoragePurgeRequest;
+type StoragePurgeResultT = import("./types").StoragePurgeResult;
+
+function usageQuery(filters: Partial<UsageEventFiltersT>, extra: Record<string, string | number | null | undefined> = {}): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries({ ...filters, ...extra })) {
+    if (value !== null && value !== undefined && String(value).trim() !== "") params.set(key, String(value).trim());
+  }
+  const text = params.toString();
+  return text ? `?${text}` : "";
+}
+
+export const usageService = {
+  summary(range: UsageRangeT): Promise<UsageSummaryDetailT> {
+    return api<UsageSummaryDetailT>(`/v1/workspace/usage${usageQuery(range)}`);
+  },
+  events(filters: UsageEventFiltersT, cursor: string | null = null, limit = 50): Promise<UsageEventPageT> {
+    return api<UsageEventPageT>(`/v1/workspace/usage/events${usageQuery(filters, { cursor, limit })}`);
+  },
+  /** Same-origin download link; the session cookie authorises it. */
+  exportUrl(filters: UsageEventFiltersT): string {
+    return `${API_BASE_URL}/v1/workspace/usage/export.csv${usageQuery(filters)}`;
+  },
+};
+
+export const storageService = {
+  summary(includeCapture = false): Promise<StorageSummaryT> {
+    return api<StorageSummaryT>(`/v1/workspace/storage${includeCapture ? "?include_capture=true" : ""}`);
+  },
+  async items(category: StorageCategoryKeyT, q = "", limit = 200): Promise<StorageItemT[]> {
+    const response = await api<{ category: string; items: StorageItemT[] }>(`/v1/workspace/storage/items${usageQuery({}, { category, q, limit })}`);
+    return response.items;
+  },
+  purge(request: StoragePurgeRequestT): Promise<StoragePurgeResultT> {
+    return api<StoragePurgeResultT>("/v1/workspace/storage/purge", { method: "POST", body: JSON.stringify(request) });
+  },
+};

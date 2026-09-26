@@ -29,13 +29,26 @@ It batches up to 2,000 eligible sources from the
 newest 200 meetings through the workspace's selected embedding profile. It
 atomically replaces that base's previous index only after every embedding call
 succeeds. `GET /v1/knowledge-bases/{id}/index` reports the count, profile, model,
-and last indexed time plus the background job state and error. The index stores vectors, source IDs, and source
-fingerprints—not transcript text. Retrieval ranks indexed sources with cosine
-similarity and merges them with lexical results; every semantic hit must match a
-current canonical source fingerprint and the active embedding provider/model.
-Without a valid index or provider, retrieval is lexical. This is a bounded
-single-worker implementation using JSON vectors in PostgreSQL, not a pgvector
-service or multi-replica job queue.
+and last indexed time plus the background job state and error.
+
+Since schema v22 the index lives in `knowledge_chunks`: context-enriched passages
+(transcript speaker turns, approved MOM facts, organization and prep documents)
+with a pgvector `embedding` column in PostgreSQL. Each chunk stores its title,
+heading path/page range, a one-to-two sentence LLM context note (cached by
+fingerprint so unchanged chunks are never re-enriched or re-embedded), and the
+embedding of title + context + content. Partial HNSW cosine indexes exist per
+dimension (1536, 1024, 768); larger models use exact scans. `ChunkRetriever`
+fuses vector and lexical rankings (reciprocal rank fusion) and then re-checks live
+access: every meeting hit must match a current, permission-checked canonical
+source fingerprint, documents must still exist, and prep chunks are visible only
+to the event owner. SQLite (tests) scores the same rows in Python.
+
+Documents (PDF, DOCX, Markdown, text, HTML, images) are ingested through
+`/v1/documents`. Scanned or low-text PDF pages are rendered and read by the
+owner-selected vision model (Workspace AI → Vision & OCR); every vision, enrichment
+and embedding call is recorded in `usage_events`. The indexing worker is a
+bounded single-process loop (`AUTO_KNOWLEDGE_INDEX_ENABLED=1`), not a
+multi-replica job queue.
 
 Opt-out, tag changes, reassignment, transcript replacement, speaker correction,
 and MOM save purge that meeting's vectors. Deleting an embedding profile also

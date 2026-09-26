@@ -218,7 +218,7 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
 
         <div className="nm-section nm-disclosures">
           <MinutesOptions disabled={joining} template={momTemplate} onTemplateChange={setMomTemplate} focus={momFocusInput} onFocusChange={setMomFocusInput} instructions={momInstructions} onInstructionsChange={setMomInstructions} />
-          <DeliveryOptions disabled={joining} defaultParticipants={source?.invitees?.map((person) => person.email).filter(Boolean).join("\n") ?? ""} />
+          <DeliveryOptions disabled={joining} defaultParticipants={(source?.invitees ?? []).flatMap((person) => person.email ? [person.email] : [])} />
         </div>
 
         <Alert tone="info" role="note" title="Disclosure is required." className="nm-disclosure">Before sending, confirm the host will announce: “Meetings AI has joined and will record and transcribe this conversation.”</Alert>

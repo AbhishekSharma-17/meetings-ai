@@ -49,7 +49,7 @@ test("observability shows full-ledger process and provider totals with cost limi
   await page.getByRole("button", { name: "Observability" }).click();
   await expect(page.getByRole("heading", { name: "Observability" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Cost by process" })).toBeVisible();
-  await expect(page.getByRole("cell", { name: /mom generation/ })).toBeVisible();
+  await expect(page.getByRole("cell", { name: /Minutes drafting/ })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Cost by provider" })).toBeVisible();
   await expect(page.getByText("not included", { exact: false })).toBeVisible();
   await expect(page.getByText("3", { exact: true }).first()).toBeVisible();

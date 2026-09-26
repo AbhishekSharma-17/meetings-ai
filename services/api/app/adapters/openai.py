@@ -17,6 +17,7 @@ from meetings_contracts import (
 
 from .base import ProviderExecutionError, RuntimeAdapterNotImplementedError
 from .embeddings import create_embeddings
+from .images import responses_user_content
 from .streaming import json_events
 
 
@@ -53,10 +54,10 @@ class OpenAIAdapter:
         if not model:
             raise ProviderExecutionError("OpenAI text-generation model is not configured")
 
-        input_items: list[dict[str, str]] = []
+        input_items: list[dict[str, object]] = []
         if request.system_prompt:
             input_items.append({"role": "system", "content": request.system_prompt})
-        input_items.append({"role": "user", "content": request.prompt})
+        input_items.append({"role": "user", "content": responses_user_content(request)})
         payload: dict[str, object] = {
             "model": model,
             "input": input_items,

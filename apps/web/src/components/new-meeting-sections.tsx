@@ -1,9 +1,10 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Collapsible } from "@base-ui/react/collapsible";
 import { ChevronDown } from "lucide-react";
 import type { CalendarEvent, KnowledgeBase } from "@/lib/types";
+import { EmailChips, mergeEmails, PersonChips } from "./ui/email-chips";
 import { SwitchField } from "./ui/switch";
 import { UiSelect } from "./ui-select";
 
@@ -30,7 +31,7 @@ export function SourcePreview({ event }: { event: CalendarEvent }) {
       {event.agenda ? <div><dt>Agenda</dt><dd>{event.agenda}</dd></div> : null}
     </dl> : null}
     <p className="field-hint">{invitees.length} listed invitee{invitees.length === 1 ? "" : "s"}. These are not verified attendees or speakers.</p>
-    {invitees.length ? <ul className="tag-list nm-invitees">{invitees.map((person, index) => <li className="tag" key={`${person.email ?? person.name}-${index}`}>{person.name}{person.email ? ` · ${person.email}` : ""}</li>)}</ul> : null}
+    <PersonChips people={invitees} className="nm-invitees" label="Listed invitees" />
   </div>;
 }
 
@@ -113,24 +114,23 @@ export function MinutesOptions({ disabled, template, onTemplateChange, focus, on
   </CollapsibleSection>;
 }
 
-export function DeliveryOptions({ disabled, defaultParticipants }: { disabled: boolean; defaultParticipants: string }) {
-  return <CollapsibleSection title="Recap delivery options" summary="Sent only after you approve the minutes">
+export function DeliveryOptions({ disabled, defaultParticipants }: { disabled: boolean; defaultParticipants: string[] }) {
+  const [internal, setInternal] = useState<string[]>([]);
+  const [participants, setParticipants] = useState<string[]>(() => mergeEmails([], defaultParticipants));
+  const summary = internal.length + participants.length
+    ? `${internal.length + participants.length} recipient${internal.length + participants.length === 1 ? "" : "s"} · sent after approval`
+    : "Sent only after you approve the minutes";
+  return <CollapsibleSection title="Recap delivery options" summary={summary}>
     <div className="form-stack">
       <div className="field-row">
-        <div className="field">
-          <label htmlFor="internal-recipients">Internal team email addresses</label>
-          <textarea id="internal-recipients" name="internal-recipients" rows={2} placeholder="team@company.com" disabled={disabled} />
-        </div>
-        <div className="field">
-          <label htmlFor="participant-recipients">Participant email addresses</label>
-          <textarea id="participant-recipients" name="participant-recipients" rows={2} placeholder="Exact addresses, one per line" defaultValue={defaultParticipants} disabled={disabled} />
-        </div>
+        <EmailChips id="internal-recipients" name="internal-recipients" label="Internal team email addresses" value={internal} onChange={setInternal} placeholder="team@company.com" disabled={disabled} />
+        <EmailChips id="participant-recipients" name="participant-recipients" label="Participant email addresses" value={participants} onChange={setParticipants} placeholder="Exact addresses only" disabled={disabled} />
       </div>
       <div className="stack nm-delivery-checks">
         <label className="check-label"><input type="checkbox" name="share-participants" disabled={disabled} /> Also send to listed participants after approval</label>
         <label className="check-label"><input type="checkbox" name="include-transcript" disabled={disabled} /> Include full transcript in the email</label>
       </div>
-      <p className="field-hint">Recipients are saved with the meeting. Nothing is emailed until you approve its minutes.</p>
+      <p className="field-hint">Press Enter after each address or paste a list. Recipients are saved with the meeting; nothing is emailed until you approve its minutes.</p>
     </div>
   </CollapsibleSection>;
 }

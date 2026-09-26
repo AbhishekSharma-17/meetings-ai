@@ -129,6 +129,17 @@ class VexaCaptureAdapter:
                 detail = response.text[:500]
             raise VexaAPIError("delete meeting", response.status_code, str(detail))
 
+    async def list_recordings(self, vexa_meeting_id: int) -> list[dict[str, Any]]:
+        """Recordings (with per-media ``file_size_bytes``) for one capture; read-only."""
+        body = await self._request(
+            "GET", "/recordings", operation="list recordings",
+            params={"meeting_id": int(vexa_meeting_id), "limit": 200},
+        )
+        recordings = body.get("recordings", [])
+        if not isinstance(recordings, list):
+            raise VexaAPIError("list recordings", 502, "invalid recordings response")
+        return [item for item in recordings if isinstance(item, dict)]
+
     async def stop(self, platform: str, native_meeting_id: str) -> dict[str, Any]:
         platform_path = quote(platform, safe="")
         native_path = quote(native_meeting_id, safe="")

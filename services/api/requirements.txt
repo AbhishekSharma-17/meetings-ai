@@ -7,6 +7,9 @@ cryptography>=46,<47
 tzdata>=2026.4,<2027
 pypdf>=6,<7
 python-docx>=1.2,<2
+# PDF page rendering for vision OCR; manylinux wheels for linux/amd64 and arm64.
+pypdfium2>=5,<6
+Pillow>=11,<13
 python-multipart>=0.0.20,<1
 
 # Test-only

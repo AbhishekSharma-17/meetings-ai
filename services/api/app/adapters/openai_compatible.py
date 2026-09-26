@@ -16,6 +16,7 @@ from meetings_contracts import (
 
 from .base import ProviderExecutionError, RuntimeAdapterNotImplementedError
 from .embeddings import create_embeddings
+from .images import chat_user_content
 from .streaming import json_events
 
 
@@ -55,10 +56,10 @@ class OpenAICompatibleAdapter:
         model = profile.models.get(Capability.TEXT_GENERATION)
         if not model:
             raise ProviderExecutionError("Compatible text-generation model is not configured")
-        messages: list[dict[str, str]] = []
+        messages: list[dict[str, object]] = []
         if request.system_prompt:
             messages.append({"role": "system", "content": request.system_prompt})
-        messages.append({"role": "user", "content": request.prompt})
+        messages.append({"role": "user", "content": chat_user_content(request)})
         payload: dict[str, object] = {"model": model, "messages": messages}
         if request.temperature is not None:
             payload["temperature"] = request.temperature

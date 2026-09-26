@@ -6,6 +6,10 @@ import { initials } from "@/lib/meeting-status";
 import type { CurrentAccount, InviteResult, WorkspaceMember } from "@/lib/types";
 import { UiSelect } from "./ui-select";
 import { Alert, Badge, type Tone } from "./ui/feedback";
+import { FilterInput, matchesQuery, NoMatches, ScrollPanel } from "./scroll-panel";
+
+/** Above this many people the list gets a search box; it always scrolls inside the card. */
+const SEARCH_THRESHOLD = 6;
 
 export type InviteRole = "admin" | "member" | "viewer";
 
@@ -20,8 +24,9 @@ const statusLabel = (status: string) => status ? `${status[0].toUpperCase()}${st
 
 const ownerRoleOptions = [{ value: "owner", label: "Owner" }, { value: "admin", label: "Admin" }, { value: "member", label: "Member" }, { value: "viewer", label: "Viewer" }];
 const adminRoleOptions = [{ value: "member", label: "Member" }, { value: "viewer", label: "Viewer" }];
-const ownerInviteOptions = [{ value: "member", label: "Member · shared knowledge" }, { value: "admin", label: "Admin · workspace management" }, { value: "viewer", label: "Viewer · shared knowledge" }];
-const adminInviteOptions = [{ value: "member", label: "Member · shared knowledge" }, { value: "viewer", label: "Viewer · shared knowledge" }];
+const ownerInviteOptions = [{ value: "member", label: "Member" }, { value: "admin", label: "Admin" }, { value: "viewer", label: "Viewer" }];
+const adminInviteOptions = [{ value: "member", label: "Member" }, { value: "viewer", label: "Viewer" }];
+const ROLE_HINT = "Admins run meetings and manage the workspace. Members use shared knowledge; viewers can’t create knowledge bases.";
 
 export function WorkspacePeople({ members, account, canManage, memberBusy, pendingRemovalId, inviteResult, inviting, onChangeRole, onReset, onRequestRemoval, onCancelRemoval, onRemove, onInvite, onCopyFailed }: {
   members: WorkspaceMember[];
@@ -42,6 +47,7 @@ export function WorkspacePeople({ members, account, canManage, memberBusy, pendi
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteName, setInviteName] = useState("");
   const [inviteRole, setInviteRole] = useState<InviteRole>("member");
+  const [query, setQuery] = useState("");
   const ownerCount = members.filter((member) => member.role === "owner").length;
   const isOwner = account?.role === "owner";
 
@@ -51,13 +57,19 @@ export function WorkspacePeople({ members, account, canManage, memberBusy, pendi
     if (invited) { setInviteEmail(""); setInviteName(""); }
   }
 
+  const searchable = members.length > SEARCH_THRESHOLD;
+  const visible = searchable ? members.filter((member) => matchesQuery(query, [member.display_name, member.email, roleLabel[member.role], member.status])) : members;
+
   return <section className="card settings-section" id="settings-people" aria-labelledby="workspace-members-title">
     <div className="card-header">
       <div><h2 id="workspace-members-title">People & access</h2><p>Who can open this workspace and what they can change.</p></div>
       <span className="section-count">{members.length} {members.length === 1 ? "person" : "people"}</span>
     </div>
-    <ul className="member-list">
-      {members.map((member) => {
+    {searchable ? <div className="card-toolbar">
+      <FilterInput id="member-search" label="Search people" value={query} onChange={setQuery} placeholder="Search by name, email or role" />
+    </div> : null}
+    {visible.length ? <ScrollPanel label="Member list" className="member-scroll"><ul className="member-list">
+      {visible.map((member) => {
         const isSelf = account?.user_id === member.user_id;
         const canEdit = canManage && !isSelf && (isOwner || member.role === "member" || member.role === "viewer");
         const ownerProtected = member.role === "owner" && ownerCount <= 1;
@@ -87,7 +99,7 @@ export function WorkspacePeople({ members, account, canManage, memberBusy, pendi
           </span>
         </li>;
       })}
-    </ul>
+    </ul></ScrollPanel> : members.length ? <NoMatches query={query} noun="people" onClear={() => setQuery("")} /> : null}
     {canManage ? <div className="invite-panel">
       <form className="form-stack" onSubmit={(event) => void submitInvite(event)}>
         <div className="invite-heading"><span className="settings-icon" aria-hidden="true"><UserPlus /></span><div><h3>Invite a teammate</h3><p className="field-hint">They get a temporary password and must change it on first sign-in.</p></div></div>
@@ -96,7 +108,10 @@ export function WorkspacePeople({ members, account, canManage, memberBusy, pendi
           <div className="field"><label htmlFor="invite-email">Work email</label><input id="invite-email" type="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} required /></div>
           <UiSelect id="invite-role" label="Role" value={inviteRole} onChange={(role) => setInviteRole(role as InviteRole)} options={isOwner ? ownerInviteOptions : adminInviteOptions} />
         </div>
-        <div className="button-group end"><button className="button primary" disabled={inviting}>{inviting ? "Sending invitation…" : "Send invitation"}</button></div>
+        <div className="invite-footer">
+          <p className="field-hint">{ROLE_HINT}</p>
+          <button className="button primary" disabled={inviting}>{inviting ? "Sending invitation…" : "Send invitation"}</button>
+        </div>
       </form>
       {inviteResult ? <InviteOutcome result={inviteResult} onCopyFailed={onCopyFailed} /> : null}
     </div> : null}

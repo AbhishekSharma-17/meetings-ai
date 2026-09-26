@@ -9,8 +9,9 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import delete, select
 
 from .database import (
-    AuditEventRow, CalendarEventCacheRow, Database, KnowledgeBaseRow, KnowledgeConversationRow,
-    KnowledgeMessageRow, MeetingPrepRow, MeetingRow, MeetingTenantRow, WorkspaceRetentionRow,
+    AuditEventRow, CalendarEventCacheRow, Database, KnowledgeBaseRow, KnowledgeChunkRow,
+    KnowledgeConversationRow, KnowledgeDocumentRow, KnowledgeMessageRow, MeetingPrepInputRow,
+    MeetingPrepRow, MeetingRow, MeetingTenantRow, WorkspaceRetentionRow,
 )
 from .tenant import tenant_scope
 
@@ -72,16 +73,26 @@ class RetentionService:
                     cutoff = now - timedelta(days=policy.meeting_days)
                     # Calendar snapshots and their research briefings contain
                     # the same attendee data as captured meeting records.
-                    # Delete reports first because they reference cached events.
+                    # Delete reports, organizer inputs and prep uploads (with their
+                    # search chunks) first: they reference the cached events.
                     with self.database.session_factory.begin() as session:
                         expired_events = select(CalendarEventCacheRow.id).where(
                             CalendarEventCacheRow.organization_id == policy.organization_id,
                             CalendarEventCacheRow.ends_at < cutoff,
                         )
-                        session.execute(delete(MeetingPrepRow).where(
-                            MeetingPrepRow.organization_id == policy.organization_id,
-                            MeetingPrepRow.calendar_event_id.in_(expired_events),
-                        ))
+                        for model, event_column in (
+                            (MeetingPrepRow, MeetingPrepRow.calendar_event_id),
+                            (MeetingPrepInputRow, MeetingPrepInputRow.calendar_event_id),
+                        ):
+                            session.execute(delete(model).where(
+                                model.organization_id == policy.organization_id,
+                                event_column.in_(expired_events),
+                            ))
+                        for model in (KnowledgeChunkRow, KnowledgeDocumentRow):
+                            session.execute(delete(model).where(
+                                model.organization_id == policy.organization_id,
+                                model.scope == "prep", model.scope_id.in_(expired_events),
+                            ))
                         session.execute(delete(CalendarEventCacheRow).where(
                             CalendarEventCacheRow.organization_id == policy.organization_id,
                             CalendarEventCacheRow.ends_at < cutoff,

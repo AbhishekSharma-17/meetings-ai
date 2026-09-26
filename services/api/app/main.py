@@ -52,7 +52,8 @@ from .adapters.base import ProviderExecutionError
 from .composio_calendar import CalendarConnection, WorkspaceCalendarConnection, CalendarConnectRequest, CalendarAliasRequest, CalendarConnectResponse, CalendarEvent, CalendarEventsResponse, CalendarError, CalendarProvider, CalendarRange, ComposioCalendar, calendar_callback_url
 from .calendar_schedule import CalendarScheduleError, CalendarSchedulePublic, CalendarScheduleService, ManualScheduleCreate, ScheduleCreate
 from .calendar_cache import CalendarCacheService, CalendarSyncRequest, CalendarSyncResponse, CachedCalendarResponse
-from .meeting_prep import OrganizationBriefService, OrganizationBrief, BriefDocument, MeetingPrepService, PrepRequest, PrepReport, PrepError
+from .meeting_prep import OrganizationBriefService, OrganizationBrief, BriefDocument, MeetingPrepService, PrepError
+from .routes_prep import register_prep_routes
 from .database import Database, SchemaVersionRow, LEGACY_ADMIN_USER_ID, LEGACY_ORGANIZATION_ID
 from .accounts import AccountError, AccountPublic, AccountService, Actor, ChangePasswordRequest, InviteRequest, InviteResult, MemberRolePatch, OrganizationCreateRequest, OrganizationOption, ProfilePatch
 from .meeting_service import MeetingConflictError, MeetingService, MeetingValidationError
@@ -67,13 +68,27 @@ from .repository import MeetingNotFoundError, MinutesNotFoundError, ProfileNotFo
 from .runtime_config import validate_runtime_config
 from .retention import RetentionPolicy, RetentionService
 from .security import CredentialCipher
-from .service import ProfileValidationError, ProviderProfileService, ProviderSelectionError
+from .service import ProfilePermissionError, ProfileValidationError, ProviderProfileService, ProviderSelectionError
+from .credential_vault import CredentialVault
+from .ai_settings import AiSettingsService
+from .routes_ai import register_ai_routes
+from .chunk_store import ChunkStore
+from .retrieval import ChunkRetriever
+from .document_vision import VisionService
+from .documents import DocumentService
+from .indexing_worker import IndexingWorker
+from .routes_documents import register_document_routes
 from .model_catalog import ModelCatalogError, ModelCatalogService, TextModelCatalog
-from .usage import UsageLedger, UsageSummary
+from .usage import UsageLedger
+from .routes_usage import register_usage_routes
+from .storage import StorageService
+from .storage_purge import StoragePurgeService
+from .routes_storage import register_storage_routes
 from .stt_route import STTRouteError
 from .tenant import tenant_scope
 from .workspace_service import WorkspacePatch, WorkspacePublic, WorkspaceMemberPublic, WorkspaceService
 from .sqlalchemy_repository import SQLAlchemyRepository, TranscriptSegmentNotFoundError, TranscriptReviewConflictError, SpeakerIdentityConflictError, MinutesDeletionConflictError
+from .rate_limit import provider_defaults_limiter, provider_test_limiter
 
 
 def _redact(value: Any) -> Any:
@@ -124,7 +139,9 @@ def create_app(
     workspace_service = WorkspaceService(database)
     model_catalog = ModelCatalogService()
     usage = UsageLedger(database, model_catalog)
-    service = ProviderProfileService(repository, usage)
+    vault = CredentialVault(database, cipher, usage)
+    service = ProviderProfileService(repository, usage, vault)
+    ai_settings = AiSettingsService(database, repository, vault, model_catalog)
     knowledge_bases = KnowledgeBaseService(database, repository)
     vexa = vexa_adapter or VexaCaptureAdapter(
         os.getenv("VEXA_BASE_URL", "http://localhost:8056"),
@@ -135,8 +152,10 @@ def create_app(
         stt_signing_key=os.getenv("VEXA_STT_OVERRIDE_SECRET", ""),
         knowledge_bases=knowledge_bases,
     )
-    knowledge_service = KnowledgeService(repository, service, knowledge_bases)
-    knowledge_index = KnowledgeIndexService(database, knowledge_service, knowledge_bases, service)
+    knowledge_service = KnowledgeService(repository, service, knowledge_bases, ai_settings=ai_settings)
+    chunk_store = ChunkStore(database, service)
+    chunk_retriever = ChunkRetriever(database, chunk_store)
+    knowledge_index = KnowledgeIndexService(database, knowledge_service, knowledge_bases, service, chunk_store, chunk_retriever)
     knowledge_service.index = knowledge_index
     resend_from = os.getenv("RESEND_FROM_EMAIL", "").strip()
     resend_name = os.getenv("RESEND_FROM_NAME") or "Meetings AI"
@@ -151,8 +170,12 @@ def create_app(
     calendar = calendar_adapter or ComposioCalendar()
     calendar_cache = CalendarCacheService(database, calendar)
     organization_brief = OrganizationBriefService(database)
-    meeting_prep = MeetingPrepService(database, calendar_cache, organization_brief, service)
+    meeting_prep = MeetingPrepService(database, calendar_cache, organization_brief, service,
+                                      usage=usage, vault=vault, ai_settings=ai_settings,
+                                      retriever=chunk_retriever)
     calendar_schedule = CalendarScheduleService(database, calendar, meeting_service)
+    document_service = DocumentService(database, VisionService(database, service, ai_settings), chunk_store)
+    indexing_worker = IndexingWorker(database, document_service, chunk_store, knowledge_index, service)
     if bool(admin_password) != bool(session_secret):
         raise RuntimeError("admin password and session secret must both be configured")
     admin = AdminSession(session_secret) if admin_password else None
@@ -160,7 +183,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         task = asyncio.create_task(worker.run()) if os.getenv("AUTO_MOM_ENABLED") == "1" else None
-        index_task = asyncio.create_task(knowledge_index.run()) if os.getenv("AUTO_KNOWLEDGE_INDEX_ENABLED") == "1" else None
+        index_task = asyncio.create_task(indexing_worker.run()) if os.getenv("AUTO_KNOWLEDGE_INDEX_ENABLED") == "1" else None
         retention_task = asyncio.create_task(retention.run()) if os.getenv("AUTO_RETENTION_ENABLED") == "1" else None
         schedule_task = asyncio.create_task(calendar_schedule.run()) if os.getenv("AUTO_CALENDAR_SCHEDULE_ENABLED") == "1" else None
         try:
@@ -202,6 +225,19 @@ def create_app(
     app.state.organization_brief = organization_brief
     app.state.meeting_prep = meeting_prep
     app.state.calendar_schedule = calendar_schedule
+    storage = StorageService(database, vexa)
+    app.state.storage = storage
+    register_usage_routes(app, usage=usage, database=database)
+    register_storage_routes(app, storage=storage, purger=StoragePurgeService(
+        database, storage, meeting_service, knowledge_bases, audit))
+    app.state.credential_vault = vault
+    app.state.ai_settings = ai_settings
+    register_ai_routes(app, vault=vault, ai_settings=ai_settings)
+    app.state.chunk_retriever = chunk_retriever
+    app.state.document_service = document_service
+    app.state.indexing_worker = indexing_worker
+    register_document_routes(app, documents=document_service)
+    register_prep_routes(app, meeting_prep=meeting_prep)
 
     @app.middleware("http")
     async def require_admin(request: Request, call_next):
@@ -237,7 +273,7 @@ def create_app(
                         or (method == "PUT" and re.fullmatch(r"/v1/knowledge-bases/[0-9a-f-]+/sharing", path))
                         or (path in {"/v1/knowledge/search", "/v1/knowledge/chat", "/v1/knowledge/chat/stream"} and method == "POST")
                         or (method == "GET" and path == "/v1/knowledge/text-profiles")
-                        or (method == "GET" and re.fullmatch(r"/v1/knowledge/text-profiles/[0-9a-f-]+/models", path))
+                        or (method == "GET" and path == "/v1/ai/settings")
                         or path == "/v1/auth/me"
                         or (path == "/v1/calendar/connections" and method == "GET")
                         or (method == "DELETE" and re.fullmatch(r"/v1/calendar/connections/[^/]+", path))
@@ -246,8 +282,11 @@ def create_app(
                         or (path == "/v1/calendar/events" and method == "GET")
                         or (path == "/v1/calendar/synced" and method == "GET")
                         or (path == "/v1/calendar/sync" and method == "POST")
-                        or (method in {"GET", "POST"} and re.fullmatch(r"/v1/calendar/events/[0-9a-f-]+/prep", path))
+                        or (method in {"GET", "POST"} and re.fullmatch(r"/v1/calendar/events/[0-9a-f-]+/prep(?:/stream)?", path))
+                        or (method in {"GET", "PUT"} and re.fullmatch(r"/v1/calendar/events/[0-9a-f-]+/prep/inputs", path))
+                        or (method == "GET" and re.fullmatch(r"/v1/calendar/events/[0-9a-f-]+/prep/history", path))
                         or (method == "GET" and path in {"/v1/workspace/brief", "/v1/workspace/brief/documents"})
+                        or (method in {"GET", "POST", "DELETE"} and re.fullmatch(r"/v1/documents(?:/url|/[0-9a-f-]{36}(?:/reindex)?)?", path))
                         or (method == "GET" and re.fullmatch(r"/v1/meetings/[0-9a-f-]+(?:/transcript)?", path))
                     )
                     if not allowed:
@@ -474,10 +513,6 @@ def create_app(
     def get_workspace_operations(request: Request) -> WorkspaceOperationsPublic:
         return workspace_operations(database, request.state.actor.organization_id)
 
-    @app.get("/v1/workspace/usage", response_model=UsageSummary)
-    def get_workspace_usage(request: Request) -> UsageSummary:
-        return usage.summary(request.state.actor.organization_id)
-
     @app.get("/v1/workspace/retention", response_model=RetentionPolicy)
     def get_workspace_retention(request: Request) -> RetentionPolicy:
         return retention.get(request.state.actor.organization_id)
@@ -596,7 +631,6 @@ def create_app(
     @app.post("/v1/knowledge/chat", response_model=KnowledgeChatResponse)
     async def chat_knowledge(payload: KnowledgeQuery, request: Request) -> KnowledgeChatResponse:
         try:
-            await validate_chat_model(payload, request.state.actor)
             return await knowledge_service.chat(payload, request.state.actor)
         except KnowledgeBaseNotFoundError as exc:
             raise HTTPException(status_code=404, detail="knowledge base not found") from exc
@@ -609,23 +643,12 @@ def create_app(
         except ModelCatalogError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    async def validate_chat_model(payload: KnowledgeQuery, actor: Actor) -> None:
-        if not payload.model_id:
-            return
-        profile_id = payload.text_profile_id
-        if not profile_id and payload.knowledge_base_id:
-            profile_id = knowledge_bases.get(payload.knowledge_base_id, actor).text_profile_id
-        if not profile_id:
-            raise HTTPException(status_code=422, detail="select a text provider before selecting a model")
-        catalog = await model_catalog.list_for(repository.get_profile(profile_id))
-        if payload.model_id not in {option.id for option in catalog.models}:
-            raise HTTPException(status_code=422, detail="choose a model from the provider catalog")
-
     @app.post("/v1/knowledge/chat/stream")
     async def stream_knowledge_chat(payload: KnowledgeQuery, request: Request) -> StreamingResponse:
         actor = request.state.actor
         try:
-            await validate_chat_model(payload, actor)
+            # Provider/model come from the owner's workspace AI settings; any
+            # client-sent text_profile_id/model_id is ignored by KnowledgeService.
             if payload.knowledge_base_id:
                 knowledge_bases.get(payload.knowledge_base_id, actor)
         except KnowledgeBaseNotFoundError as exc:
@@ -781,15 +804,22 @@ def create_app(
         response_model=ProfilePublic,
         status_code=status.HTTP_201_CREATED,
     )
-    def create_profile(payload: ProfileCreate) -> ProfilePublic:
-        return service.to_public(service.create(payload))
-
-    @app.patch("/v1/provider-profiles/{profile_id}", response_model=ProfilePublic)
-    def update_profile(profile_id: UUID, payload: ProfileUpdate) -> ProfilePublic:
+    def create_profile(payload: ProfileCreate, request: Request) -> ProfilePublic:
         try:
-            return service.to_public(service.update(profile_id, payload))
+            return service.to_public(service.create(payload, request.state.actor))
         except (ProfileNotFoundError, ProfileValidationError) as exc:
             raise api_error(exc) from exc
+        except ProfilePermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    @app.patch("/v1/provider-profiles/{profile_id}", response_model=ProfilePublic)
+    def update_profile(profile_id: UUID, payload: ProfileUpdate, request: Request) -> ProfilePublic:
+        try:
+            return service.to_public(service.update(profile_id, payload, request.state.actor))
+        except (ProfileNotFoundError, ProfileValidationError) as exc:
+            raise api_error(exc) from exc
+        except ProfilePermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     @app.delete("/v1/provider-profiles/{profile_id}", status_code=status.HTTP_204_NO_CONTENT)
     def delete_profile(profile_id: UUID) -> Response:
@@ -799,10 +829,14 @@ def create_app(
             raise api_error(exc) from exc
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
+    profile_test_limit = provider_test_limiter()
+    defaults_limit = provider_defaults_limiter()
+
     @app.post(
         "/v1/provider-profiles/{profile_id}/test", response_model=AdapterTestResult
     )
-    async def test_profile(profile_id: UUID) -> AdapterTestResult:
+    async def test_profile(profile_id: UUID, request: Request) -> AdapterTestResult:
+        profile_test_limit.check(request.state.actor.user_id)
         try:
             return await service.test(profile_id)
         except ProfileNotFoundError as exc:
@@ -816,8 +850,9 @@ def create_app(
         "/v1/provider-defaults/{capability}", response_model=DefaultSelectionResponse
     )
     def select_default(
-        capability: Capability, payload: DefaultSelectionRequest
+        capability: Capability, payload: DefaultSelectionRequest, request: Request
     ) -> DefaultSelectionResponse:
+        defaults_limit.check(request.state.actor.user_id)
         try:
             return service.select_default(capability, payload)
         except (ProfileNotFoundError, ProfileValidationError) as exc:
@@ -889,25 +924,7 @@ def create_app(
         except PrepError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
 
-    @app.get("/v1/workspace/brief/documents", response_model=list[BriefDocument])
-    def list_organization_documents(request: Request) -> list[BriefDocument]:
-        return organization_brief.documents(request.state.actor)
-
-    @app.post("/v1/workspace/brief/documents", response_model=BriefDocument, status_code=201)
-    async def upload_organization_document(request: Request, file: UploadFile = File(...)) -> BriefDocument:
-        try:
-            contents = await file.read(8 * 1024 * 1024 + 1)
-            return organization_brief.upload(request.state.actor, file.filename or "document", contents)
-        except PrepError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    @app.delete("/v1/workspace/brief/documents/{document_id}", status_code=204)
-    def delete_organization_document(document_id: UUID, request: Request) -> Response:
-        try:
-            organization_brief.delete_document(request.state.actor, document_id)
-            return Response(status_code=204)
-        except PrepError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    # /v1/workspace/brief/documents routes live in routes_documents.py (DocumentService).
 
     @app.post("/v1/calendar/connect/{provider}", response_model=CalendarConnectResponse)
     async def calendar_connect(provider: CalendarProvider, request: Request, payload: CalendarConnectRequest | None = None) -> CalendarConnectResponse:
@@ -942,22 +959,6 @@ def create_app(
             return await calendar_cache.sync(request.state.actor, payload)
         except CalendarError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    @app.get("/v1/calendar/events/{event_id}/prep", response_model=PrepReport | None)
-    def latest_meeting_prep(event_id: UUID, request: Request) -> PrepReport | None:
-        try:
-            return meeting_prep.latest(request.state.actor, event_id)
-        except CalendarError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    @app.post("/v1/calendar/events/{event_id}/prep", response_model=PrepReport)
-    async def generate_meeting_prep(event_id: UUID, payload: PrepRequest, request: Request) -> PrepReport:
-        try:
-            return await meeting_prep.generate(request.state.actor, event_id, payload)
-        except CalendarError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except PrepError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     @app.get("/v1/calendar/schedules", response_model=list[CalendarSchedulePublic])
     def calendar_schedules(request: Request) -> list[CalendarSchedulePublic]:

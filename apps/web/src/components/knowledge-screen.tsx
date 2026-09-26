@@ -5,8 +5,8 @@ import { Popover } from "@base-ui/react/popover";
 import { BookOpenText, Building2, Database, Download, Ellipsis, Library, Lock, MessageSquare, Plus, Search, ShieldCheck, Trash2, Users } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
 import { useUiPreference } from "@/lib/ui-preferences";
-import type { CurrentAccount, KnowledgeBase, ProviderProfile, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeTextProfile, KnowledgeWikiOverview, TextModelCatalog, WorkspaceMember } from "@/lib/types";
-import { ChatTurn, ChatWelcome, Composer, ModelPicker, PendingTurn, type Exchange, type PendingAnswer } from "./knowledge-chat";
+import type { AiSettingsView, CurrentAccount, KnowledgeBase, ProviderProfile, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeWikiOverview, WorkspaceMember } from "@/lib/types";
+import { BasePicker, ChatModelInfo, ChatTurn, ChatWelcome, Composer, PendingTurn, type Exchange, type PendingAnswer } from "./knowledge-chat";
 import { EvidenceMap, SourceCard, WikiOverview } from "./knowledge-sources";
 import { KnowledgeSharingDialog, type Visibility } from "./knowledge-sharing-dialog";
 import { Alert, EmptyState, LoadingRow } from "./ui/feedback";
@@ -72,9 +72,10 @@ function relativeDay(value: string): string {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-export function KnowledgeScreen({ identity, onOpenSource, account }: {
+export function KnowledgeScreen({ identity, onOpenSource, onOpenProviders, account }: {
   identity: string;
   account: CurrentAccount | null;
+  onOpenProviders?(): void;
   onOpenSource(meetingId: string, segmentId: string): void;
 }) {
   const isAdmin = account?.role === "owner" || account?.role === "admin";
@@ -84,12 +85,9 @@ export function KnowledgeScreen({ identity, onOpenSource, account }: {
   const [bases, setBases] = useState<KnowledgeBase[]>([]);
   const [basesLoaded, setBasesLoaded] = useState(false);
   const [storedBaseId, setStoredBaseId] = useUiPreference(`meetings-ai:knowledge-base:${identity}`, "", isString);
-  const [textProfiles, setTextProfiles] = useState<KnowledgeTextProfile[]>([]);
   const [providerProfiles, setProviderProfiles] = useState<ProviderProfile[]>([]);
-  const [chatProfileId, setChatProfileId] = useUiPreference(`meetings-ai:knowledge-profile:${identity}`, "", isString);
-  const [modelCatalog, setModelCatalog] = useState<TextModelCatalog | null>(null);
-  const [selectedModelId, setSelectedModelId] = useUiPreference(`meetings-ai:knowledge-model:${identity}`, "", isString);
-  const [modelError, setModelError] = useState<string | null>(null);
+  // undefined while loading; null when the settings could not be read.
+  const [aiSettings, setAiSettings] = useState<AiSettingsView | null | undefined>(undefined);
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
   const [shareVisibility, setShareVisibility] = useState<Visibility>("private");
   const [shareUserIds, setShareUserIds] = useState<string[]>([]);
@@ -120,7 +118,6 @@ export function KnowledgeScreen({ identity, onOpenSource, account }: {
   const selectedBaseId = storedBaseId === ALL_MEETINGS ? "" : storedBaseId;
   const selectedBase = bases.find((item) => item.id === selectedBaseId);
   const canManageBase = Boolean(selectedBase && (isAdmin || selectedBase.created_by === account?.user_id));
-  const effectiveProfileId = textProfiles.some((profile) => profile.id === chatProfileId) ? chatProfileId : selectedBase?.text_profile_id || textProfiles[0]?.id || "";
 
   useEffect(() => { conversationRef.current = conversationId; }, [conversationId]);
 
@@ -136,15 +133,11 @@ export function KnowledgeScreen({ identity, onOpenSource, account }: {
         return items[0]?.id ?? (isAdmin ? ALL_MEETINGS : "");
       });
     }).catch(() => { if (active) { setBasesLoaded(true); setError("Could not load knowledge bases."); } });
-    void meetingsService.listKnowledgeTextProfiles().then((items) => {
-      if (!active) return;
-      setTextProfiles(items);
-      setChatProfileId((current) => current && !items.some((item) => item.id === current) ? "" : current);
-    }).catch(() => { if (active) setModelError("Could not load text providers."); });
+    void meetingsService.getAiSettings().then((value) => { if (active) setAiSettings(value); }).catch(() => { if (active) setAiSettings(null); });
     void meetingsService.listWorkspaceMembers().then((items) => { if (active) setMembers(items); }).catch(() => undefined);
     if (isAdmin) void meetingsService.listProviderProfiles().then((items) => { if (active) setProviderProfiles(items); }).catch(() => undefined);
     return () => { active = false; };
-  }, [isAdmin, setChatProfileId, setStoredBaseId]);
+  }, [isAdmin, setStoredBaseId]);
 
   useEffect(() => {
     if (!selectedBaseId) return;
@@ -169,19 +162,6 @@ export function KnowledgeScreen({ identity, onOpenSource, account }: {
   }, [selectedBaseId, setConversationId]);
 
   useEffect(() => {
-    if (!effectiveProfileId) return;
-    let active = true;
-    queueMicrotask(() => { if (active) { setModelCatalog(null); setModelError(null); } });
-    void meetingsService.listKnowledgeModels(effectiveProfileId).then((catalog) => {
-      if (!active) return;
-      setModelCatalog(catalog);
-      // A cost-conscious default for OpenAI, without changing the saved workspace MOM route.
-      setSelectedModelId((current) => catalog.models.some((item) => item.id === current) ? current : catalog.provider === "openai" && catalog.models.some((item) => item.id === "gpt-6-luna") ? "gpt-6-luna" : catalog.configured_model);
-    }).catch((cause) => { if (active) setModelError(cause instanceof Error ? cause.message : "Could not load the model catalog."); });
-    return () => { active = false; };
-  }, [effectiveProfileId, setSelectedModelId]);
-
-  useEffect(() => {
     const node = threadRef.current;
     if (node) node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
   }, [exchanges, pending]);
@@ -190,8 +170,8 @@ export function KnowledgeScreen({ identity, onOpenSource, account }: {
     threadGeneration.current += 1;
     setMenuOpen(false);
     setSearch(null); setOverview(null); setEvidenceMap(null); setIndexStatus(null); setExchanges([]); setConversations([]);
-    setConversationId(null); setError(null); setConfirmDelete(null); setNotice(null); setChatProfileId("");
-  }, [setChatProfileId, setConversationId]);
+    setConversationId(null); setError(null); setConfirmDelete(null); setNotice(null);
+  }, [setConversationId]);
 
   function chooseBase(id: string) {
     const next = id || ALL_MEETINGS;
@@ -330,7 +310,7 @@ export function KnowledgeScreen({ identity, onOpenSource, account }: {
       setPending({ question, raw: "", answer: "" });
       setQuery("");
       let raw = "";
-      const response = await meetingsService.streamKnowledgeChat(question, tags, selectedBaseId, conversationId, effectiveProfileId || null, selectedModelId || null, (delta) => {
+      const response = await meetingsService.streamKnowledgeChat(question, tags, selectedBaseId, conversationId, null, null, (delta) => {
         raw += delta;
         if (current()) setPending({ question, raw, answer: streamedAnswer(raw) });
       });
@@ -356,14 +336,9 @@ export function KnowledgeScreen({ identity, onOpenSource, account }: {
   const indexed = indexStatus?.indexed_sources ?? 0;
   const retrievalHint = indexed ? "Hybrid search" : "Keyword search";
   const defaultProfile = selectedBase?.text_profile_id ?? "";
-  const picker = <ModelPicker
-    textProfiles={textProfiles}
-    profileId={effectiveProfileId}
-    onProfile={(id) => { setChatProfileId(id); setSelectedModelId(""); }}
-    catalog={modelCatalog}
-    modelId={selectedModelId}
-    onModel={setSelectedModelId}
-    error={modelError}
+  const picker = <ChatModelInfo
+    settings={aiSettings}
+    onOpenProviders={onOpenProviders}
     baseDefault={isAdmin && canManageBase && selectedBase ? {
       baseName: selectedBase.name,
       value: defaultProfile,
@@ -452,7 +427,7 @@ export function KnowledgeScreen({ identity, onOpenSource, account }: {
             </div>
           </div>
           <div className="chat-dock"><div className="chat-column">
-            <Composer value={query} onChange={setQuery} onSubmit={submit} busy={busy} disabled={!selectedBase} tags={tagFilter} onTags={setTagFilter} picker={picker} hint={selectedBase ? `${retrievalHint} · memory saved in this chat` : ""} />
+            <Composer value={query} onChange={setQuery} onSubmit={submit} busy={busy} disabled={!selectedBase} tags={tagFilter} onTags={setTagFilter} picker={picker} basePicker={<BasePicker bases={bases.map((base) => ({ id: base.id, name: base.name, meetings: base.meeting_count }))} selectedId={selectedBaseId} onSelect={chooseBase} />} hint={selectedBase ? `${retrievalHint} · memory saved in this chat` : ""} />
           </div></div>
         </> : null}
 

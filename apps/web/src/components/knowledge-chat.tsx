@@ -1,9 +1,10 @@
 "use client";
 
 import { Fragment, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import Image from "next/image";
 import { Popover } from "@base-ui/react/popover";
-import { ArrowUp, Check, ChevronDown, Copy, Cpu, Quote, Sparkles, Tag, X } from "lucide-react";
-import type { KnowledgeChatResponse, KnowledgeSource, KnowledgeTextProfile, TextModelCatalog } from "@/lib/types";
+import { ArrowUp, Check, ChevronDown, Copy, Cpu, Library, MessagesSquare, Quote, Tag, X } from "lucide-react";
+import type { AiSettingsView, KnowledgeChatResponse, KnowledgeSource } from "@/lib/types";
 import { SourceCard, type OpenSource } from "./knowledge-sources";
 
 export type Exchange = { question: string; response: KnowledgeChatResponse };
@@ -15,7 +16,6 @@ const SUGGESTED_PROMPTS = [
   "Which questions are still unresolved?",
   "Summarise how this topic evolved across meetings",
 ];
-const MODEL_LIST_LIMIT = 40;
 const CITATION_PATTERN = /\[K(\d+)\]/g;
 
 /** Renders an answer as paragraphs and bullets, turning [K1] markers into citation chips. */
@@ -45,7 +45,7 @@ function AnswerText({ text, citations, onCite }: { text: string; citations: Know
 }
 
 function AssistantMark() {
-  return <span className="assistant-mark" aria-hidden="true"><Sparkles /></span>;
+  return <span className="assistant-mark" aria-hidden="true"><Image src="/icon.svg" width={28} height={28} alt="" /></span>;
 }
 
 export function ChatTurn({ exchange, onOpenSource }: { exchange: Exchange; onOpenSource: OpenSource }) {
@@ -94,7 +94,7 @@ export function PendingTurn({ pending }: { pending: PendingAnswer }) {
 
 export function ChatWelcome({ baseName, disabled, onPrompt }: { baseName: string | null; disabled: boolean; onPrompt(prompt: string): void }) {
   return <div className="chat-welcome">
-    <span className="chat-welcome-mark" aria-hidden="true"><Sparkles /></span>
+    <span className="chat-welcome-mark" aria-hidden="true"><MessagesSquare /></span>
     <h2>{baseName ? `Ask ${baseName}` : "Choose a knowledge base"}</h2>
     <p>{baseName ? "Answers are grounded in opted-in meetings and cite the exact transcript turn." : "Select a named knowledge base to start a saved chat."}</p>
     {baseName ? <div className="prompt-grid">{SUGGESTED_PROMPTS.map((prompt) => <button key={prompt} type="button" className="prompt-card" disabled={disabled} onClick={() => onPrompt(prompt)}>{prompt}</button>)}</div> : null}
@@ -103,45 +103,30 @@ export function ChatWelcome({ baseName, disabled, onPrompt }: { baseName: string
 
 export type BaseDefaultControl = { baseName: string; value: string; options: { value: string; label: string }[]; onChange(value: string): void };
 
-export function ModelPicker({ textProfiles, profileId, onProfile, catalog, modelId, onModel, error, baseDefault }: {
-  textProfiles: KnowledgeTextProfile[];
-  profileId: string;
-  onProfile(id: string): void;
-  catalog: TextModelCatalog | null;
-  modelId: string;
-  onModel(id: string): void;
-  error: string | null;
+/** Read-only view of the owner-chosen Ask AI model; admins can still set a per-base fallback. */
+export function ChatModelInfo({ settings, onOpenProviders, baseDefault }: {
+  settings: AiSettingsView | null | undefined;
+  onOpenProviders?(): void;
   baseDefault?: BaseDefaultControl | null;
 }) {
   const [open, setOpen] = useState(false);
-  const [filter, setFilter] = useState("");
-  const selected = catalog?.models.find((item) => item.id === modelId);
-  const label = selected?.name ?? catalog?.configured_model ?? (textProfiles.length ? "Loading models…" : "No text provider");
-  const models = (catalog?.models ?? []).filter((item) => `${item.name} ${item.id}`.toLowerCase().includes(filter.toLowerCase())).slice(0, MODEL_LIST_LIMIT);
-  const providerLabel = (profile: KnowledgeTextProfile) => profile.base_url?.includes("openrouter.ai") ? "OpenRouter" : profile.provider_type === "openai" ? "OpenAI" : "Compatible";
-  return <Popover.Root open={open} onOpenChange={(next) => { setOpen(next); if (!next) setFilter(""); }}>
-    <Popover.Trigger className="composer-chip knowledge-model-trigger" aria-label={`Model: ${label}`} disabled={!textProfiles.length}><Cpu aria-hidden="true" /><span>{label}</span><ChevronDown aria-hidden="true" /></Popover.Trigger>
+  const route = settings?.effective_chat;
+  const label = route?.model ?? (settings ? "No model configured" : settings === null ? "Workspace model" : "Loading…");
+  const summary = settings === null ? "Answers use the model chosen by the workspace owner." : !route || route.source === "not_configured" || !route.model ? "Ask AI has no model yet. The workspace owner chooses it in AI providers."
+    : `${route.model}${route.profile_name ? ` via ${route.profile_name}` : ""}${route.source === "workspace_default" ? " (workspace default)" : ""}.`;
+  return <Popover.Root open={open} onOpenChange={setOpen}>
+    <Popover.Trigger className="composer-chip knowledge-model-trigger" aria-label={`Ask AI model: ${label}`}><Cpu aria-hidden="true" /><span>{label}</span><ChevronDown aria-hidden="true" /></Popover.Trigger>
     <Popover.Portal>
       <Popover.Positioner side="top" align="start" sideOffset={8} className="ui-select-positioner">
         <Popover.Popup className="popover model-popover">
-          <p className="menu-label">Provider</p>
-          <div role="radiogroup" aria-label="Chat provider">{textProfiles.map((profile) => <button key={profile.id} type="button" role="radio" aria-checked={profile.id === profileId} className="menu-item" onClick={() => onProfile(profile.id)}><span className="model-provider-name">{profile.name}</span><small>{providerLabel(profile)}</small>{profile.id === profileId ? <Check className="model-check" aria-hidden="true" /> : null}</button>)}</div>
-          <div className="menu-separator" />
-          <label className="menu-label" htmlFor="chat-model-search">Model</label>
-          <div className="model-search"><input id="chat-model-search" value={filter} onChange={(event) => setFilter(event.target.value)} autoComplete="off" placeholder="Search available models" disabled={!catalog} /></div>
-          <div className="model-options" role="listbox" aria-label="Available models">
-            {catalog ? models.length ? models.map((item) => <button type="button" role="option" aria-selected={item.id === modelId} key={item.id} className="model-option" onClick={() => { onModel(item.id); setOpen(false); }}>
-              <span><b>{item.name}</b><small>{item.id}</small></span>
-              {item.input_per_million_usd !== null ? <small className="model-price">${item.input_per_million_usd} in · ${item.output_per_million_usd} out /M</small> : null}
-              {item.id === modelId ? <Check className="model-check" aria-hidden="true" /> : null}
-            </button>) : <p className="field-hint model-empty">No models match “{filter}”.</p> : <p className="field-hint model-empty">{error ?? "Loading models…"}</p>}
-          </div>
-          <div className="model-foot">
-            {error ? <small className="inline-error">{error}</small> : <small className="field-hint">{catalog?.live_catalog ? `${catalog.models.length} live models. Prices are provider list rates.` : "Using this provider’s saved model."}</small>}
-          </div>
+          <p className="menu-label">Ask AI model</p>
+          <p className="model-summary">{summary}</p>
+          <p className="field-hint model-summary">Set by the workspace owner for everyone, so answers stay consistent and costs predictable.</p>
+          {settings?.can_edit && onOpenProviders ? <div className="model-foot"><button type="button" className="text-button" onClick={() => { setOpen(false); onOpenProviders(); }}>Change in AI providers</button></div> : null}
           {baseDefault ? <>
             <div className="menu-separator" />
-            <p className="menu-label">Default provider for {baseDefault.baseName}</p>
+            <p className="menu-label">Fallback for {baseDefault.baseName}</p>
+            <p className="field-hint model-summary">Used only when no workspace chat model is set.</p>
             <div role="radiogroup" aria-label={`Default provider for ${baseDefault.baseName}`}>{baseDefault.options.map((option) => <button key={option.value || "workspace"} type="button" role="radio" aria-checked={option.value === baseDefault.value} className="menu-item" onClick={() => baseDefault.onChange(option.value)}><span className="model-provider-name">{option.label}</span>{option.value === baseDefault.value ? <Check className="model-check" aria-hidden="true" /> : null}</button>)}</div>
           </> : null}
         </Popover.Popup>
@@ -150,7 +135,24 @@ export function ModelPicker({ textProfiles, profileId, onProfile, catalog, model
   </Popover.Root>;
 }
 
-export function Composer({ value, onChange, onSubmit, busy, disabled, tags, onTags, picker, hint }: {
+/** Chooses which knowledge base the next message searches, from inside the composer. */
+export function BasePicker({ bases, selectedId, onSelect }: { bases: { id: string; name: string; meetings: number }[]; selectedId: string; onSelect(id: string): void }) {
+  const [open, setOpen] = useState(false);
+  const selected = bases.find((base) => base.id === selectedId);
+  return <Popover.Root open={open} onOpenChange={setOpen}>
+    <Popover.Trigger className="composer-chip knowledge-base-trigger" aria-label="Switch knowledge base" title={selected ? `Chatting with ${selected.name}` : undefined} disabled={!bases.length}><Library aria-hidden="true" /><span>{selected?.name ?? "Choose a knowledge base"}</span><ChevronDown aria-hidden="true" /></Popover.Trigger>
+    <Popover.Portal>
+      <Popover.Positioner side="top" align="start" sideOffset={8} className="ui-select-positioner">
+        <Popover.Popup className="popover model-popover">
+          <p className="menu-label">Chat with</p>
+          <div role="radiogroup" aria-label="Knowledge base for this chat">{bases.map((base) => <button key={base.id} type="button" role="radio" aria-checked={base.id === selectedId} className="menu-item" onClick={() => { onSelect(base.id); setOpen(false); }}><Library /><span className="model-provider-name">{base.name}</span><small>{base.meetings} meeting{base.meetings === 1 ? "" : "s"}</small>{base.id === selectedId ? <Check className="model-check" aria-hidden="true" /> : null}</button>)}</div>
+        </Popover.Popup>
+      </Popover.Positioner>
+    </Popover.Portal>
+  </Popover.Root>;
+}
+
+export function Composer({ value, onChange, onSubmit, busy, disabled, tags, onTags, picker, hint, basePicker }: {
   value: string;
   onChange(value: string): void;
   onSubmit(event: FormEvent<HTMLFormElement>): void;
@@ -160,6 +162,7 @@ export function Composer({ value, onChange, onSubmit, busy, disabled, tags, onTa
   onTags(value: string): void;
   picker: ReactNode;
   hint: string;
+  basePicker?: ReactNode;
 }) {
   const [tagsOpen, setTagsOpen] = useState(tags.length > 0);
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -174,6 +177,7 @@ export function Composer({ value, onChange, onSubmit, busy, disabled, tags, onTa
       <label className="sr-only" htmlFor="knowledge-question">Message your knowledge base</label>
       <textarea id="knowledge-question" rows={1} value={value} onChange={(event) => onChange(event.target.value)} onKeyDown={onKeyDown} minLength={3} maxLength={500} required disabled={disabled} placeholder={disabled ? "Select a knowledge base to start chatting" : "Ask about a decision, person, date or follow-up…"} />
       <div className="composer-bar">
+        {basePicker}
         {picker}
         {!tagsOpen ? <button type="button" className="composer-chip" onClick={() => setTagsOpen(true)}><Tag aria-hidden="true" /><span>Tags</span></button> : null}
         <span className="composer-hint">{hint}</span>
