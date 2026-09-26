@@ -24,7 +24,7 @@ export function UsageEventSheet({ event, onClose }: { event: UsageEvent | null; 
   return <Dialog.Root open={event !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
     <Dialog.Portal>
       <Dialog.Backdrop className="dialog-backdrop" />
-      <Dialog.Popup className="sheet obs-sheet">
+      <Dialog.Popup className="dialog lg obs-modal">
         {event ? <>
           <div className="obs-sheet-header">
             <Dialog.Close className="close-button" aria-label="Close call details"><X /></Dialog.Close>

@@ -27,7 +27,7 @@ export function StorageManageSheet({ category, onClose, onPurged, result }: {
   return <Dialog.Root open={category !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
     <Dialog.Portal>
       <Dialog.Backdrop className="dialog-backdrop" />
-      <Dialog.Popup className="sheet obs-sheet storage-sheet">
+      <Dialog.Popup className="dialog lg obs-modal storage-sheet">
         {category ? <ManageBody key={category.key} category={category} onPurged={onPurged}
           result={result?.category === category.key ? result : null} /> : null}
       </Dialog.Popup>

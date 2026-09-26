@@ -29,6 +29,19 @@ from .service import ProviderProfileService, ProviderSelectionError
 logger = logging.getLogger(__name__)
 
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
+# OpenAI models whose docs list "Input modalities: text, image" (checked 2026-09-27 at
+# https://developers.openai.com/api/docs/models/gpt-6-luna). Add others only after checking.
+OPENAI_IMAGE_INPUT_MODELS = frozenset({"gpt-6-luna"})
+OPENAI_DEFAULT_VISION_MODEL = "gpt-6-luna"
+
+
+def _is_openai_direct(profile: ProviderProfile) -> bool:
+    if profile.provider_type is not ProviderType.OPENAI:
+        return False
+    if not profile.base_url:
+        return True
+    parsed = urlparse(profile.base_url)
+    return parsed.scheme == "https" and parsed.hostname == "api.openai.com"
 CATALOG_TTL_SECONDS = 600
 VISION_MAX_OUTPUT_TOKENS = 2000
 
@@ -82,6 +95,9 @@ class VisionService:
                 continue
             if await self.is_vision_capable(profile, text_model):
                 return VisionRoute(profile.id, text_model, None, "workspace_default")
+            if _is_openai_direct(profile):
+                # Same OpenAI key, economical image-capable model (verified in OpenAI's docs).
+                return VisionRoute(profile.id, OPENAI_DEFAULT_VISION_MODEL, OPENAI_DEFAULT_VISION_MODEL, "openai_default_vision")
             return None  # Only the primary default is considered; never guess.
         return None
 
@@ -96,7 +112,9 @@ class VisionService:
             return UUID(row.vision_profile_id), row.vision_model
 
     async def is_vision_capable(self, profile: ProviderProfile, model: str) -> bool:
-        """True only when a live catalog says the model accepts images (OpenRouter today)."""
+        """True when a live catalog (OpenRouter) or OpenAI's model docs say the model accepts images."""
+        if _is_openai_direct(profile):
+            return model in OPENAI_IMAGE_INPUT_MODELS
         if profile.provider_type is not ProviderType.OPENAI_COMPATIBLE or not profile.base_url:
             return False
         parsed = urlparse(profile.base_url)

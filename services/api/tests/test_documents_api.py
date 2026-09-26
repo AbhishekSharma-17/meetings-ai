@@ -318,3 +318,20 @@ def test_organization_brief_is_indexed_once_per_change(tmp_path) -> None:
                  "website": None, "differentiators": "", "positioning": ""}
         assert asyncio.run(worker.index_brief(str(LEGACY_ORGANIZATION_ID), brief)) is False
         assert asyncio.run(worker.index_brief(str(LEGACY_ORGANIZATION_ID), {**brief, "services": ["Audits"]})) is True
+
+
+def test_openai_default_uses_gpt_6_luna_for_vision_when_no_vision_model_is_set(tmp_path) -> None:
+    app = _app(tmp_path)
+    vision = app.state.document_service.vision
+    with TestClient(app) as client:
+        profile = client.post("/v1/provider-profiles", json={
+            "name": "OpenAI main", "provider_type": "openai", "execution_location": "cloud",
+            "api_key": "sk-openai-test-key",
+            "capabilities": [{"capability": "text_generation", "model": "gpt-6-sol"}],
+        }).json()
+        assert client.put("/v1/provider-defaults/text_generation", json={
+            "policy": "cloud_only", "cloud_profile_id": profile["id"],
+        }).status_code == 200
+        route = asyncio.run(vision.resolve(LEGACY_ORGANIZATION_ID))
+        assert route is not None and route.source == "openai_default_vision"
+        assert route.model == "gpt-6-luna" and route.model_override == "gpt-6-luna"

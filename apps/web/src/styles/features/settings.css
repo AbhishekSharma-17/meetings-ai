@@ -461,3 +461,9 @@
   .obs-kv > div { grid-template-columns:minmax(0,1fr); gap:2px; }
   .storage-grid { grid-template-columns:minmax(0,1fr); }
 }
+
+/* Observability detail and storage "Manage" views open as centred modals (header fixed, body scrolls). */
+.dialog.obs-modal { display:flex; flex-direction:column; padding:0; overflow:hidden; max-height:min(86dvh,820px); }
+.dialog.obs-modal > * { min-height:0; }
+.obs-modal .obs-sheet-header { flex:none; }
+.obs-modal .obs-sheet-body { flex:1; min-height:0; overflow-y:auto; }

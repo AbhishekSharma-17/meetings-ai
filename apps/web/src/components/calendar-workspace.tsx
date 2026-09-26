@@ -236,6 +236,8 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
     setBusy(true); setError(null);
     try {
       await meetingsService.disconnectCalendar(connectionId);
+      // The server forgets this account's meetings; drop them here too so nothing lingers until the next sync.
+      setSnapshot((current) => ({ ...current, events: current.events.filter((event) => event.connection_id !== connectionId), syncs: current.syncs.filter((state) => state.connection_id !== connectionId) }));
       setConnections(await meetingsService.listCalendarConnections());
       setAccountFilter((current) => current === connectionId ? "all" : current);
       return true;

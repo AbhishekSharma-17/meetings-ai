@@ -43,6 +43,16 @@ class CalendarSyncResponse(CachedCalendarResponse):
     errors: dict[str, str] = Field(default_factory=dict)
 
 
+def _has_prep_work(session, event_row_id: str) -> bool:
+    """A saved briefing, prep inputs or a prep upload still references this event."""
+    return bool(session.execute(select(MeetingPrepRow.id).where(
+        MeetingPrepRow.calendar_event_id == event_row_id,
+    ).limit(1)).first() or session.get(MeetingPrepInputRow, event_row_id) or session.execute(
+        select(KnowledgeDocumentRow.id).where(
+            KnowledgeDocumentRow.scope == "prep", KnowledgeDocumentRow.scope_id == event_row_id,
+        ).limit(1)).first())
+
+
 class CalendarCacheService:
     def __init__(self, database: Database, calendar: ComposioCalendar) -> None:
         self.database = database
@@ -51,9 +61,17 @@ class CalendarCacheService:
     def list(self, actor: Actor, first: date, last: date, timezone: str) -> CachedCalendarResponse:
         start, end = calendar_date_window(first, last, timezone)
         with self.database.session_factory() as session:
+            # Events are shown only for accounts that are still connected. A
+            # disconnected account's sync state is removed, so its leftover rows
+            # (kept only when a saved briefing references them) stay hidden here.
+            connected = select(CalendarSyncStateRow.connection_id).where(
+                CalendarSyncStateRow.organization_id == str(actor.organization_id),
+                CalendarSyncStateRow.user_id == str(actor.user_id),
+            )
             rows = session.execute(select(CalendarEventCacheRow).where(
                 CalendarEventCacheRow.organization_id == str(actor.organization_id),
                 CalendarEventCacheRow.user_id == str(actor.user_id),
+                CalendarEventCacheRow.connection_id.in_(connected),
                 CalendarEventCacheRow.starts_at >= start.astimezone(UTC),
                 CalendarEventCacheRow.starts_at < end.astimezone(UTC),
             ).order_by(CalendarEventCacheRow.starts_at, CalendarEventCacheRow.provider)).scalars().all()
@@ -76,10 +94,46 @@ class CalendarCacheService:
                 raise CalendarError("saved calendar event not found")
             return CachedCalendarEvent(**row.payload, id=UUID(row.id), synced_at=row.synced_at)
 
+    def forget_connection(self, actor: Actor, connection_id: str) -> int:
+        """Drop a disconnected account's cached events and sync state; returns rows removed.
+
+        Events that a saved briefing, prep inputs or prep upload still reference are
+        kept (so the briefing stays readable) but no longer listed in the calendar.
+        """
+        removed = 0
+        with self.database.session_factory.begin() as session:
+            rows = session.execute(select(CalendarEventCacheRow).where(
+                CalendarEventCacheRow.organization_id == str(actor.organization_id),
+                CalendarEventCacheRow.user_id == str(actor.user_id),
+                CalendarEventCacheRow.connection_id == connection_id,
+            )).scalars().all()
+            for row in rows:
+                if not _has_prep_work(session, row.id):
+                    session.delete(row)
+                    removed += 1
+            state = session.get(CalendarSyncStateRow, (str(actor.organization_id), str(actor.user_id), connection_id))
+            if state is not None:
+                session.delete(state)
+        return removed
+
+    def forget_missing_connections(self, actor: Actor, active_ids: set[str]) -> int:
+        with self.database.session_factory() as session:
+            cached = set(session.execute(select(CalendarSyncStateRow.connection_id).where(
+                CalendarSyncStateRow.organization_id == str(actor.organization_id),
+                CalendarSyncStateRow.user_id == str(actor.user_id),
+            )).scalars()) | set(session.execute(select(CalendarEventCacheRow.connection_id).where(
+                CalendarEventCacheRow.organization_id == str(actor.organization_id),
+                CalendarEventCacheRow.user_id == str(actor.user_id),
+            ).distinct()).scalars())
+        return sum(self.forget_connection(actor, connection_id) for connection_id in cached - active_ids)
+
     async def sync(self, actor: Actor, request: CalendarSyncRequest) -> CalendarSyncResponse:
         start, end = calendar_date_window(request.start_date, request.end_date, request.timezone)
         connections = {item.id: item for item in await self.calendar.connections(actor) if item.status == "ACTIVE"}
         selected = list(dict.fromkeys(request.connection_ids)) if request.connection_ids else list(connections)
+        # Accounts disconnected elsewhere (Composio dashboard, expiry) must not
+        # leave their meetings behind in the calendar.
+        self.forget_missing_connections(actor, set(connections))
         if not selected:
             raise CalendarError("connect an account before syncing events")
         if any(item not in connections for item in selected):
@@ -126,15 +180,7 @@ class CalendarCacheService:
                             # Keep a prepared meeting's event identity so its
                             # saved briefing is still readable after removal
                             # from the upstream calendar.
-                            # Saved prep inputs and prep uploads also keep it
-                            # (they reference the event, and are the user's work).
-                            has_prep = session.execute(select(MeetingPrepRow.id).where(
-                                MeetingPrepRow.calendar_event_id == row.id,
-                            ).limit(1)).first() or session.get(MeetingPrepInputRow, row.id) or session.execute(
-                                select(KnowledgeDocumentRow.id).where(
-                                    KnowledgeDocumentRow.scope == "prep", KnowledgeDocumentRow.scope_id == row.id,
-                                ).limit(1)).first()
-                            if not has_prep:
+                            if not _has_prep_work(session, row.id):
                                 session.delete(row)
                 sync_key = (str(actor.organization_id), str(actor.user_id), connection_id)
                 state = session.get(CalendarSyncStateRow, sync_key)

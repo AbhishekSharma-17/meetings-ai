@@ -226,3 +226,42 @@ def _v2_output(**overrides):
         "talking_points": [], "questions_to_ask": [], "watchouts": [],
     }
     return {**base, **overrides}
+
+
+class ShrinkingCalendar(FakeCalendar):
+    """An account can disappear upstream (disconnected here, in Composio, or expired)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.active = ["google", "outlook"]
+        self.disconnected: list[str] = []
+
+    async def connections(self, actor):
+        return [item for item in await super().connections(actor) if item.id in self.active]
+
+    async def disconnect(self, actor, connection_id):
+        self.disconnected.append(connection_id)
+        self.active = [item for item in self.active if item != connection_id]
+
+
+def test_disconnected_account_meetings_leave_the_calendar(tmp_path):
+    fake = ShrinkingCalendar()
+    app = _app(tmp_path, fake)
+    params = {"start_date": "2026-10-01", "end_date": "2026-10-31", "timezone": "UTC"}
+    with TestClient(app) as client:
+        assert {event["connection_id"] for event in _sync(client).json()["events"]} == {"google", "outlook"}
+
+        # Disconnecting through the app hides the account's meetings immediately.
+        assert client.delete("/v1/calendar/connections/google").status_code == 204
+        listed = client.get("/v1/calendar/synced", params=params).json()
+        assert {event["connection_id"] for event in listed["events"]} == {"outlook"}
+        assert {state["connection_id"] for state in listed["syncs"]} == {"outlook"}
+
+        # Google is reconnected while Outlook vanishes upstream (expired or removed
+        # in the provider): the next sync keeps Google and cleans up Outlook.
+        fake.active = ["google"]
+        synced = _sync(client).json()
+        assert {event["connection_id"] for event in synced["events"]} == {"google"}
+        with app.state.database.session_factory() as session:
+            leftovers = session.execute(select(CalendarEventCacheRow.connection_id)).scalars().all()
+        assert "outlook" not in leftovers

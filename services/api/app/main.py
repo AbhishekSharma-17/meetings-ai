@@ -881,6 +881,8 @@ def create_app(
         except CalendarError as exc:
             code = 404 if "not found for your account" in str(exc) else 503
             raise HTTPException(status_code=code, detail=str(exc)) from exc
+        # The account's meetings disappear from the calendar immediately, not on the next sync.
+        calendar_cache.forget_connection(request.state.actor, connection_id)
         return Response(status_code=204)
 
     @app.patch("/v1/calendar/connections/{connection_id}", response_model=CalendarConnection)

@@ -31,6 +31,23 @@ function toInput(draft: Draft): AiSettingsInput {
   };
 }
 
+// Recommended GPT-6 routing (checked 2026-09-27 in OpenAI's model docs and pricing):
+// gpt-6-luna reads text and images at $0.10 / $0.50 per 1M tokens; gpt-6-sol ($2 / $10)
+// writes the longer research briefs. Only offered when an OpenAI profile exists.
+const RECOMMENDED = { chat: "gpt-6-luna", vision: "gpt-6-luna", research: "gpt-6-sol" } as const;
+
+function recommendedDraft(draft: Draft, profiles: ProviderProfile[]): Draft | null {
+  const openai = profiles.find((profile) => profile.provider === "OpenAI" && profile.capabilities.includes("text_generation")
+    && !profile.id.startsWith("new-") && (!profile.endpoint || profile.endpoint.startsWith("https://api.openai.com")));
+  if (!openai) return null;
+  return {
+    ...draft,
+    chat: { profileId: openai.id, model: RECOMMENDED.chat },
+    vision: { profileId: openai.id, model: RECOMMENDED.vision },
+    research: { profileId: openai.id, model: RECOMMENDED.research },
+  };
+}
+
 /** One-line description of the model that answers Ask AI, for everyone. */
 export function effectiveChatText(view: AiSettingsView): string {
   const route = view.effective_chat;
@@ -81,6 +98,7 @@ function OwnerForm({ view, profiles, exaKeys, onSaved, onNotice }: {
   const [error, setError] = useState<string | null>(null);
   const dirty = JSON.stringify(toInput(draft)) !== JSON.stringify(toInput(draftFrom(view)));
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((current) => ({ ...current, [key]: value }));
+  const recommended = recommendedDraft(draft, profiles);
 
   async function save() {
     setSaving(true); setError(null);
@@ -103,8 +121,8 @@ function OwnerForm({ view, profiles, exaKeys, onSaved, onNotice }: {
       </fieldset>
       <fieldset className="workspace-ai-section">
         <legend><ScanText aria-hidden="true" /> Vision & OCR</legend>
-        <p className="field-hint">Reads scanned pages and images in documents. Pick a model that accepts images; an economical OpenRouter vision model is usually enough.</p>
-        <ModelRoutePicker id="ai-vision" name="Vision" profiles={profiles} value={draft.vision} onChange={(value) => set("vision", value)} noneLabel="Off" />
+        <p className="field-hint">Reads scanned pages and images in documents. gpt-6-luna accepts images and is economical; with an OpenAI default and no choice here, it is used automatically.</p>
+        <ModelRoutePicker id="ai-vision" name="Vision" profiles={profiles} value={draft.vision} onChange={(value) => set("vision", value)} noneLabel="Automatic (gpt-6-luna with an OpenAI default)" />
       </fieldset>
       <fieldset className="workspace-ai-section">
         <legend><Globe aria-hidden="true" /> Web research</legend>
@@ -116,7 +134,10 @@ function OwnerForm({ view, profiles, exaKeys, onSaved, onNotice }: {
     </div>
     {error ? <div className="workspace-ai-error"><Alert tone="danger">{error}</Alert></div> : null}
     <div className="card-footer split">
-      <span className="field-hint">{profiles.length ? "Leave a model blank to use the profile's own model." : "Add a MOM & actions profile first; its models are offered here."}</span>
+      <span className="cluster">
+        {recommended ? <button type="button" className="button secondary sm" onClick={() => setDraft(recommended)} title="Ask AI and vision: gpt-6-luna · research writing: gpt-6-sol">Apply recommended models</button> : null}
+        <span className="field-hint">{profiles.length ? "Leave a model blank to use the profile's own model." : "Add a MOM & actions profile first; its models are offered here."}</span>
+      </span>
       <button type="button" className={dirty ? "button primary" : "button secondary"} disabled={saving || !dirty} onClick={() => void save()}>{saving ? "Saving…" : "Save workspace AI"}</button>
     </div>
   </section>;

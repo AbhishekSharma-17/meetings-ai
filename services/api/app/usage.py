@@ -61,8 +61,14 @@ OPENAI_EMBEDDING_USD_PER_MILLION: dict[str, float] = {
     "text-embedding-3-small": 0.02,
     "text-embedding-3-large": 0.13,
 }
-# gpt-6-luna standard short-context list price, USD per 1M tokens (input, output): $0.10 / $0.50.
-OPENAI_TEXT_FALLBACK_PRICES: dict[str, tuple[float, float]] = {"gpt-6-luna": (0.10, 0.50)}
+# OpenAI GPT-6 standard short-context list prices, USD per 1M tokens (input, output),
+# checked 2026-09-27 at https://developers.openai.com/api/docs/pricing. Used only when the
+# live catalog has no price; long-context, cached and regional rates are not modelled.
+OPENAI_TEXT_FALLBACK_PRICES: dict[str, tuple[float, float]] = {
+    "gpt-6-luna": (0.10, 0.50),
+    "gpt-6-sol": (2.00, 10.00),
+    "gpt-6-astra": (10.00, 50.00),
+}
 OPENAI_API_HOST = "api.openai.com"
 
 # The HTTP request state (carrying ``actor``) for the call being served, so ledger rows
