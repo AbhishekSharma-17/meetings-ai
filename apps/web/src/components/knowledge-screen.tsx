@@ -1,19 +1,25 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
-import { Dialog } from "@base-ui/react/dialog";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { Popover } from "@base-ui/react/popover";
+import { BookOpenText, Building2, Database, Download, Ellipsis, Library, Lock, MessageSquare, Plus, Search, ShieldCheck, Trash2, Users } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
 import { useUiPreference } from "@/lib/ui-preferences";
-import { UiSelect } from "./ui-select";
-import type { CurrentAccount, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeSource, KnowledgeTextProfile, KnowledgeWikiOverview, ProviderProfile, TextModelCatalog, WorkspaceMember } from "@/lib/types";
-import { ArrowUpRight, BookOpenText, GitBranch, Plus, Search, Sparkles, MessageCircle, Send, ShieldCheck, X } from "lucide-react";
+import type { CurrentAccount, KnowledgeBase, ProviderProfile, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeTextProfile, KnowledgeWikiOverview, TextModelCatalog, WorkspaceMember } from "@/lib/types";
+import { ChatTurn, ChatWelcome, Composer, ModelPicker, PendingTurn, type Exchange, type PendingAnswer } from "./knowledge-chat";
+import { EvidenceMap, SourceCard, WikiOverview } from "./knowledge-sources";
+import { KnowledgeSharingDialog, type Visibility } from "./knowledge-sharing-dialog";
+import { Alert, EmptyState, LoadingRow } from "./ui/feedback";
 
-type Exchange = { question: string; response: KnowledgeChatResponse };
+type Mode = "search" | "ask" | "wiki";
+const ALL_MEETINGS = "__all__";
+const INDEX_POLL_MS = 15_000;
 const isString = (value: unknown): value is string => typeof value === "string";
 const isNullableString = (value: unknown): value is string | null => value === null || typeof value === "string";
-const isMode = (value: unknown): value is "search" | "ask" | "wiki" => value === "search" || value === "ask" || value === "wiki";
+const isMode = (value: unknown): value is Mode => value === "search" || value === "ask" || value === "wiki";
+const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
 
-function conversationExchanges(conversation: Awaited<ReturnType<typeof meetingsService.getKnowledgeConversation>>): Exchange[] {
+function conversationExchanges(conversation: KnowledgeConversation): Exchange[] {
   const pairs: Exchange[] = [];
   for (let index = 0; index < conversation.messages.length - 1; index += 2) {
     const question = conversation.messages[index];
@@ -29,6 +35,7 @@ function conversationExchanges(conversation: Awaited<ReturnType<typeof meetingsS
   return pairs;
 }
 
+/** Extracts the partial "answer" string from a streamed JSON object. */
 function streamedAnswer(raw: string): string {
   const match = /"answer"\s*:\s*"/.exec(raw);
   if (!match) return "";
@@ -43,28 +50,52 @@ function streamedAnswer(raw: string): string {
   try { return JSON.parse(`"${literal}"`) as string; } catch { return ""; }
 }
 
+function visibilitySummary(base: KnowledgeBase): string {
+  if (base.visibility === "organization") return "Shared with everyone in this organization";
+  if (base.visibility === "specific") return `Shared with ${plural(base.shared_user_ids.length, "selected teammate")}`;
+  return "Private to the creator and workspace admins";
+}
+
+function VisibilityIcon({ visibility }: { visibility: KnowledgeBase["visibility"] }) {
+  if (visibility === "organization") return <Building2 aria-hidden="true" />;
+  if (visibility === "specific") return <Users aria-hidden="true" />;
+  return <Lock aria-hidden="true" />;
+}
+
+function relativeDay(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const days = Math.floor((Date.now() - date.getTime()) / 86_400_000);
+  if (days < 1) return "Today";
+  if (days < 2) return "Yesterday";
+  if (days < 7) return `${days}d ago`;
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 export function KnowledgeScreen({ identity, onOpenSource, account }: {
   identity: string;
   account: CurrentAccount | null;
   onOpenSource(meetingId: string, segmentId: string): void;
 }) {
+  const isAdmin = account?.role === "owner" || account?.role === "admin";
   const [query, setQuery] = useState("");
   const [tagFilter, setTagFilter] = useState("");
-  const [mode, setMode] = useUiPreference(`meetings-ai:knowledge-mode:${identity}`, "ask" as "search" | "ask" | "wiki", isMode);
+  const [mode, setMode] = useUiPreference(`meetings-ai:knowledge-mode:${identity}`, "ask" as Mode, isMode);
   const [bases, setBases] = useState<KnowledgeBase[]>([]);
-  const [selectedBaseId, setSelectedBaseId] = useUiPreference(`meetings-ai:knowledge-base:${identity}`, "", isString);
-  const [profiles, setProfiles] = useState<ProviderProfile[]>([]);
+  const [basesLoaded, setBasesLoaded] = useState(false);
+  const [storedBaseId, setStoredBaseId] = useUiPreference(`meetings-ai:knowledge-base:${identity}`, "", isString);
   const [textProfiles, setTextProfiles] = useState<KnowledgeTextProfile[]>([]);
+  const [providerProfiles, setProviderProfiles] = useState<ProviderProfile[]>([]);
   const [chatProfileId, setChatProfileId] = useUiPreference(`meetings-ai:knowledge-profile:${identity}`, "", isString);
   const [modelCatalog, setModelCatalog] = useState<TextModelCatalog | null>(null);
   const [selectedModelId, setSelectedModelId] = useUiPreference(`meetings-ai:knowledge-model:${identity}`, "", isString);
-  const [modelFilter, setModelFilter] = useState("");
-  const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
-  const [shareVisibility, setShareVisibility] = useState<"private" | "organization" | "specific">("private");
+  const [shareVisibility, setShareVisibility] = useState<Visibility>("private");
   const [shareUserIds, setShareUserIds] = useState<string[]>([]);
   const [sharingOpen, setSharingOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const [newBaseName, setNewBaseName] = useState("");
   const [creatingBase, setCreatingBase] = useState(false);
   const [conversations, setConversations] = useState<KnowledgeConversation[]>([]);
@@ -75,36 +106,45 @@ export function KnowledgeScreen({ identity, onOpenSource, account }: {
   const [indexStatus, setIndexStatus] = useState<KnowledgeIndexStatus | null>(null);
   const [indexing, setIndexing] = useState(false);
   const [exchanges, setExchanges] = useState<Exchange[]>([]);
-  const [pending, setPending] = useState<{ question: string; raw: string; answer: string } | null>(null);
-  const [confirmDeleteConversation, setConfirmDeleteConversation] = useState(false);
-  const [confirmDeleteBase, setConfirmDeleteBase] = useState(false);
+  const [pending, setPending] = useState<PendingAnswer | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<"chat" | "base" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const conversationRef = useRef(conversationId);
+  const threadRef = useRef<HTMLDivElement>(null);
+  // Bumped whenever the visible base or thread changes, so a late streamed answer is not shown in the wrong chat.
+  const threadGeneration = useRef(0);
+
+  // "" means "not chosen yet"; the sentinel records an explicit "All opted-in meetings" choice.
+  const selectedBaseId = storedBaseId === ALL_MEETINGS ? "" : storedBaseId;
   const selectedBase = bases.find((item) => item.id === selectedBaseId);
+  const canManageBase = Boolean(selectedBase && (isAdmin || selectedBase.created_by === account?.user_id));
   const effectiveProfileId = textProfiles.some((profile) => profile.id === chatProfileId) ? chatProfileId : selectedBase?.text_profile_id || textProfiles[0]?.id || "";
-  const selectedModel = modelCatalog?.models.find((item) => item.id === selectedModelId);
-  const canManageBase = selectedBase && (account?.role === "owner" || account?.role === "admin" || selectedBase.created_by === account?.user_id);
+
+  useEffect(() => { conversationRef.current = conversationId; }, [conversationId]);
 
   useEffect(() => {
+    let active = true;
     void meetingsService.listKnowledgeBases().then((items) => {
+      if (!active) return;
       setBases(items);
-      setSelectedBaseId((current) => {
+      setBasesLoaded(true);
+      setStoredBaseId((current) => {
+        if (current === ALL_MEETINGS && isAdmin) return current;
         if (current && items.some((item) => item.id === current)) return current;
-        return items[0]?.id ?? "";
+        return items[0]?.id ?? (isAdmin ? ALL_MEETINGS : "");
       });
-      const chosen = items.find((item) => item.id === selectedBaseId) ?? items[0];
-      if (chosen) { setShareVisibility(chosen.visibility); setShareUserIds(chosen.shared_user_ids); }
-    }).catch(() => setError("Could not load knowledge bases."));
-    if (account?.role === "owner" || account?.role === "admin") {
-      void meetingsService.listProviderProfiles().then(setProfiles).catch(() => undefined);
-    }
+    }).catch(() => { if (active) { setBasesLoaded(true); setError("Could not load knowledge bases."); } });
     void meetingsService.listKnowledgeTextProfiles().then((items) => {
+      if (!active) return;
       setTextProfiles(items);
       setChatProfileId((current) => current && !items.some((item) => item.id === current) ? "" : current);
-    }).catch(() => setModelError("Could not load text providers."));
-    void meetingsService.listWorkspaceMembers().then(setMembers).catch(() => undefined);
-  }, [account, selectedBaseId, setChatProfileId, setSelectedBaseId]);
+    }).catch(() => { if (active) setModelError("Could not load text providers."); });
+    void meetingsService.listWorkspaceMembers().then((items) => { if (active) setMembers(items); }).catch(() => undefined);
+    if (isAdmin) void meetingsService.listProviderProfiles().then((items) => { if (active) setProviderProfiles(items); }).catch(() => undefined);
+    return () => { active = false; };
+  }, [isAdmin, setChatProfileId, setStoredBaseId]);
 
   useEffect(() => {
     if (!selectedBaseId) return;
@@ -112,19 +152,21 @@ export function KnowledgeScreen({ identity, onOpenSource, account }: {
     void meetingsService.listKnowledgeConversations(selectedBaseId).then((items) => {
       if (!active) return;
       setConversations(items);
-      if (conversationId) {
-        if (items.some((item) => item.id === conversationId)) {
-          void meetingsService.getKnowledgeConversation(selectedBaseId, conversationId)
-            .then((conversation) => { if (active) setExchanges(conversationExchanges(conversation)); })
-            .catch(() => { if (active) { setConversationId(null); setExchanges([]); } });
-        } else { setConversationId(null); setExchanges([]); }
-      }
+      const remembered = conversationRef.current;
+      if (!remembered) return;
+      if (!items.some((item) => item.id === remembered)) { setConversationId(null); setExchanges([]); return; }
+      void meetingsService.getKnowledgeConversation(selectedBaseId, remembered)
+        .then((conversation) => { if (active) setExchanges(conversationExchanges(conversation)); })
+        .catch(() => { if (active) { setConversationId(null); setExchanges([]); } });
     }).catch(() => { if (active) setError("Could not load conversations."); });
-    void meetingsService.getKnowledgeOverview(selectedBaseId).then(setOverview).catch(() => setOverview(null));
-    void meetingsService.getKnowledgeMap(selectedBaseId).then(setEvidenceMap).catch(() => setEvidenceMap(null));
-    void meetingsService.getKnowledgeIndex(selectedBaseId).then(setIndexStatus).catch(() => setIndexStatus(null));
-    return () => { active = false; };
-  }, [selectedBaseId, conversationId, setConversationId]);
+    void meetingsService.getKnowledgeOverview(selectedBaseId).then((value) => { if (active) setOverview(value); }).catch(() => { if (active) setOverview(null); });
+    void meetingsService.getKnowledgeMap(selectedBaseId).then((value) => { if (active) setEvidenceMap(value); }).catch(() => { if (active) setEvidenceMap(null); });
+    void meetingsService.getKnowledgeIndex(selectedBaseId).then((value) => { if (active) setIndexStatus(value); }).catch(() => { if (active) setIndexStatus(null); });
+    const timer = window.setInterval(() => {
+      void meetingsService.getKnowledgeIndex(selectedBaseId).then((value) => { if (active) setIndexStatus(value); }).catch(() => undefined);
+    }, INDEX_POLL_MS);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [selectedBaseId, setConversationId]);
 
   useEffect(() => {
     if (!effectiveProfileId) return;
@@ -140,21 +182,27 @@ export function KnowledgeScreen({ identity, onOpenSource, account }: {
   }, [effectiveProfileId, setSelectedModelId]);
 
   useEffect(() => {
-    if (!selectedBaseId) return;
-    const timer = window.setInterval(() => {
-      void meetingsService.getKnowledgeIndex(selectedBaseId).then(setIndexStatus).catch(() => undefined);
-    }, 15_000);
-    return () => window.clearInterval(timer);
-  }, [selectedBaseId]);
+    const node = threadRef.current;
+    if (node) node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
+  }, [exchanges, pending]);
 
-  function chooseBase(id: string, baseOverride?: KnowledgeBase) {
-    if (id === selectedBaseId) return;
-    setSelectedBaseId(id); setSearch(null); setOverview(null); setEvidenceMap(null); setIndexStatus(null); setExchanges([]); setConversations([]); setConversationId(null); setError(null);
-    setConfirmDeleteConversation(false); setConfirmDeleteBase(false); setNotice(null);
-    const base = baseOverride ?? bases.find((item) => item.id === id);
-    setShareVisibility(base?.visibility ?? "private");
-    setShareUserIds(base?.shared_user_ids ?? []);
-    setChatProfileId(""); setModelFilter(""); setModelPickerOpen(false);
+  const resetForBase = useCallback(() => {
+    threadGeneration.current += 1;
+    setMenuOpen(false);
+    setSearch(null); setOverview(null); setEvidenceMap(null); setIndexStatus(null); setExchanges([]); setConversations([]);
+    setConversationId(null); setError(null); setConfirmDelete(null); setNotice(null); setChatProfileId("");
+  }, [setChatProfileId, setConversationId]);
+
+  function chooseBase(id: string) {
+    const next = id || ALL_MEETINGS;
+    if (next === storedBaseId) return;
+    setStoredBaseId(next);
+    resetForBase();
+  }
+
+  function startNewChat() {
+    threadGeneration.current += 1;
+    setConversationId(null); setExchanges([]); setMode("ask"); setConfirmDelete(null); setNotice(null); setError(null);
   }
 
   async function createBase(event: FormEvent<HTMLFormElement>) {
@@ -162,7 +210,7 @@ export function KnowledgeScreen({ identity, onOpenSource, account }: {
     try {
       const created = await meetingsService.createKnowledgeBase(newBaseName.trim());
       setBases((current) => [...current, created].sort((a, b) => a.name.localeCompare(b.name)));
-      setNewBaseName(""); chooseBase(created.id, created);
+      setNewBaseName(""); setCreateOpen(false); chooseBase(created.id);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not create knowledge base.");
     } finally { setCreatingBase(false); }
@@ -173,37 +221,23 @@ export function KnowledgeScreen({ identity, onOpenSource, account }: {
     setBusy(true); setError(null);
     try {
       const conversation = await meetingsService.getKnowledgeConversation(selectedBaseId, id);
-      setExchanges(conversationExchanges(conversation)); setConversationId(id); setMode("ask"); setConfirmDeleteConversation(false); setNotice(null);
+      threadGeneration.current += 1;
+      setExchanges(conversationExchanges(conversation)); setConversationId(id); setMode("ask"); setConfirmDelete(null); setNotice(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not open conversation.");
     } finally { setBusy(false); }
   }
 
-  async function setTextProfile(value: string) {
+  async function setBaseDefaultProfile(value: string) {
     if (!selectedBaseId) return;
     setError(null);
     try {
       const updated = await meetingsService.updateKnowledgeBase(selectedBaseId, { text_profile_id: value || null });
       setBases((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setNotice(`Default AI provider updated for ${updated.name}.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not update AI model.");
     }
-  }
-
-  async function saveSharing() {
-    if (!selectedBaseId) return;
-    setError(null); setBusy(true);
-    try {
-      if (shareVisibility === "specific" && shareUserIds.length === 0) {
-        throw new Error("Select at least one teammate for specific-person sharing.");
-      }
-      const updated = await meetingsService.shareKnowledgeBase(selectedBaseId, shareVisibility, shareUserIds);
-      setBases((current) => current.map((item) => item.id === updated.id ? updated : item));
-      setNotice(`Sharing saved for ${updated.name}.`);
-      setSharingOpen(false);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not update sharing.");
-    } finally { setBusy(false); }
   }
 
   function openSharing() {
@@ -212,6 +246,20 @@ export function KnowledgeScreen({ identity, onOpenSource, account }: {
     setShareUserIds(selectedBase.shared_user_ids);
     setError(null);
     setSharingOpen(true);
+  }
+
+  async function saveSharing() {
+    if (!selectedBaseId) return;
+    setError(null); setBusy(true);
+    try {
+      if (shareVisibility === "specific" && shareUserIds.length === 0) throw new Error("Select at least one teammate for specific-person sharing.");
+      const updated = await meetingsService.shareKnowledgeBase(selectedBaseId, shareVisibility, shareUserIds);
+      setBases((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setNotice(`Sharing saved for ${updated.name}.`);
+      setSharingOpen(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not update sharing.");
+    } finally { setBusy(false); }
   }
 
   async function reindexBase() {
@@ -224,7 +272,7 @@ export function KnowledgeScreen({ identity, onOpenSource, account }: {
 
   async function exportConversation() {
     if (!selectedBaseId || !conversationId) return;
-    setError(null);
+    setError(null); setMenuOpen(false);
     try {
       const conversation = await meetingsService.getKnowledgeConversation(selectedBaseId, conversationId);
       const url = URL.createObjectURL(new Blob([JSON.stringify(conversation, null, 2)], { type: "application/json" }));
@@ -245,7 +293,7 @@ export function KnowledgeScreen({ identity, onOpenSource, account }: {
     try {
       await meetingsService.deleteKnowledgeConversation(selectedBaseId, deletedId);
       setConversations((current) => current.filter((item) => item.id !== deletedId));
-      setConversationId(null); setExchanges([]); setConfirmDeleteConversation(false);
+      setConversationId(null); setExchanges([]); setConfirmDelete(null);
       setNotice("Saved chat deleted. Downloaded copies are not affected.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not delete this chat.");
@@ -267,86 +315,167 @@ export function KnowledgeScreen({ identity, onOpenSource, account }: {
     } finally { setBusy(false); }
   }
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const question = query.trim();
+  async function ask(question: string) {
     if (question.length < 3) return;
     const tags = tagFilter.split(/[,;\n]+/).map((item) => item.trim()).filter(Boolean);
-    setBusy(true); setError(null); setNotice(null);
+    setBusy(true); setError(null); setNotice(null); setConfirmDelete(null);
     try {
       if (mode === "search") {
         setSearch(await meetingsService.searchKnowledge(question, tags, selectedBaseId || null));
-      } else {
-        if (!selectedBaseId) throw new Error("Select a knowledge base before starting a saved chat.");
-        setPending({ question, raw: "", answer: "" });
-        setQuery("");
-        let raw = "";
-        const response = await meetingsService.streamKnowledgeChat(question, tags, selectedBaseId, conversationId, effectiveProfileId || null, selectedModelId || null, (delta) => {
-          raw += delta;
-          const answer = streamedAnswer(raw);
-          setPending({ question, raw, answer });
-        });
-        setExchanges((current) => [...current, { question, response }]);
-        setConversationId(response.conversation_id);
-        void meetingsService.listKnowledgeConversations(selectedBaseId).then(setConversations).catch(() => undefined);
-        setQuery("");
+        return;
       }
+      if (!selectedBaseId) throw new Error("Select a knowledge base before starting a saved chat.");
+      const generation = threadGeneration.current;
+      const current = () => generation === threadGeneration.current;
+      setPending({ question, raw: "", answer: "" });
+      setQuery("");
+      let raw = "";
+      const response = await meetingsService.streamKnowledgeChat(question, tags, selectedBaseId, conversationId, effectiveProfileId || null, selectedModelId || null, (delta) => {
+        raw += delta;
+        if (current()) setPending({ question, raw, answer: streamedAnswer(raw) });
+      });
+      if (!current()) return;
+      setExchanges((items) => [...items, { question, response }]);
+      setConversationId(response.conversation_id);
+      void meetingsService.listKnowledgeConversations(selectedBaseId).then((items) => { if (current()) setConversations(items); }).catch(() => undefined);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The knowledge request failed.");
+      if (mode === "ask") setQuery((current) => current || question);
     } finally {
       setPending(null);
       setBusy(false);
     }
   }
 
-  return <><section className="page knowledge-page" aria-labelledby="knowledge-title">
-    <div className="knowledge-hero"><p className="eyebrow">CONNECTED KNOWLEDGE</p><h1 id="knowledge-title">Your meeting wiki.</h1><p className="intro">Explore connected meetings, approved decisions, and transcript evidence. Ask questions across a knowledge base and follow every answer back to its source.</p></div>
-    <div className="knowledge-policy" role="note"><b>Grounded in meeting records.</b> Only completed meetings marked “Add to AI knowledge” appear here. Approved MOM facts are linked to the meeting; individual answers cite timestamped transcript turns. Review speaker names before relying on attribution.</div>
-    <div className="knowledge-layout"><aside className="knowledge-library" aria-label="Knowledge bases"><div className="section-heading"><div><h2>Knowledge bases</h2><p>One client or project per base</p></div></div>{account?.role === "owner" || account?.role === "admin" ? <button className={!selectedBaseId ? "knowledge-base-option selected" : "knowledge-base-option"} onClick={() => chooseBase("")}><BookOpenText /> All opted-in meetings</button> : null}{bases.map((base) => <button key={base.id} className={selectedBaseId === base.id ? "knowledge-base-option selected" : "knowledge-base-option"} onClick={() => chooseBase(base.id)}><span><b>{base.name}</b><small>{base.meeting_count} meeting{base.meeting_count === 1 ? "" : "s"} · {base.visibility}</small></span></button>)}<form className="knowledge-create" onSubmit={(event) => void createBase(event)}><label htmlFor="knowledge-base-new">Create a knowledge base</label><div><input id="knowledge-base-new" value={newBaseName} onChange={(event) => setNewBaseName(event.target.value)} minLength={2} maxLength={120} required placeholder="e.g. Acme client" /><button type="submit" className="button secondary" disabled={creatingBase} aria-label="Create knowledge base"><Plus /></button></div></form>{selectedBase ? <>{canManageBase && (account?.role === "owner" || account?.role === "admin") ? <><label className="knowledge-model-label" htmlFor="knowledge-model">Ask AI model for {selectedBase.name}</label><select id="knowledge-model" value={selectedBase.text_profile_id ?? ""} onChange={(event) => void setTextProfile(event.target.value)}><option value="">Workspace text-generation default</option>{profiles.filter((profile) => profile.capabilities.includes("text_generation") && !profile.id.startsWith("new-")).map((profile) => <option value={profile.id} key={profile.id}>{profile.label} · {profile.model}</option>)}</select><p className="field-hint">Configure credentials in AI providers. Base-specific selection does not change MOM or transcription models.</p></> : null}{canManageBase ? <div className="knowledge-sharing"><label htmlFor="knowledge-visibility">Share this base</label><select id="knowledge-visibility" value={shareVisibility} onChange={(event) => setShareVisibility(event.target.value as "private" | "organization" | "specific")}><option value="private">Private to creator and admins</option><option value="organization">Everyone in organization</option><option value="specific">Specific teammates</option></select>{shareVisibility === "specific" ? <div className="knowledge-share-members">{members.filter((member) => member.user_id !== account?.user_id).map((member) => <label key={member.user_id}><input type="checkbox" checked={shareUserIds.includes(member.user_id)} onChange={(event) => setShareUserIds((current) => event.target.checked ? [...current, member.user_id] : current.filter((id) => id !== member.user_id))} /> {member.display_name} <small>{member.email}</small></label>)}</div> : null}<button type="button" className="button secondary" onClick={() => void saveSharing()}>Save sharing</button></div> : null}<div className="knowledge-index"><b>Semantic index</b><small>{indexStatus?.indexed_sources ? `${indexStatus.indexed_sources} source${indexStatus.indexed_sources === 1 ? "" : "s"} indexed · ${indexStatus.model ?? "embedding model"}` : "No sources indexed yet"}</small><p>Search checks indexed hits against live meeting records. Completed meeting changes queue a background refresh.</p>{indexStatus?.job_status ? <p role="status">Background index: {indexStatus.job_status}{indexStatus.next_retry_at ? ` · retry ${new Date(indexStatus.next_retry_at).toLocaleString()}` : ""}</p> : null}{indexStatus?.last_error ? <p className="form-error" role="alert">{indexStatus.last_error}</p> : null}{canManageBase ? <button type="button" className="button secondary" disabled={indexing} onClick={() => void reindexBase()}>{indexing ? "Indexing…" : "Reindex now"}</button> : null}</div><div className="knowledge-conversations"><div className="section-heading"><h2>Chats</h2><button type="button" className="text-button" onClick={() => { setConversationId(null); setExchanges([]); setMode("ask"); }}>New chat</button></div>{conversations.map((conversation) => <button key={conversation.id} onClick={() => void chooseConversation(conversation.id)} className={conversationId === conversation.id ? "knowledge-chat-option selected" : "knowledge-chat-option"}>{conversation.title}</button>)}</div></> : null}</aside><div className="knowledge-main">
-    {selectedBase && canManageBase ? <div className="knowledge-base-management" aria-label="Knowledge base controls"><span><b>{selectedBase.name}</b><small>{selectedBase.visibility === "organization" ? "Shared with everyone in this organization" : selectedBase.visibility === "specific" ? `Shared with ${selectedBase.shared_user_ids.length} selected teammate${selectedBase.shared_user_ids.length === 1 ? "" : "s"}` : "Private to the creator and workspace admins"}</small></span><button type="button" className="button secondary" onClick={openSharing}><ShieldCheck size={15} /> Manage sharing</button>{confirmDeleteBase ? <><button type="button" className="button danger" disabled={busy} onClick={() => void deleteBase()}>Confirm delete base</button><button type="button" className="button secondary" onClick={() => setConfirmDeleteBase(false)}>Cancel</button></> : <button type="button" className="button secondary" onClick={() => setConfirmDeleteBase(true)}>Delete knowledge base</button>}</div> : null}
-    {selectedBase && canManageBase && (account?.role === "owner" || account?.role === "admin") ? <div className="knowledge-base-model-bar"><UiSelect id="knowledge-base-model" label="Default Ask AI provider for this base" value={selectedBase.text_profile_id ?? ""} onChange={(value) => void setTextProfile(value)} options={[{ value: "", label: "Workspace text-generation default" }, ...profiles.filter((profile) => profile.capabilities.includes("text_generation") && !profile.id.startsWith("new-")).map((profile) => ({ value: profile.id, label: `${profile.label} · ${profile.model}` }))]} /></div> : null}
-    {selectedBase && conversationId ? <div className="knowledge-chat-management" aria-label="Saved chat controls"><span><b>Saved chat</b><small>Export includes stored answers and citations. Check them against current meeting records.</small></span><button type="button" className="button secondary" onClick={() => void exportConversation()}>Export JSON</button>{confirmDeleteConversation ? <><button type="button" className="button danger" disabled={busy} onClick={() => void deleteConversation()}>Confirm delete</button><button type="button" className="button secondary" onClick={() => setConfirmDeleteConversation(false)}>Cancel</button></> : <button type="button" className="button secondary" onClick={() => setConfirmDeleteConversation(true)}>Delete chat</button>}</div> : null}
-    <div className="knowledge-mode" role="group" aria-label="Knowledge mode"><button type="button" aria-pressed={mode === "search"} onClick={() => setMode("search")}><Search /> Sources</button><button type="button" aria-pressed={mode === "ask"} onClick={() => setMode("ask")}><MessageCircle /> Ask AI</button><button type="button" aria-pressed={mode === "wiki"} onClick={() => setMode("wiki")}><BookOpenText /> Wiki</button></div>
-    <form className="knowledge-query" onSubmit={(event) => void submit(event)}>
-      {mode !== "wiki" ? <>
-        {mode === "ask" ? <details className="knowledge-chat-settings"><summary>Model · {selectedModel?.name ?? modelCatalog?.configured_model ?? "Choose a model"}</summary><div className="knowledge-chat-settings-grid"><UiSelect id="chat-provider" label="Chat provider" value={effectiveProfileId} onChange={(value) => { setChatProfileId(value); setSelectedModelId(""); }} options={textProfiles.map((profile) => ({ value: profile.id, label: `${profile.name}${profile.base_url?.includes("openrouter.ai") ? " · OpenRouter" : profile.provider_type === "openai" ? " · OpenAI" : " · Compatible"}` }))} disabled={!textProfiles.length} /><div className="knowledge-model-picker"><label htmlFor="chat-model-search">Model</label><input id="chat-model-search" value={modelPickerOpen ? modelFilter : selectedModel?.name ?? modelCatalog?.configured_model ?? "Loading models…"} onFocus={() => { setModelPickerOpen(true); setModelFilter(""); }} onChange={(event) => { setModelFilter(event.target.value); setModelPickerOpen(true); }} autoComplete="off" placeholder="Search available models" disabled={!modelCatalog} />{modelPickerOpen && modelCatalog ? <div className="knowledge-model-options" role="listbox" aria-label="Available models">{modelCatalog.models.filter((item) => `${item.name} ${item.id}`.toLowerCase().includes(modelFilter.toLowerCase())).slice(0, 40).map((item) => <button type="button" role="option" aria-selected={item.id === selectedModelId} key={item.id} onClick={() => { setSelectedModelId(item.id); setModelPickerOpen(false); setModelFilter(""); }}><span><b>{item.name}</b><small>{item.id}</small></span>{item.input_per_million_usd !== null ? <small>${item.input_per_million_usd}/M in · ${item.output_per_million_usd}/M out</small> : null}</button>)}<button type="button" className="knowledge-model-close" onClick={() => setModelPickerOpen(false)}>Close model list</button></div> : null}</div>{modelError ? <small className="form-error">{modelError}</small> : <small className="field-hint">{modelCatalog?.live_catalog ? `${modelCatalog.models.length} live models available. Prices, if shown, are provider list rates.` : "Using this provider’s saved model."}</small>}</div></details> : null}
-        <label htmlFor="knowledge-question">{mode === "ask" ? "Message your knowledge base" : "Search meetings"}</label>
-        <div className="knowledge-query-row"><input id="knowledge-question" value={query} onChange={(event) => setQuery(event.target.value)} minLength={3} maxLength={500} required placeholder={mode === "ask" ? "Ask about a decision, person, date, or follow-up…" : "Try a person, decision, topic, or exact phrase"} /><button className="button primary" disabled={busy || (mode === "ask" && !selectedBaseId)}>{busy ? "Working…" : mode === "ask" ? <><Send size={16} /> Send</> : "Search"}</button></div>
-        <details className="knowledge-chat-filters"><summary>Filter by tags (optional)</summary><input id="knowledge-tags" value={tagFilter} onChange={(event) => setTagFilter(event.target.value)} placeholder="e.g. roadmap, customer research" /></details>
-        {mode === "ask" ? <p className="field-hint">{selectedBase ? `Chat memory is saved in ${selectedBase.name}; answers retrieve fresh, cited evidence.` : "Select a named knowledge base to start a saved chat."} {indexStatus?.indexed_sources ? "Hybrid keyword + semantic retrieval enabled." : "Keyword retrieval until this base is indexed."}</p> : null}
-      </> : <p className="field-hint">Browse connected meetings, approved MOMs, people, and topics below.</p>}
-    </form>
-    {error ? <p className="form-error knowledge-error" role="alert">{error}</p> : null}
-    {notice ? <p className="field-hint" role="status">{notice}</p> : null}
-    {mode === "search" && search ? <div className="knowledge-results"><div className="section-heading"><div><h2>Matching sources</h2><p>{search.count} result{search.count === 1 ? "" : "s"} · {search.retrieval_mode === "hybrid" ? "hybrid lexical + semantic" : "lexical"} retrieval{search.truncated_meeting_scope ? " · newest 200 meetings searched" : ""}</p></div></div>{search.sources.length ? <div className="knowledge-source-list">{search.sources.map((source) => <SourceCard key={source.source_id} source={source} onOpenSource={onOpenSource} />)}</div> : <div className="empty-state"><b>No matching source found.</b><p>Try a different phrase or tag. Only opted-in completed meetings are searchable.</p></div>}</div> : null}
-    {mode === "ask" ? <div className="knowledge-results knowledge-chat-panel"><div className="section-heading"><div><h2>{selectedBase ? `Ask ${selectedBase.name}` : "Choose a knowledge base"}</h2><p>Searches the selected base on every turn. Saved conversation history helps resolve follow-up questions.</p></div></div>{exchanges.length ? <div className="knowledge-chat-thread" aria-live="polite">{exchanges.map((exchange, index) => <div className="knowledge-chat-turn" key={`${index}:${exchange.question}`}><div className="knowledge-chat-user"><small>You</small><p>{exchange.question}</p></div><article className="knowledge-chat-assistant"><small>Meetings AI · {exchange.response.model ? `${exchange.response.provider} / ${exchange.response.model}` : "No matching sources"}</small><p className="knowledge-answer">{exchange.response.answer}</p>{exchange.response.citations.length ? <details className="knowledge-citations"><summary>{exchange.response.citations.length} cited source{exchange.response.citations.length === 1 ? "" : "s"} · open transcript</summary>{exchange.response.citations.map((source) => <SourceCard key={source.source_id} source={source} onOpenSource={onOpenSource} />)}</details> : null}</article></div>)}</div> : <div className="knowledge-chat-empty"><Sparkles /><h3>Start a conversation</h3><p>Ask what was decided, who committed to an action, or how a topic evolved across meetings. Each answer links back to a timestamped source.</p></div>}</div> : null}
-    {mode === "ask" && pending ? <div className="knowledge-chat-thread knowledge-streaming" aria-live="polite" aria-busy="true"><div className="knowledge-chat-turn"><div className="knowledge-chat-user"><small>You</small><p>{pending.question}</p></div><article className="knowledge-chat-assistant"><small>Meetings AI · answering live</small><p className="knowledge-answer">{pending.answer || "Finding relevant meeting evidence…"}<span className="knowledge-stream-cursor" aria-hidden="true" /></p><small>Citations will appear after the answer is verified.</small></article></div></div> : null}
-    {mode === "wiki" ? <div className="knowledge-results"><div className="section-heading"><div><h2>{selectedBase ? `${selectedBase.name} wiki` : "Choose a knowledge base"}</h2><p>Meetings, decisions, and conversations stay connected to their originals.</p></div></div>{overview ? <><WikiOverview overview={overview} onOpenMeeting={(id) => onOpenSource(id, "")} />{evidenceMap ? <EvidenceMap map={evidenceMap} onOpenSource={onOpenSource} /> : null}</> : <div className="empty-state"><b>No wiki to show yet.</b><p>Select a knowledge base with completed meetings.</p></div>}</div> : null}
-  </div></div></section><Dialog.Root open={sharingOpen} onOpenChange={setSharingOpen}><Dialog.Portal><Dialog.Backdrop className="dialog-backdrop" /><Dialog.Popup className="dialog knowledge-sharing-dialog"><Dialog.Close className="close-button" aria-label="Close sharing"><X /></Dialog.Close><Dialog.Title>Share {selectedBase?.name}</Dialog.Title><Dialog.Description className="dialog-intro">Choose who can browse and ask questions about this knowledge base.</Dialog.Description><fieldset><legend>Access</legend><label><input type="radio" name="sharing" checked={shareVisibility === "private"} onChange={() => setShareVisibility("private")} /> Private to creator and admins</label><label><input type="radio" name="sharing" checked={shareVisibility === "organization"} onChange={() => setShareVisibility("organization")} /> Everyone in this organization</label><label><input type="radio" name="sharing" checked={shareVisibility === "specific"} onChange={() => setShareVisibility("specific")} /> Specific teammates</label></fieldset>{shareVisibility === "specific" ? <div className="knowledge-share-members">{members.filter((member) => member.user_id !== account?.user_id).map((member) => <label key={member.user_id}><input type="checkbox" checked={shareUserIds.includes(member.user_id)} onChange={(event) => setShareUserIds((current) => event.target.checked ? [...current, member.user_id] : current.filter((id) => id !== member.user_id))} /> <span>{member.display_name}<small>{member.email}</small></span></label>)}</div> : null}{error ? <p className="form-error" role="alert">{error}</p> : null}<div className="knowledge-sharing-actions"><button type="button" className="button secondary" onClick={() => setSharingOpen(false)}>Cancel</button><button type="button" className="button primary" disabled={busy} onClick={() => void saveSharing()}>Save sharing</button></div></Dialog.Popup></Dialog.Portal></Dialog.Root></>;
-}
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void ask(query.trim());
+  }
 
-function WikiOverview({ overview, onOpenMeeting }: { overview: KnowledgeWikiOverview; onOpenMeeting(id: string): void }) {
-  return <div className="wiki-overview"><div className="wiki-overview-heading"><GitBranch /><span><b>Connected source map</b><small>{overview.meetings.length} completed meeting{overview.meetings.length === 1 ? "" : "s"} in this knowledge base</small></span></div>{overview.meetings.length ? <div className="wiki-meeting-list">{overview.meetings.map((meeting) => <article className="wiki-meeting" key={meeting.id}><div className="wiki-meeting-meta"><span>MEETING</span><time>{new Date(meeting.created_at).toLocaleDateString()}</time></div><h3>{meeting.title}</h3>{meeting.summary ? <p>{meeting.summary}</p> : <p className="wiki-muted">Approved MOM summary not available yet.</p>}{meeting.decisions.length ? <div className="wiki-facts"><b>Decisions</b><ul>{meeting.decisions.slice(0, 3).map((decision, index) => <li key={index}>{decision}</li>)}</ul></div> : null}{meeting.action_items.length ? <div className="wiki-facts"><b>Actions</b><ul>{meeting.action_items.slice(0, 3).map((action, index) => <li key={index}>{action}</li>)}</ul></div> : null}{meeting.tags.length ? <div className="knowledge-tags">{meeting.tags.map((tag) => <span key={tag}>#{tag}</span>)}</div> : null}{meeting.related_meetings?.length ? <div className="wiki-related-links"><b>Connected meetings</b>{meeting.related_meetings.map((link) => <button type="button" key={link.meeting_id} onClick={() => onOpenMeeting(link.meeting_id)}><span>{link.title}</span><small>{link.reasons.join(" · ")}</small></button>)}</div> : null}<button type="button" className="text-button" onClick={() => onOpenMeeting(meeting.id)}>Open meeting record <ArrowUpRight /></button></article>)}</div> : <div className="empty-state"><b>No connected meetings yet.</b><p>Add a completed meeting to this knowledge base to build its wiki.</p></div>}</div>;
-}
+  const baseTitle = selectedBase?.name ?? (selectedBaseId ? "Knowledge base" : "All opted-in meetings");
+  const indexed = indexStatus?.indexed_sources ?? 0;
+  const retrievalHint = indexed ? "Hybrid search" : "Keyword search";
+  const defaultProfile = selectedBase?.text_profile_id ?? "";
+  const picker = <ModelPicker
+    textProfiles={textProfiles}
+    profileId={effectiveProfileId}
+    onProfile={(id) => { setChatProfileId(id); setSelectedModelId(""); }}
+    catalog={modelCatalog}
+    modelId={selectedModelId}
+    onModel={setSelectedModelId}
+    error={modelError}
+    baseDefault={isAdmin && canManageBase && selectedBase ? {
+      baseName: selectedBase.name,
+      value: defaultProfile,
+      options: [{ value: "", label: "Workspace text-generation default" }, ...providerProfiles.filter((profile) => profile.capabilities.includes("text_generation") && !profile.id.startsWith("new-")).map((profile) => ({ value: profile.id, label: `${profile.label} · ${profile.model}` }))],
+      onChange: (value) => { if (value !== defaultProfile) void setBaseDefaultProfile(value); },
+    } : null}
+  />;
+  const hasMenu = Boolean(selectedBase && (conversationId || canManageBase));
 
-function EvidenceMap({ map, onOpenSource }: { map: KnowledgeMap; onOpenSource(meetingId: string, segmentId: string): void }) {
-  return <section className="knowledge-evidence-map" aria-label="Evidence map"><div className="section-heading"><div><h2>People & topics</h2><p>Literal tags and speaker labels linked to timestamped source turns.</p></div></div><p className="field-hint">Speaker labels are not verified identities unless an email was explicitly confirmed. The same unverified name in two meetings is kept separate.</p>{map.truncated_meeting_scope ? <p className="field-hint">This map covers the newest 200 eligible meetings.</p> : null}<div className="knowledge-map-columns"><div><h3>Topics</h3>{map.topics.length ? map.topics.map((item) => <details key={item.key} className="knowledge-map-entry"><summary><b>#{item.label}</b><small>{item.meeting_count} meeting{item.meeting_count === 1 ? "" : "s"} · {item.source_count} source{item.source_count === 1 ? "" : "s"}</small></summary><div className="knowledge-map-sources">{item.sources.map((source) => <SourceCard key={source.source_id} source={source} onOpenSource={onOpenSource} />)}</div></details>) : <p className="field-hint">No tags on eligible meetings yet.</p>}</div><div><h3>Speaker labels</h3>{map.speaker_labels.length ? map.speaker_labels.map((item) => <details key={item.key} className="knowledge-map-entry"><summary><b>{item.label}</b><small>{item.verified_identity ? `Confirmed email · ${item.email}` : "Unverified label"} · {item.meeting_count} meeting{item.meeting_count === 1 ? "" : "s"}</small></summary><div className="knowledge-map-sources">{item.sources.map((source) => <SourceCard key={source.source_id} source={source} onOpenSource={onOpenSource} />)}</div></details>) : <p className="field-hint">No named speaker turns yet.</p>}</div></div></section>;
-}
+  return <>
+    <section className="knowledge-page" aria-labelledby="knowledge-title">
+      <aside className="knowledge-library" aria-label="Knowledge bases">
+        <div className="kl-head">
+          <h1 id="knowledge-title">AI knowledge</h1>
+          <button type="button" className="button secondary sm" onClick={startNewChat} disabled={!selectedBase}><Plus /> New chat</button>
+        </div>
+        <div className="kl-section">
+          <div className="kl-label"><span>Knowledge bases</span><button type="button" className="icon-button sm" aria-label="New knowledge base" aria-expanded={createOpen} onClick={() => setCreateOpen((value) => !value)}><Plus /></button></div>
+          {createOpen ? <form className="kl-create" onSubmit={(event) => void createBase(event)}>
+            <label className="sr-only" htmlFor="knowledge-base-new">Knowledge base name</label>
+            <input id="knowledge-base-new" value={newBaseName} onChange={(event) => setNewBaseName(event.target.value)} minLength={2} maxLength={120} required placeholder="e.g. Acme client" autoFocus />
+            <button type="submit" className="button primary sm" disabled={creatingBase} aria-label="Create knowledge base">{creatingBase ? "Creating…" : "Create"}</button>
+          </form> : null}
+          <div className="kl-list">
+            {isAdmin ? <button type="button" className={storedBaseId === ALL_MEETINGS ? "knowledge-base-option selected" : "knowledge-base-option"} onClick={() => chooseBase("")}><span className="kl-icon"><BookOpenText aria-hidden="true" /></span><span className="kl-copy"><b>All opted-in meetings</b><small>Search only</small></span></button> : null}
+            {bases.map((base) => <button type="button" key={base.id} className={selectedBaseId === base.id ? "knowledge-base-option selected" : "knowledge-base-option"} onClick={() => chooseBase(base.id)}>
+              <span className="kl-icon"><Library aria-hidden="true" /></span>
+              <span className="kl-copy"><b>{base.name}</b><small>{plural(base.meeting_count, "meeting")}</small></span>
+              <span className="kl-visibility" title={visibilitySummary(base)}><VisibilityIcon visibility={base.visibility} /></span>
+            </button>)}
+            {basesLoaded && !bases.length && !isAdmin ? <p className="field-hint kl-empty">No knowledge bases are shared with you yet.</p> : null}
+          </div>
+        </div>
+        {selectedBase ? <div className="kl-section kl-chats">
+          <div className="kl-label"><span>Chats</span><span className="section-count">{conversations.length || ""}</span></div>
+          <div className="kl-list">
+            {conversations.length ? conversations.map((conversation) => <button type="button" key={conversation.id} onClick={() => void chooseConversation(conversation.id)} className={conversationId === conversation.id ? "knowledge-chat-option selected" : "knowledge-chat-option"}><MessageSquare aria-hidden="true" /><span>{conversation.title}</span><small>{relativeDay(conversation.updated_at)}</small></button>)
+              : <p className="field-hint kl-empty">Saved chats for {selectedBase.name} appear here.</p>}
+          </div>
+        </div> : null}
+        {selectedBase ? <div className="kl-index" role="group" aria-label="Semantic index">
+          <div className="kl-index-head"><Database aria-hidden="true" /><b>Semantic index</b>{canManageBase ? <button type="button" className="text-button" disabled={indexing} onClick={() => void reindexBase()}>{indexing ? "Indexing…" : "Reindex now"}</button> : null}</div>
+          <small>{indexed ? `${plural(indexed, "source")} indexed · ${indexStatus?.model ?? "embedding model"}` : "No sources indexed yet"}</small>
+          {indexStatus?.job_status && indexStatus.job_status !== "succeeded" ? <small role="status">Background index: {indexStatus.job_status}{indexStatus.next_retry_at ? ` · retry ${new Date(indexStatus.next_retry_at).toLocaleString()}` : ""}</small> : null}
+          {indexStatus?.last_error ? <small className="inline-error" role="alert">{indexStatus.last_error}</small> : null}
+        </div> : null}
+      </aside>
 
-function SourceCard({ source, onOpenSource }: {
-  source: KnowledgeSource;
-  onOpenSource(meetingId: string, segmentId: string): void;
-}) {
-  const dateValue = source.meeting_joined_at ?? source.meeting_created_at;
-  const date = new Date(dateValue);
-  const dateLabel = Number.isNaN(date.getTime()) ? dateValue : new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" }).format(date);
-  return <article className="knowledge-source"><div className="knowledge-source-meta"><span className="knowledge-kind">{source.kind}</span><span>{dateLabel}{source.meeting_joined_at ? " meeting" : " record"} date</span><span>{formatOffset(source.start_seconds)} into transcript</span><span>{source.kind === "transcript" ? "Speaker" : "Evidence speaker"}: {source.speaker ?? "Unidentified"}</span></div><h3>{source.meeting_title}</h3><p>{source.text}</p>{source.tags.length ? <div className="knowledge-tags">{source.tags.map((tag) => <span key={tag}>#{tag}</span>)}</div> : null}<button className="text-button" type="button" onClick={() => onOpenSource(source.meeting_id, source.segment_id)}>Open cited transcript <ArrowUpRight /></button></article>;
-}
+      <div className="knowledge-main">
+        <header className="knowledge-header">
+          <div className="kh-title">
+            <h2>{baseTitle}</h2>
+            <p>{selectedBase ? <><VisibilityIcon visibility={selectedBase.visibility} /><span>{visibilitySummary(selectedBase)}</span><span aria-hidden="true">·</span><span>{plural(selectedBase.meeting_count, "meeting")}</span></> : <span>Only completed meetings marked “Add to AI knowledge” are included.</span>}</p>
+          </div>
+          <div className="segmented kh-modes" role="group" aria-label="Knowledge mode">
+            <button type="button" aria-pressed={mode === "ask"} onClick={() => setMode("ask")}><MessageSquare /> Ask AI</button>
+            <button type="button" aria-pressed={mode === "search"} onClick={() => setMode("search")}><Search /> Sources</button>
+            <button type="button" aria-pressed={mode === "wiki"} onClick={() => setMode("wiki")}><BookOpenText /> Wiki</button>
+          </div>
+          <div className="kh-actions">
+            {canManageBase ? <button type="button" className="button secondary sm" onClick={openSharing}><ShieldCheck /> Manage sharing</button> : null}
+            {hasMenu ? <Popover.Root open={menuOpen} onOpenChange={setMenuOpen}>
+              <Popover.Trigger className="icon-button" aria-label="More options"><Ellipsis /></Popover.Trigger>
+              <Popover.Portal><Popover.Positioner side="bottom" align="end" sideOffset={6} className="ui-select-positioner"><Popover.Popup className="popover">
+                {conversationId ? <button type="button" className="menu-item" onClick={() => void exportConversation()}><Download /> Export JSON</button> : null}
+                {conversationId ? <button type="button" className="menu-item destructive" onClick={() => { setMenuOpen(false); setConfirmDelete("chat"); }}><Trash2 /> Delete chat</button> : null}
+                {conversationId && canManageBase ? <div className="menu-separator" /> : null}
+                {canManageBase ? <button type="button" className="menu-item destructive" onClick={() => { setMenuOpen(false); setConfirmDelete("base"); }}><Trash2 /> Delete knowledge base</button> : null}
+              </Popover.Popup></Popover.Positioner></Popover.Portal>
+            </Popover.Root> : null}
+          </div>
+        </header>
 
-function formatOffset(seconds: number): string {
-  const total = Math.max(0, Math.floor(seconds));
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const remainder = String(total % 60).padStart(2, "0");
-  return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${remainder}` : `${minutes}:${remainder}`;
+        {confirmDelete === "chat" ? <Alert tone="danger" role="alert" className="knowledge-banner" title="Delete this saved chat?" actions={<><button type="button" className="button secondary sm" onClick={() => setConfirmDelete(null)}>Cancel</button><button type="button" className="button danger sm" disabled={busy} onClick={() => void deleteConversation()}>Confirm delete</button></>}>Stored answers and citations are removed. Exported copies are not affected.</Alert> : null}
+        {confirmDelete === "base" ? <Alert tone="danger" role="alert" className="knowledge-banner" title={`Delete ${selectedBase?.name ?? "this knowledge base"}?`} actions={<><button type="button" className="button secondary sm" onClick={() => setConfirmDelete(null)}>Cancel</button><button type="button" className="button danger sm" disabled={busy} onClick={() => void deleteBase()}>Confirm delete base</button></>}>Meeting records stay, but their AI knowledge opt-in is turned off and saved chats are removed.</Alert> : null}
+        {error && !sharingOpen ? <Alert tone="danger" className="knowledge-banner">{error}</Alert> : null}
+        {notice ? <Alert tone="success" className="knowledge-banner">{notice}</Alert> : null}
+
+        {mode === "ask" ? <>
+          <div className="chat-scroll" ref={threadRef}>
+            <div className="chat-column">
+              {exchanges.length || pending ? <div className="chat-thread" aria-live="polite">
+                {exchanges.map((exchange, index) => <ChatTurn key={`${index}:${exchange.question}`} exchange={exchange} onOpenSource={onOpenSource} />)}
+                {pending ? <PendingTurn pending={pending} /> : null}
+              </div> : !basesLoaded ? <LoadingRow>Loading knowledge bases…</LoadingRow> : <ChatWelcome baseName={selectedBase?.name ?? null} disabled={busy} onPrompt={(prompt) => void ask(prompt)} />}
+            </div>
+          </div>
+          <div className="chat-dock"><div className="chat-column">
+            <Composer value={query} onChange={setQuery} onSubmit={submit} busy={busy} disabled={!selectedBase} tags={tagFilter} onTags={setTagFilter} picker={picker} hint={selectedBase ? `${retrievalHint} · memory saved in this chat` : ""} />
+          </div></div>
+        </> : null}
+
+        {mode === "search" ? <div className="knowledge-pane">
+          <form className="source-search" onSubmit={submit}>
+            <div className="input-with-icon source-search-query"><Search aria-hidden="true" /><label className="sr-only" htmlFor="knowledge-search">Search meetings</label><input id="knowledge-search" value={query} onChange={(event) => setQuery(event.target.value)} minLength={3} maxLength={500} required placeholder="Search a person, decision, topic or exact phrase" /></div>
+            <label className="sr-only" htmlFor="knowledge-tags">Filter by tags</label>
+            <input id="knowledge-tags" className="source-search-tags" value={tagFilter} onChange={(event) => setTagFilter(event.target.value)} placeholder="Tags (optional)" />
+            <button className="button primary" disabled={busy}>{busy ? "Searching…" : "Search"}</button>
+          </form>
+          {search ? <section className="source-results" aria-labelledby="source-results-title">
+            <div className="section-heading"><div><h2 id="source-results-title">Matching sources</h2><p>{plural(search.count, "result")} · {search.retrieval_mode === "hybrid" ? "hybrid keyword + semantic" : "keyword"} retrieval{search.truncated_meeting_scope ? " · newest 200 meetings searched" : ""}</p></div></div>
+            {search.sources.length ? <div className="source-list">{search.sources.map((source) => <SourceCard key={source.source_id} source={source} onOpenSource={onOpenSource} />)}</div>
+              : <EmptyState icon={<Search />} title="No matching sources">Try a different phrase or tag. Only opted-in, completed meetings are searchable.</EmptyState>}
+          </section> : <EmptyState plain icon={<Search />} title={`Search ${baseTitle}`}>Find the exact transcript turns and approved minutes behind any topic, with timestamps and speakers.</EmptyState>}
+        </div> : null}
+
+        {mode === "wiki" ? <div className="knowledge-pane">
+          {overview ? <><WikiOverview overview={overview} onOpenMeeting={(id) => onOpenSource(id, "")} />{evidenceMap ? <EvidenceMap map={evidenceMap} onOpenSource={onOpenSource} /> : null}</>
+            : <EmptyState icon={<BookOpenText />} title="No wiki to show yet">{selectedBase ? "This knowledge base has no completed meetings yet." : "Select a knowledge base with completed meetings."}</EmptyState>}
+        </div> : null}
+      </div>
+    </section>
+    <KnowledgeSharingDialog open={sharingOpen} onOpenChange={setSharingOpen} baseName={selectedBase?.name ?? ""} visibility={shareVisibility} onVisibility={setShareVisibility} userIds={shareUserIds} onUserIds={setShareUserIds} members={members} currentUserId={account?.user_id} busy={busy} error={error} onSave={() => void saveSharing()} />
+  </>;
 }

@@ -319,7 +319,7 @@ test("foundation UI walkthrough", async ({ page }) => {
   });
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "From conversation to clarity." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Welcome back/, level: 1 })).toBeVisible();
   await expect(page.getByText("No meetings yet")).toBeVisible();
   await expect(
     page.getByText("All meetings").locator("..").getByText("0", { exact: true }),
@@ -356,7 +356,7 @@ test("foundation UI walkthrough", async ({ page }) => {
   await expect(page.getByText("Joining", { exact: true })).toBeVisible();
   await expect(page.getByText("Let us validate this with the internal team first.")).toBeVisible();
   await capture(page, "04-meeting-lifecycle.png");
-  await page.getByRole("button", { name: "All meetings" }).click();
+  await page.getByRole("main").getByRole("button", { name: "Overview" }).click();
 
   await page.getByRole("button", { name: "AI providers" }).click();
   await expect(page.getByRole("heading", { name: "AI providers" })).toBeVisible();
@@ -527,11 +527,10 @@ test("AI knowledge links tagged evidence to the exact transcript turn", async ({
 
   await page.goto("/");
   await page.getByRole("button", { name: "AI knowledge" }).click();
-  await expect(page.getByRole("heading", { name: "Your meeting wiki." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "AI knowledge", level: 1 })).toBeVisible();
   await page.getByRole("button", { name: "Sources" }).click();
   await page.getByLabel("Search meetings").fill("roadmap");
-  await page.getByText("Filter by tags (optional)").click();
-  await page.locator("#knowledge-tags").fill("roadmap");
+  await page.getByLabel("Filter by tags").fill("roadmap");
   await page.getByRole("button", { name: "Search", exact: true }).click();
   await expect(page.getByText(source.text)).toBeVisible();
   await expect(page.getByText("Speaker: Alice", { exact: true })).toBeVisible();
@@ -539,7 +538,7 @@ test("AI knowledge links tagged evidence to the exact transcript turn", async ({
   await capture(page, "12-ai-knowledge-search.png");
   await page.getByRole("button", { name: "Open cited transcript" }).click();
   await expect(page.locator("#transcript-segment-1")).toHaveClass(/focused-source/);
-  await page.getByRole("button", { name: /All meetings/ }).first().click();
+  await page.getByRole("button", { name: "AI knowledge" }).first().click();
   await page.getByRole("button", { name: /Acme client/ }).click();
   await expect(page.getByText("No sources indexed yet")).toBeVisible();
   await page.getByRole("button", { name: "Wiki", exact: true }).click();
@@ -551,16 +550,19 @@ test("AI knowledge links tagged evidence to the exact transcript turn", async ({
   await page.getByRole("button", { name: "Ask AI", exact: true }).click();
   await page.getByLabel("Message your knowledge base").fill("Who owns the roadmap?");
   await page.getByRole("button", { name: "Send", exact: true }).click();
-  await expect(page.getByText("Alice committed to the roadmap on Friday [K1].")).toBeVisible();
-  await page.getByText("1 cited source · open transcript").click();
+  await expect(page.getByText("Alice committed to the roadmap on Friday")).toBeVisible();
+  await page.getByRole("button", { name: "Show source 1" }).click();
   await expect(page.getByRole("button", { name: "Open cited transcript" })).toBeVisible();
   const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "More options" }).click();
   await page.getByRole("button", { name: "Export JSON" }).click();
   expect((await downloadPromise).suggestedFilename()).toBe("meetings-ai-chat-00000000-0000-4000-8000-000000000077.json");
+  await page.getByRole("button", { name: "More options" }).click();
   await page.getByRole("button", { name: "Delete chat" }).click();
   await page.getByRole("button", { name: "Confirm delete" }).click();
   await expect(page.getByText("Saved chat deleted. Downloaded copies are not affected.")).toBeVisible();
   expect(chatDeleted).toBe(true);
+  await page.getByRole("button", { name: "More options" }).click();
   await page.getByRole("button", { name: "Delete knowledge base" }).click();
   await page.getByRole("button", { name: "Confirm delete base" }).click();
   await expect(page.getByText("Knowledge base deleted. Meeting records remain, but their AI knowledge opt-in was turned off.")).toBeVisible();

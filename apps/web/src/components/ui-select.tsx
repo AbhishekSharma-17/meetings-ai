@@ -1,21 +1,27 @@
 "use client";
 
 import { Select } from "@base-ui/react/select";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronsUpDown } from "lucide-react";
 
-export function UiSelect({ id, label, value, options, onChange, disabled = false }: {
+/** The only select in the product; native select elements are not used. */
+export function UiSelect({ id, label, value, options, onChange, disabled = false, hideLabel = false, size = "md", className = "", placeholder }: {
   id: string;
   label: string;
   value: string;
   options: { value: string; label: string }[];
   onChange(value: string): void;
   disabled?: boolean;
+  hideLabel?: boolean;
+  size?: "sm" | "md";
+  className?: string;
+  placeholder?: string;
 }) {
-  return <div className="ui-select-field">
-    <label id={`${id}-label`} htmlFor={id}>{label}</label>
-    <Select.Root value={value} onValueChange={(next) => { if (next !== null) onChange(String(next)); }} disabled={disabled} items={options}>
-      <Select.Trigger id={id} className="ui-select-trigger" aria-labelledby={`${id}-label`}>
-        <Select.Value /><Select.Icon><ChevronDown aria-hidden="true" /></Select.Icon>
+  const items = placeholder && !options.some((option) => option.value === value) ? [{ value, label: placeholder }, ...options] : options;
+  return <div className={`ui-select-field ${className}`.trim()}>
+    <label id={`${id}-label`} htmlFor={id} className={hideLabel ? "sr-only" : undefined}>{label}</label>
+    <Select.Root value={value} onValueChange={(next) => { if (next !== null) onChange(String(next)); }} disabled={disabled} items={items}>
+      <Select.Trigger id={id} className={size === "sm" ? "ui-select-trigger sm" : "ui-select-trigger"} aria-labelledby={`${id}-label`}>
+        <Select.Value /><Select.Icon><ChevronsUpDown aria-hidden="true" /></Select.Icon>
       </Select.Trigger>
       <Select.Portal>
         <Select.Positioner sideOffset={4} alignItemWithTrigger={false} className="ui-select-positioner">

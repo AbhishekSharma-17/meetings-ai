@@ -2,10 +2,26 @@
 
 import { FormEvent, useEffect, useId, useState } from "react";
 import { Dialog } from "@base-ui/react/dialog";
-import { X } from "lucide-react";
+import { CircleCheck, Link2, X } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
 import type { KnowledgeBase, MeetingDetail } from "@/lib/types";
 import type { CalendarSelection } from "./calendar-import-dialog";
+import { calendarProviderNames } from "./calendar-providers";
+import { DeliveryOptions, KnowledgeOptions, MinutesOptions, SourcePreview, type MomTemplate } from "./new-meeting-sections";
+import { Alert } from "./ui/feedback";
+
+const SUPPORTED_PLATFORMS = "Google Meet, Zoom, Microsoft Teams or Jitsi";
+
+function detectPlatform(value: string): string | null {
+  try {
+    const host = new URL(value.trim()).hostname.toLowerCase();
+    if (host === "meet.google.com") return "Google Meet";
+    if (host === "zoom.us" || host.endsWith(".zoom.us")) return "Zoom";
+    if (host.endsWith("teams.microsoft.com") || host.endsWith("teams.live.com")) return "Microsoft Teams";
+    if (host === "meet.jit.si" || host.includes("jitsi")) return "Jitsi";
+    return null;
+  } catch { return null; }
+}
 
 export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelection }: { open: boolean; onClose(): void; onMeetingJoined(meeting: MeetingDetail): void; calendarSelection?: CalendarSelection | null }) {
   const titleId = useId();
@@ -17,11 +33,13 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
   const [selectedBaseId, setSelectedBaseId] = useState("");
   const [newBaseName, setNewBaseName] = useState("");
   const [tagInput, setTagInput] = useState("");
-  const [momTemplate, setMomTemplate] = useState<"standard" | "actions" | "client" | "discovery" | "custom">("standard");
+  const [momTemplate, setMomTemplate] = useState<MomTemplate>("standard");
   const [momInstructions, setMomInstructions] = useState("");
   const [momFocusInput, setMomFocusInput] = useState("");
   const [joinTiming, setJoinTiming] = useState<"now" | "scheduled">("now");
   const [scheduledStart, setScheduledStart] = useState("");
+  const [linkValue, setLinkValue] = useState("");
+  const [linkError, setLinkError] = useState<string | null>(null);
   useEffect(() => {
     if (!open) return;
     let active = true;
@@ -34,7 +52,7 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
   }, [open]);
   if (!open) return null;
 
-  function close() { setError(null); setJoining(false); setSelectedBaseId(""); setNewBaseName(""); setTagInput(""); setKnowledgeEnabled(false); setMomTemplate("standard"); setMomInstructions(""); setMomFocusInput(""); setJoinTiming("now"); setScheduledStart(""); onClose(); }
+  function close() { setError(null); setJoining(false); setSelectedBaseId(""); setNewBaseName(""); setTagInput(""); setKnowledgeEnabled(false); setMomTemplate("standard"); setMomInstructions(""); setMomFocusInput(""); setJoinTiming("now"); setScheduledStart(""); setLinkValue(""); setLinkError(null); onClose(); }
 
   async function resolveKnowledgeBaseId(): Promise<string | null> {
     if (!knowledgeEnabled) return null;
@@ -131,49 +149,85 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
       setJoining(false);
     }
   }
+
+  const source = calendarSelection?.event;
+  const link = source ? source.meeting_url : linkValue;
+  const platform = detectPlatform(link);
+  const willSchedule = calendarSelection?.willSchedule || joinTiming === "scheduled";
+  const description = source
+    ? `From ${calendarProviderNames[source.provider]} · ${new Date(source.starts_at).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}. Future meetings are scheduled; meetings starting now join right away.`
+    : "Paste a meeting link. You review the transcript and minutes before anything is emailed.";
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
   return <Dialog.Root open={open} onOpenChange={(next) => { if (!next && !joining) close(); }}>
     <Dialog.Portal>
     <Dialog.Backdrop className="dialog-backdrop" />
-    <Dialog.Popup className="dialog" aria-labelledby={titleId}>
-      <Dialog.Close className="close-button" aria-label="Close" disabled={joining}><X /></Dialog.Close>
-      <p className="eyebrow">NEW CAPTURE</p><Dialog.Title id={titleId}>{calendarSelection ? "Review sourced meeting" : "Send your assistant"}</Dialog.Title><Dialog.Description className="dialog-intro">{calendarSelection ? `From ${calendarSelection.event.provider === "googlecalendar" ? "Google Calendar" : calendarSelection.event.provider === "outlook" ? "Outlook Calendar" : calendarSelection.event.provider === "calendly" ? "Calendly" : "Zoom"} · ${new Date(calendarSelection.event.starts_at).toLocaleString()}. Future meetings are scheduled automatically; meetings starting now join immediately.` : "Paste a meeting link to start a capture. You’ll review the transcript and minutes here before anything is emailed."}</Dialog.Description>
-      <form onSubmit={(event) => void submit(event)}>
-        <label htmlFor="meeting-link">Meeting link</label>
-        <input id="meeting-link" name="meeting-link" type="url" required placeholder="https://meet.google.com/..." autoFocus defaultValue={calendarSelection?.event.meeting_url ?? ""} readOnly={Boolean(calendarSelection)} disabled={joining} />
-        <label htmlFor="meeting-title">Meeting name <span className="optional">optional</span></label>
-        <input id="meeting-title" name="meeting-title" placeholder="e.g. Product discovery" defaultValue={calendarSelection?.event.title ?? ""} disabled={joining} />
-        {calendarSelection ? <div className="source-preview"><b>Source details</b>{calendarSelection.event.organizer ? <p>Organizer: {calendarSelection.event.organizer}</p> : null}{calendarSelection.event.agenda ? <p>Agenda: {calendarSelection.event.agenda}</p> : null}<p>{calendarSelection.event.invitees?.length ?? 0} listed invitees. These are not verified attendees or speakers.</p>{calendarSelection.event.invitees?.length ? <ul>{calendarSelection.event.invitees.map((person, index) => <li key={`${person.email ?? person.name}-${index}`}>{person.name}{person.email ? ` · ${person.email}` : ""}</li>)}</ul> : null}</div> : null}
-        <label htmlFor="bot-name">Assistant name</label>
-        <input id="bot-name" name="bot-name" defaultValue="Meetings AI" disabled={joining} />
-        {!calendarSelection ? <fieldset className="meeting-join-timing"><legend>When should the assistant join?</legend><label><input type="radio" name="join-timing" value="now" checked={joinTiming === "now"} onChange={() => setJoinTiming("now")} disabled={joining} /> Join now</label><label><input type="radio" name="join-timing" value="scheduled" checked={joinTiming === "scheduled"} onChange={() => setJoinTiming("scheduled")} disabled={joining} /> At the meeting start time</label>{joinTiming === "scheduled" ? <><label htmlFor="scheduled-start">Meeting start · {Intl.DateTimeFormat().resolvedOptions().timeZone}</label><input id="scheduled-start" type="datetime-local" value={scheduledStart} onChange={(event) => setScheduledStart(event.target.value)} required disabled={joining} /><p>The assistant is queued now and joins at this time. It will leave after Vexa detects the meeting has gone quiet.</p></> : null}</fieldset> : null}
-        <div className={knowledgeEnabled ? "meeting-knowledge-options enabled" : "meeting-knowledge-options"}>
-          <label className="meeting-knowledge-primary"><input type="checkbox" name="knowledge-enabled" checked={knowledgeEnabled} onChange={(event) => setKnowledgeEnabled(event.target.checked)} disabled={joining} /><span><b>Add this meeting to AI knowledge</b><small>Connect its transcript and approved MOM to a searchable knowledge base after completion.</small></span></label>
-          <div className="meeting-knowledge-fields"><label htmlFor="knowledge-base">Knowledge base <span className="optional">one per meeting</span></label>
-          <select id="knowledge-base" name="knowledge-base" value={selectedBaseId} disabled={joining} onChange={(event) => { setSelectedBaseId(event.target.value); if (event.target.value) setKnowledgeEnabled(true); }}><option value="">No named knowledge base</option>{bases.map((base) => <option value={base.id} key={base.id}>{base.name}</option>)}</select>
-          {basesError ? <p className="form-error" role="alert">{basesError}</p> : null}
-          <label htmlFor="new-knowledge-base">Or create a knowledge base <span className="optional">optional</span></label>
-          <input id="new-knowledge-base" name="new-knowledge-base" maxLength={120} placeholder="e.g. Acme client" value={newBaseName} disabled={joining} onChange={(event) => { setNewBaseName(event.target.value); if (event.target.value.trim()) setKnowledgeEnabled(true); }} />
-          {newBaseName.trim() && bases.some((base) => base.name.trim().toLocaleLowerCase() === newBaseName.trim().toLocaleLowerCase()) ? <p role="status">This knowledge base already exists. The meeting will be added to it.</p> : null}
-          <label htmlFor="meeting-tags">Knowledge tags <span className="optional">add multiple, separated by commas</span></label>
-          <input id="meeting-tags" name="meeting-tags" value={tagInput} onChange={(event) => setTagInput(event.target.value)} placeholder="e.g. discovery, roadmap, Acme" disabled={joining} />
-          {tagInput.trim() ? <div className="meeting-tag-preview" aria-label="Tags to add">{tagInput.split(/[,;\n]+/).map((item) => item.trim()).filter(Boolean).map((item, index) => <span key={`${item}:${index}`}>#{item}</span>)}</div> : null}
-          <p>One knowledge base can hold many meetings. Tags can be multiple. An existing name reuses that base; a new name creates one.</p></div>
+    <Dialog.Popup className="dialog lg new-meeting-dialog" aria-labelledby={titleId}>
+      <Dialog.Close className="close-button" aria-label="Close" disabled={joining}><X aria-hidden="true" /></Dialog.Close>
+      <Dialog.Title id={titleId}>{source ? "Review sourced meeting" : "Send your assistant"}</Dialog.Title>
+      <Dialog.Description className="dialog-intro">{description}</Dialog.Description>
+      <form className="new-meeting-form" onSubmit={(event) => void submit(event)}>
+        <section className="nm-section" aria-labelledby={`${titleId}-meeting`}>
+          <h3 id={`${titleId}-meeting`} className="sr-only">Meeting</h3>
+          <div className="field">
+            <label htmlFor="meeting-link">Meeting link</label>
+            <div className="input-with-icon">
+              <Link2 aria-hidden="true" />
+              <input id="meeting-link" name="meeting-link" type="url" required placeholder="https://meet.google.com/..." autoFocus defaultValue={source?.meeting_url ?? ""} readOnly={Boolean(source)} disabled={joining}
+                aria-invalid={linkError ? true : undefined} aria-describedby="meeting-link-hint"
+                onChange={(event) => { setLinkValue(event.target.value); setLinkError(null); }}
+                onInvalid={(event) => { event.preventDefault(); event.currentTarget.focus(); setLinkError(event.currentTarget.value ? "Enter a full meeting link that starts with https://." : "Paste the meeting link to continue."); }} />
+            </div>
+            {linkError
+              ? <p id="meeting-link-hint" className="inline-error nm-link-hint">{linkError}</p>
+              : <p id="meeting-link-hint" className={platform ? "field-hint nm-link-hint detected" : "field-hint nm-link-hint"}>{platform ? <><CircleCheck aria-hidden="true" />{platform} link</> : `Works with ${SUPPORTED_PLATFORMS}.`}</p>}
+          </div>
+          <div className="field-row">
+            <div className="field">
+              <label htmlFor="meeting-title">Meeting name <span className="optional">optional</span></label>
+              <input id="meeting-title" name="meeting-title" placeholder="e.g. Product discovery" defaultValue={source?.title ?? ""} disabled={joining} />
+            </div>
+            <div className="field">
+              <label htmlFor="bot-name">Assistant name</label>
+              <input id="bot-name" name="bot-name" defaultValue="Meetings AI" disabled={joining} />
+            </div>
+          </div>
+          {source ? <SourcePreview event={source} /> : null}
+        </section>
+
+        {!source ? <fieldset className="nm-section">
+          <legend className="nm-section-title">When should the assistant join?</legend>
+          <div className="field-row">
+            <label className="choice-card"><input type="radio" name="join-timing" value="now" checked={joinTiming === "now"} onChange={() => setJoinTiming("now")} disabled={joining} /><span><b>Join now</b><small>It joins as soon as you send it.</small></span></label>
+            <label className="choice-card"><input type="radio" name="join-timing" value="scheduled" checked={joinTiming === "scheduled"} onChange={() => setJoinTiming("scheduled")} disabled={joining} /><span><b>At the meeting start time</b><small>Queue it now; it joins on time.</small></span></label>
+          </div>
+          {joinTiming === "scheduled" ? <div className="field nm-schedule-field">
+            <label htmlFor="scheduled-start">Meeting start</label>
+            <input id="scheduled-start" type="datetime-local" value={scheduledStart} onChange={(event) => setScheduledStart(event.target.value)} required disabled={joining} />
+            <p className="field-hint">Your time zone: {timeZone}. The assistant leaves once the meeting goes quiet.</p>
+          </div> : null}
+        </fieldset> : null}
+
+        <KnowledgeOptions
+          disabled={joining} bases={bases} basesError={basesError}
+          enabled={knowledgeEnabled} onEnabledChange={setKnowledgeEnabled}
+          selectedBaseId={selectedBaseId} onSelectBase={(value) => { setSelectedBaseId(value); if (value) setKnowledgeEnabled(true); }}
+          newBaseName={newBaseName} onNewBaseNameChange={(value) => { setNewBaseName(value); if (value.trim()) setKnowledgeEnabled(true); }}
+          tagInput={tagInput} onTagInputChange={setTagInput}
+        />
+
+        <div className="nm-section nm-disclosures">
+          <MinutesOptions disabled={joining} template={momTemplate} onTemplateChange={setMomTemplate} focus={momFocusInput} onFocusChange={setMomFocusInput} instructions={momInstructions} onInstructionsChange={setMomInstructions} />
+          <DeliveryOptions disabled={joining} defaultParticipants={source?.invitees?.map((person) => person.email).filter(Boolean).join("\n") ?? ""} />
         </div>
-        <details className="meeting-mom-options"><summary>MOM format & analysis guide</summary><p>Choose how the assistant organizes the draft after the meeting. Transcript evidence remains the source of truth.</p><label htmlFor="mom-template">Template</label><select id="mom-template" value={momTemplate} onChange={(event) => setMomTemplate(event.target.value as typeof momTemplate)} disabled={joining}><option value="standard">Balanced meeting minutes</option><option value="actions">Decisions & action tracker</option><option value="client">Client recap</option><option value="discovery">Discovery notes</option><option value="custom">Custom focus</option></select><label htmlFor="mom-focus">Additional fields to cover <span className="optional">comma-separated</span></label><input id="mom-focus" value={momFocusInput} onChange={(event) => setMomFocusInput(event.target.value)} placeholder="e.g. Risks, Budget, Dependencies" disabled={joining} /><label htmlFor="mom-instructions">Organizer guidance <span className="optional">optional</span></label><textarea id="mom-instructions" value={momInstructions} onChange={(event) => setMomInstructions(event.target.value)} maxLength={2000} rows={3} placeholder="What should the draft emphasize?" disabled={joining} /><p>Supported focus fields appear as labelled discussion points; unsupported claims are omitted.</p></details>
-        <details className="meeting-delivery-options">
-          <summary>Recap delivery options</summary>
-          <p>Recipients are saved with this meeting. No email is sent until you review and approve its MOM.</p>
-          <label htmlFor="internal-recipients">Internal team email addresses</label>
-          <textarea id="internal-recipients" name="internal-recipients" rows={2} placeholder="team@company.com" disabled={joining} />
-          <label htmlFor="participant-recipients">Participant email addresses</label>
-          <textarea id="participant-recipients" name="participant-recipients" rows={2} placeholder="optional; enter exact addresses" defaultValue={calendarSelection?.event.invitees?.map((person) => person.email).filter(Boolean).join("\n") ?? ""} disabled={joining} />
-          <label className="check-label"><input type="checkbox" name="share-participants" disabled={joining} /> Also send to listed participants after approval</label>
-          <p>To enable participant delivery, add their email addresses above. Nothing is sent until the MOM is approved.</p>
-          <label className="check-label"><input type="checkbox" name="include-transcript" disabled={joining} /> Include full transcript in the email</label>
-        </details>
-        <div className="disclosure"><span aria-hidden="true">ⓘ</span><p><b>Disclosure is required.</b> Before sending, confirm the host will announce: “Meetings AI has joined and will record and transcribe this conversation.”</p></div>
-        {error ? <p className="form-error" role="alert">{error}</p> : null}
-        <div className="dialog-actions"><button className="button secondary" type="button" onClick={close} disabled={joining}>Cancel</button><button className="button primary" type="submit" disabled={joining}>{joining ? "Saving…" : calendarSelection?.willSchedule || joinTiming === "scheduled" ? "Schedule assistant" : "Send assistant"}</button></div>
+
+        <Alert tone="info" role="note" title="Disclosure is required." className="nm-disclosure">Before sending, confirm the host will announce: “Meetings AI has joined and will record and transcribe this conversation.”</Alert>
+
+        <div className="dialog-footer nm-footer">
+          {error ? <p className="form-error nm-footer-error" role="alert">{error}</p> : null}
+          <button className="button secondary" type="button" onClick={close} disabled={joining}>Cancel</button>
+          <button className="button primary" type="submit" disabled={joining}>{joining ? "Saving…" : willSchedule ? "Schedule assistant" : "Send assistant"}</button>
+        </div>
       </form>
     </Dialog.Popup>
     </Dialog.Portal>

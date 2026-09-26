@@ -31,7 +31,7 @@ test("knowledge workspace keeps rail and conversation separate at common widths"
     await page.goto("/");
     if (width < 768) await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByRole("button", { name: "AI knowledge" }).click();
-    await expect(page.getByRole("heading", { name: "Your meeting wiki." })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "AI knowledge", level: 1 })).toBeVisible();
     await page.getByRole("button", { name: /Acme research/ }).click();
     const positions = await page.evaluate(() => {
       const rail = document.querySelector(".knowledge-library")!.getBoundingClientRect();

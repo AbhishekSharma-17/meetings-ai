@@ -1,8 +1,15 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import { Building2, Mail } from "lucide-react";
 import type { CurrentAccount, Workspace } from "@/lib/types";
 import { meetingsService } from "@/lib/meetings-service";
+import { initials } from "@/lib/meeting-status";
+import { PageHeader } from "./ui/page-header";
+import { Badge } from "./ui/feedback";
+import { SettingsToast } from "./settings-toast";
+
+const roleLabel: Record<CurrentAccount["role"], string> = { owner: "Owner", admin: "Admin", member: "Member", viewer: "Viewer" };
 
 export function ProfileSettings({ account, workspace, onAccountChange }: { account: CurrentAccount; workspace: Workspace | null; onAccountChange(account: CurrentAccount): void }) {
   const [displayName, setDisplayName] = useState(account.display_name);
@@ -38,12 +45,47 @@ export function ProfileSettings({ account, workspace, onAccountChange }: { accou
     } finally { setSaving(false); }
   }
 
-  return <section className="page profile-page" aria-labelledby="profile-title">
-    <p className="eyebrow">ACCOUNT</p><h1 id="profile-title">My profile</h1><p className="intro">Your sign-in and organization membership.</p>
-    {message ? <p className="workspace-success" role="status">{message}</p> : null}{error ? <p className="form-error" role="alert">{error}</p> : null}
-    <div className="profile-settings-grid">
-      <section className="workspace-card"><h2>Profile details</h2><div className="profile-identity"><span className="profile-identity-avatar" aria-hidden="true">{account.display_name[0]?.toUpperCase() ?? "U"}</span><span><b>{account.display_name}</b><small>{account.email ?? "Local account"}</small></span></div><form onSubmit={(event) => void saveName(event)}><label htmlFor="profile-display-name">Your display name</label><input id="profile-display-name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} minLength={2} maxLength={120} required /><button className="button secondary" disabled={saving || displayName.trim() === account.display_name}>{saving ? "Saving…" : "Save name"}</button></form><dl className="profile-facts"><div><dt>Organization</dt><dd>{workspace?.display_name ?? "Workspace"}</dd></div><div><dt>Role</dt><dd>{account.role}</dd></div></dl></section>
-      <form className="workspace-card" onSubmit={(event) => void changePassword(event)}><h2>Change password</h2><p>Use at least 12 characters. Changing your password revokes your other sessions.</p><label htmlFor="profile-current-password">Current password</label><input id="profile-current-password" type="password" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} required /><label htmlFor="profile-new-password">New password</label><input id="profile-new-password" type="password" autoComplete="new-password" minLength={12} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required /><label htmlFor="profile-confirm-password">Confirm new password</label><input id="profile-confirm-password" type="password" autoComplete="new-password" minLength={12} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required /><button className="button primary" disabled={saving}>{saving ? "Updating…" : "Update password"}</button></form>
+  const notice = error ? { tone: "danger" as const, text: error } : message ? { tone: "success" as const, text: message } : null;
+  return <section className="page narrow profile-page" aria-labelledby="profile-title">
+    <PageHeader titleId="profile-title" title="My profile" description="Your sign-in details and workspace membership." />
+    <div className="stack-lg">
+      <section className="card" aria-labelledby="profile-details-title">
+        <div className="profile-identity">
+          <span className="avatar profile-avatar" aria-hidden="true">{initials(account.display_name)}</span>
+          <div className="profile-identity-copy">
+            <h2 id="profile-details-title">{account.display_name}</h2>
+            <div className="profile-facts">
+              <span><Mail aria-hidden="true" />{account.email ?? "Local account"}</span>
+              <span><Building2 aria-hidden="true" />{workspace?.display_name ?? "Workspace"}</span>
+              <Badge tone="brand">{roleLabel[account.role] ?? account.role}</Badge>
+            </div>
+          </div>
+        </div>
+        <form className="card-body profile-name-form" onSubmit={(event) => void saveName(event)}>
+          <div className="field">
+            <label htmlFor="profile-display-name">Your display name</label>
+            <div className="profile-inline-field">
+              <input id="profile-display-name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} minLength={2} maxLength={120} required />
+              <button className="button secondary" disabled={saving || displayName.trim() === account.display_name}>{saving ? "Saving…" : "Save name"}</button>
+            </div>
+            <p className="field-hint">Shown to teammates on meetings, minutes and shared knowledge.</p>
+          </div>
+        </form>
+      </section>
+      <section className="card" aria-labelledby="password-title">
+        <div className="card-header"><div><h2 id="password-title">Change password</h2><p>Use at least 12 characters. Changing it signs you out everywhere else.</p></div></div>
+        <form onSubmit={(event) => void changePassword(event)}>
+          <div className="card-body form-stack">
+            <div className="field"><label htmlFor="profile-current-password">Current password</label><input id="profile-current-password" type="password" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} required /></div>
+            <div className="field-row">
+              <div className="field"><label htmlFor="profile-new-password">New password</label><input id="profile-new-password" type="password" autoComplete="new-password" minLength={12} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required /></div>
+              <div className="field"><label htmlFor="profile-confirm-password">Confirm new password</label><input id="profile-confirm-password" type="password" autoComplete="new-password" minLength={12} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required /></div>
+            </div>
+          </div>
+          <div className="card-footer"><button className="button primary" disabled={saving}>{saving ? "Updating…" : "Update password"}</button></div>
+        </form>
+      </section>
     </div>
+    <SettingsToast notice={notice} onDismiss={() => { setError(null); setMessage(null); }} />
   </section>;
 }

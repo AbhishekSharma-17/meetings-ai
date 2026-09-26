@@ -1,0 +1,186 @@
+/* Meetings: library, meeting record, transcript, MOM review and the shared evidence view.
+   Composes primitives (card, list-card, segmented, status, alert, avatar, field); layout only. */
+
+/* ---------- Library ---------- */
+.library-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px 16px; flex-wrap:wrap; margin-bottom:16px; }
+.library-filters { flex:0 1 auto; }
+.library-search { flex:0 1 300px; min-width:220px; }
+.library-list { list-style:none; }
+.library-row { display:grid; grid-template-columns:36px minmax(0,1fr) auto auto 16px; align-items:center; gap:14px; width:100%; min-height:64px; padding:10px 18px; border:0; background:var(--card); color:var(--foreground); text-align:left; transition:background var(--duration-fast) ease; }
+.library-row:hover { background:var(--muted); }
+.library-list > li:first-child .library-row { border-radius:var(--radius-lg) var(--radius-lg) 0 0; }
+.library-list > li:last-child .library-row { border-radius:0 0 var(--radius-lg) var(--radius-lg); }
+.library-list > li:only-child .library-row { border-radius:var(--radius-lg); }
+.library-platform { display:grid; place-items:center; width:36px; height:36px; border-radius:var(--radius); background:var(--muted); border:1px solid var(--border); color:var(--text-secondary); font-size:12px; font-weight:600; letter-spacing:.02em; }
+.library-row-copy { min-width:0; }
+.library-row-copy b, .library-row-copy small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.library-row-copy b { font-size:14px; font-weight:500; }
+.library-row-copy small { margin-top:1px; color:var(--text-secondary); }
+.library-row-duration { min-width:44px; text-align:right; color:var(--text-tertiary); font-size:12px; font-variant-numeric:tabular-nums; }
+.library-row-arrow { color:var(--text-tertiary); transition:transform var(--duration-base) ease, color var(--duration-base) ease; }
+.library-row:hover .library-row-arrow { color:var(--foreground); transform:translateX(2px); }
+
+/* ---------- Meeting record ---------- */
+.record-title-skeleton { display:inline-block; width:min(320px,70vw); height:26px; }
+.record-meta { display:inline-flex; align-items:center; flex-wrap:wrap; gap:4px 16px; min-width:0; max-width:100%; }
+.record-meta > span { display:inline-flex; align-items:center; min-width:0; }
+.record-link { display:inline-flex; align-items:center; gap:4px; min-width:0; max-width:min(40ch,60vw); }
+.record-link > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.record-link .lucide { width:13px; height:13px; }
+.record-spin { animation:spin .8s linear infinite; }
+.record-alerts { display:grid; gap:10px; margin:-8px 0 20px; }
+.record-alerts:empty { display:none; }
+.record-layout { display:grid; grid-template-columns:minmax(0,1fr) 352px; gap:20px; align-items:start; }
+.record-main { display:grid; gap:20px; min-width:0; }
+.record-side { display:grid; gap:16px; min-width:0; }
+.record-call { display:flex; align-items:center; gap:16px; padding:16px 20px; background:var(--brand-subtle); border-color:var(--brand-border); }
+.record-call-art { flex:none; width:56px; height:56px; border-radius:var(--radius-lg); object-fit:cover; }
+.record-call-copy { display:grid; gap:2px; min-width:0; }
+.record-call-copy .eyebrow { margin-bottom:0; color:var(--brand); }
+.record-call-copy p:not(.eyebrow):not(.field-hint) { color:var(--text-secondary); font-size:13.5px; }
+.record-quiet { font-size:13px; }
+.record-people { list-style:none; display:grid; gap:10px; }
+.record-people li { display:flex; align-items:center; gap:10px; min-width:0; }
+.record-person-copy { display:grid; min-width:0; flex:1; }
+.record-person-copy b { font-size:13.5px; font-weight:500; overflow-wrap:anywhere; }
+.record-person-copy small { color:var(--text-secondary); overflow-wrap:anywhere; }
+.record-person-source { flex:none; color:var(--text-tertiary); font-size:12px; }
+.record-identities { padding:14px 20px 18px; border-top:1px solid var(--border); }
+.record-identities h3 { font-size:13.5px; }
+.record-identity-list { list-style:none; display:grid; gap:12px; margin-top:12px; }
+.record-identity-row { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+.record-identity-row .text-button { flex:none; margin-top:1px; }
+.record-person-copy small.record-confirmed { color:var(--success-text); }
+.record-identity-form, .turn-review-form { display:grid; gap:12px; margin-top:10px; padding:12px 14px; border:1px solid var(--border); border-radius:var(--radius); background:var(--muted); }
+.record-runtime { display:grid; gap:4px; margin-top:16px; padding-top:14px; border-top:1px solid var(--border); }
+.record-runtime h3 { color:var(--text-tertiary); font-size:12px; font-weight:400; }
+.record-runtime p:not(.field-hint) { font-size:13.5px; overflow-wrap:anywhere; }
+.record-agenda { display:grid; gap:2px; }
+.record-agenda .field-label { color:var(--text-tertiary); font-size:12px; font-weight:400; }
+.record-agenda p { font-size:13.5px; line-height:1.55; }
+.record-danger .card-header h2 { font-size:14px; }
+.record-danger .card-body { padding-top:10px; }
+.record-danger-confirm { display:grid; gap:12px; padding:12px 14px; border:1px solid var(--destructive-border); border-radius:var(--radius); background:var(--destructive-subtle); font-size:13px; line-height:1.5; }
+.record-danger-confirm b { color:var(--destructive-text); }
+.record-tag-input { display:flex; align-items:center; flex-wrap:wrap; gap:6px; min-height:36px; padding:4px 6px; border:1px solid var(--input); border-radius:var(--radius); background:var(--card); transition:border-color var(--duration-fast) ease; }
+.record-tag-input:hover { border-color:var(--border-strong); }
+.record-tag-input:focus-within { border-color:var(--brand); box-shadow:var(--focus-shadow); }
+.record-tag-input > input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]) { flex:1 1 90px; width:auto; min-width:90px; min-height:26px; padding:0 4px; border:0; background:transparent; box-shadow:none; }
+.record-tag-remove { display:grid; place-items:center; width:16px; height:16px; margin-right:-3px; padding:0; border:0; border-radius:4px; background:transparent; color:var(--text-tertiary); }
+.record-tag-remove:hover { background:var(--muted); color:var(--foreground); }
+.record-tag-remove .lucide { width:12px; height:12px; }
+
+/* ---------- Transcript ---------- */
+.transcript-body { padding-top:12px; }
+.transcript-live { display:inline-flex; align-items:center; gap:6px; }
+.transcript-live-dot { width:6px; height:6px; border-radius:50%; background:var(--success); animation:pulse-dot 1.6s ease-in-out infinite; }
+.transcript-summary { display:grid; gap:2px; margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid var(--border); }
+.transcript-summary p:not(.field-hint) { color:var(--text-secondary); font-size:13px; line-height:1.5; }
+.transcript-summary b { color:var(--foreground); font-weight:600; }
+.transcript-list { list-style:none; display:grid; gap:2px; }
+.transcript-list-compact { max-height:560px; overflow-y:auto; margin:0 -10px; padding:0 10px; overscroll-behavior:contain; }
+.transcript-list-full { margin-top:16px; }
+.turn { display:grid; grid-template-columns:28px minmax(0,1fr); gap:12px; padding:10px 10px; border:1px solid transparent; border-radius:var(--radius); scroll-margin:96px; transition:background var(--duration-fast) ease; }
+.turn:hover { background:var(--muted); }
+.turn.focused-source { background:var(--brand-subtle); border-color:var(--brand-border); }
+.turn-avatar { margin-top:1px; }
+.turn-avatar.unknown { background:var(--muted); color:var(--text-tertiary); border:1px dashed var(--border-strong); }
+.turn-body { min-width:0; }
+.turn-head { display:flex; align-items:baseline; flex-wrap:wrap; gap:2px 10px; }
+.turn-speaker { font-size:13.5px; font-weight:600; }
+.turn-time { color:var(--text-tertiary); font-size:12px; }
+.turn-flag { color:var(--text-tertiary); font-size:12px; }
+.turn-flag.reviewed { color:var(--success-text); }
+.turn-actions { margin-left:auto; }
+.turn-actions .text-button { font-size:12.5px; }
+.turn-text { margin-top:2px; max-width:74ch; font-size:14px; line-height:1.6; overflow-wrap:anywhere; }
+.transcript-dialog .dialog-title { padding-right:40px; }
+
+/* ---------- MOM review ---------- */
+.mom-stack { display:grid; gap:20px; }
+.mom-body { display:grid; gap:20px; }
+.mom-format { border:1px solid var(--border); border-radius:var(--radius); background:var(--muted); }
+.mom-format-bar { display:flex; align-items:center; gap:10px; min-height:44px; padding:6px 8px 6px 12px; }
+.mom-format-bar > .lucide { color:var(--text-tertiary); }
+.mom-format-summary { display:grid; min-width:0; flex:1; }
+.mom-format-summary b { font-size:13px; font-weight:500; }
+.mom-format-summary small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-secondary); }
+.mom-format-trigger .lucide { transition:transform var(--duration-base) ease; }
+.mom-format-trigger[data-panel-open] .lucide { transform:rotate(180deg); }
+.mom-format-panel { display:grid; gap:14px; padding:6px 12px 14px; border-top:1px solid var(--border); padding-top:14px; }
+.mom-format-foot { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.mom-format-foot .field-hint { flex:1 1 260px; }
+.mom-document { display:grid; gap:24px; }
+.mom-title-field input:not([type=checkbox]) { min-height:42px; font-size:17px; font-weight:600; letter-spacing:-.01em; }
+.mom-section { display:grid; gap:10px; min-width:0; align-content:start; }
+.mom-section-head { display:flex; align-items:flex-end; justify-content:space-between; gap:8px 12px; flex-wrap:wrap; }
+.mom-section-head > div { min-width:0; flex:1 1 220px; }
+.mom-section-head h3 { display:flex; align-items:center; gap:8px; }
+.mom-section-head h3 label { font:inherit; color:inherit; cursor:default; }
+.mom-section-head .field-hint { margin-top:1px; }
+.mom-pair { gap:20px; }
+.mom-action-list { list-style:none; display:grid; gap:10px; }
+.mom-action { display:grid; gap:12px; padding:14px 16px; border:1px solid var(--border); border-radius:var(--radius); background:var(--card); }
+.mom-action-foot { display:flex; align-items:center; justify-content:space-between; gap:10px 16px; flex-wrap:wrap; }
+.mom-evidence { display:flex; align-items:center; flex-wrap:wrap; gap:6px; min-width:0; }
+.mom-evidence-label { margin-right:2px; color:var(--text-tertiary); font-size:12px; }
+.mom-chip { display:inline-flex; align-items:center; height:24px; border:1px solid var(--border); border-radius:999px; background:var(--muted); font-size:12px; font-variant-numeric:tabular-nums; }
+.mom-chip a { padding:0 9px; font-weight:500; }
+.mom-chip a + button { margin-left:-5px; }
+.mom-chip button { display:grid; place-items:center; width:20px; height:20px; margin-right:2px; padding:0; border:0; border-radius:50%; background:transparent; color:var(--text-tertiary); }
+.mom-chip button:hover { background:var(--muted-strong); color:var(--foreground); }
+.mom-chip button .lucide { width:12px; height:12px; }
+.mom-evidence-empty { color:var(--warning-text); font-size:12px; }
+.mom-evidence-add { width:150px; }
+.mom-empty-line { color:var(--text-secondary); font-size:13px; }
+.mom-claims { list-style:none; display:grid; gap:14px; }
+.mom-claim { display:grid; gap:8px; }
+.mom-claim-head { display:flex; align-items:center; gap:8px; }
+.mom-claim-head b { font-size:13.5px; font-weight:600; }
+.mom-claim-head .text-button { margin-left:auto; }
+.mom-read-title { font-size:17px; font-weight:600; letter-spacing:-.01em; }
+.mom-read-text { font-size:14px; line-height:1.6; }
+.mom-read-list { display:grid; gap:6px; padding-left:18px; font-size:14px; line-height:1.55; }
+.mom-document.read-only .mom-action b { font-size:14px; font-weight:500; }
+.mom-delete { padding-top:16px; border-top:1px solid var(--border); }
+.mom-delete-confirm { display:grid; gap:12px; padding:12px 14px; border:1px solid var(--destructive-border); border-radius:var(--radius); background:var(--destructive-subtle); font-size:13px; line-height:1.5; }
+.mom-delete-confirm b { color:var(--destructive-text); }
+.mom-footer { flex-direction:column; align-items:stretch; gap:10px; }
+.mom-card > .mom-footer { position:sticky; bottom:0; z-index:5; }
+.mom-footer-messages { display:grid; gap:8px; }
+.mom-footer-row { display:flex; align-items:center; justify-content:space-between; gap:10px 16px; flex-wrap:wrap; }
+.mom-footer-row .button-group { margin-left:auto; }
+.mom-generator { display:inline-flex; align-items:center; flex-wrap:wrap; gap:4px 12px; color:var(--text-tertiary); font-size:12.5px; }
+.mom-delivery-switches { display:grid; gap:14px; padding:14px 16px; border:1px solid var(--border); border-radius:var(--radius); background:var(--muted); }
+
+/* ---------- Responsive ---------- */
+@media (max-width: 1100px) {
+  .record-layout { grid-template-columns:minmax(0,1fr); }
+  .record-side { grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); align-items:start; }
+}
+@media (max-width: 640px) {
+  .library-search { flex:1 1 100%; min-width:0; }
+  .library-row { grid-template-columns:36px minmax(0,1fr); align-items:start; padding:12px 14px; gap:4px 12px; }
+  .library-row .status { grid-column:2; justify-self:start; }
+  .library-row-copy b { white-space:normal; }
+  .library-row-duration, .library-row-arrow { display:none; }
+  .record-side { grid-template-columns:minmax(0,1fr); }
+  .record-call { align-items:flex-start; padding:14px 16px; }
+  .record-call-art { width:44px; height:44px; }
+  .record-identities { padding:14px 16px 16px; }
+  .transcript-list-compact { max-height:none; }
+  .turn { gap:10px; padding:10px 6px; }
+  .mom-footer-row .button-group { width:100%; }
+  .mom-footer-row .button-group .button { flex:1; }
+}
+
+/* Side-column refinements: one fact per row reads better in a narrow column. */
+.record-side .meta-list { grid-template-columns:minmax(0,1fr); gap:8px; }
+.record-side .meta-list > div { display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
+.record-side .meta-list dt { margin-bottom:0; flex:none; }
+.record-side .meta-list dd { text-align:right; font-size:13px; }
+.record-card-badge { margin-top:1px; }
+/* While capturing, the live transcript leads; the MOM follows once capture completes. */
+.record-main.capturing > .record-call { order:-2; }
+.record-main.capturing > .transcript-card { order:-1; }
+.record-side .card-header > div:first-child { flex-basis:140px; }

@@ -1,19 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Check, FileText, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
-import type { ActionItem, AttributedQuestion, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MinutesDraft, MomGuidance, PostMeetingJob, ResendStatus, SpeakerContribution, TranscriptSegment } from "@/lib/types";
-
-type EditableDraft = {
-  title: string;
-  summary: string;
-  discussion: string;
-  decisions: string;
-  actions: ActionItem[];
-  questions: string;
-  contributions: SpeakerContribution[];
-  questionsAsked: AttributedQuestion[];
-};
+import type { MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MomGuidance, PostMeetingJob, ResendStatus, TranscriptSegment } from "@/lib/types";
+import { Alert, EmptyState } from "./ui/feedback";
+import { MinutesEditor, MinutesDocument } from "./minutes-editor";
+import { MinutesFormat } from "./minutes-format";
+import { RecapDeliveryCard } from "./minutes-delivery";
+import { toEditable, toPayload, type EditableDraft } from "./minutes-support";
 
 const captureInProgress = new Set<MeetingDetail["status"]>([
   "created", "joining", "waiting_room", "live", "needs_attention", "stopping", "processing",
@@ -38,6 +33,7 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
   const [momGuidance, setMomGuidance] = useState<MomGuidance>(defaultMomGuidance);
   const [momFocusInput, setMomFocusInput] = useState("");
   const [savingGuidance, setSavingGuidance] = useState(false);
+  const [messageAt, setMessageAt] = useState<"mom" | "delivery">("mom");
 
   useEffect(() => {
     let current = true;
@@ -48,7 +44,7 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
   }, [meeting.id]);
 
   async function saveGuidance() {
-    setSavingGuidance(true); setError(null);
+    setSavingGuidance(true); setMessageAt("mom"); setError(null);
     try {
       const saved = await meetingsService.saveMomGuidance(meeting.id, { ...momGuidance, focus_fields: momFocusInput.split(/[,;\n]+/).map((item) => item.trim()).filter(Boolean) });
       setMomGuidance(saved); setMomFocusInput(saved.focus_fields.join(", "));
@@ -102,6 +98,7 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
           setMinutes(next);
           setDraft(toEditable(next));
           if (next.status === "draft" && minutes.status === "approved") {
+            setMessageAt("mom");
             setNotice("The transcript changed. Review and regenerate the MOM before approval.");
           }
         }
@@ -140,7 +137,7 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
   }
 
   async function saveDeliverySettings() {
-    setError(null); setNotice(null);
+    setMessageAt("delivery"); setError(null); setNotice(null);
     try {
       await meetingsService.saveDeliverySettings(meeting.id, settingsPayload());
       setNotice("Recipient choices saved for this meeting.");
@@ -154,7 +151,7 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
   }
 
   async function deleteDraft() {
-    setBusy("delete"); setError(null); setNotice(null);
+    setBusy("delete"); setMessageAt("mom"); setError(null); setNotice(null);
     try {
       await meetingsService.deleteMinutes(meeting.id);
       setMinutes(null); setDraft(null); setMomDeleted(true); setConfirmDelete(false);
@@ -165,7 +162,7 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
   }
 
   async function generate() {
-    setBusy("generate"); setError(null); setNotice(null);
+    setBusy("generate"); setMessageAt("mom"); setError(null); setNotice(null);
     try {
       await meetingsService.saveMomGuidance(meeting.id, { ...momGuidance, focus_fields: momFocusInput.split(/[,;\n]+/).map((item) => item.trim()).filter(Boolean) });
       accept(await meetingsService.generateMinutes(meeting.id));
@@ -175,7 +172,7 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
   }
 
   async function retryAutomaticDraft() {
-    setBusy("retry"); setError(null); setNotice(null);
+    setBusy("retry"); setMessageAt("mom"); setError(null); setNotice(null);
     try {
       const job = await meetingsService.retryPostMeetingJob(meeting.id);
       setPostMeetingJob(job);
@@ -192,7 +189,7 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
 
   async function save(): Promise<MeetingMinutes | null> {
     if (!draft) return null;
-    setBusy("save"); setError(null); setNotice(null);
+    setBusy("save"); setMessageAt("mom"); setError(null); setNotice(null);
     try {
       const saved = await meetingsService.saveMinutes(meeting.id, toPayload(draft));
       accept(saved);
@@ -204,7 +201,7 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
 
   async function approve() {
     if (!draft) return;
-    setBusy("approve"); setError(null); setNotice(null);
+    setBusy("approve"); setMessageAt("mom"); setError(null); setNotice(null);
     try {
       await meetingsService.saveMinutes(meeting.id, toPayload(draft));
       accept(await meetingsService.approveMinutes(meeting.id));
@@ -214,6 +211,7 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
   }
 
   async function send() {
+    setMessageAt("delivery");
     if (!resendStatus?.can_attempt_send) { setError("Email delivery is not configured yet."); return; }
     if (!recipientList.length) { setError("Enter at least one recipient email address."); return; }
     setBusy("send"); setError(null); setNotice(null);
@@ -222,110 +220,78 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
       const delivery = await meetingsService.sendConfiguredMinutes(meeting.id);
       const refreshed = await meetingsService.getMinutes(meeting.id);
       if (refreshed) accept(refreshed);
+      setMessageAt("mom");
       setNotice(`Recap sent to ${delivery.recipients.length} recipient${delivery.recipients.length === 1 ? "" : "s"}.`);
     } catch (requestError) { setError(messageFor(requestError)); }
     finally { setBusy(null); }
   }
 
-  return <section className="minutes-panel" aria-labelledby="minutes-title">
-    <div className="minutes-heading">
-      <div><p className="eyebrow">POST-MEETING WORKFLOW</p><h2 id="minutes-title">MOM & follow-up</h2><p>A draft appears automatically after capture completes. Review and approve before sending.</p></div>
-      {minutes ? <span className={`minutes-status ${minutes.status}`}>{minutes.status}</span> : null}
-    </div>
+  const locked = minutes?.status === "sent";
+  const editable = Boolean(minutes && draft && !locked);
+  const messages = error || notice ? <>
     {error ? <p className="form-error" role="alert">{error}</p> : null}
-    {notice ? <p className="mom-notice" role="status">{notice}</p> : null}
-    <details className="mom-guidance-panel"><summary>MOM template & custom focus</summary><p>Guides the next AI draft. The transcript and its evidence remain authoritative.</p><div className="mom-guidance-grid"><label>Template<select value={momGuidance.template} disabled={minutes?.status === "sent"} onChange={(event) => setMomGuidance({ ...momGuidance, template: event.target.value as MomGuidance["template"] })}><option value="standard">Balanced meeting minutes</option><option value="actions">Decisions & action tracker</option><option value="client">Client recap</option><option value="discovery">Discovery notes</option><option value="custom">Custom focus</option></select></label><label>Focus fields <small>comma-separated</small><input value={momFocusInput} disabled={minutes?.status === "sent"} onChange={(event) => setMomFocusInput(event.target.value)} placeholder="Risks, Budget, Dependencies" /></label></div><label>Organizer guidance<textarea rows={3} maxLength={2000} value={momGuidance.instructions} disabled={minutes?.status === "sent"} onChange={(event) => setMomGuidance({ ...momGuidance, instructions: event.target.value })} placeholder="What should the draft emphasize?" /></label><p>Supported focus fields become labelled discussion points. Unsaid details are omitted.</p>{minutes?.status !== "sent" ? <button className="button secondary" type="button" disabled={savingGuidance} onClick={() => void saveGuidance()}>{savingGuidance ? "Saving…" : "Save MOM format"}</button> : null}</details>
+    {notice ? <p className="form-success" role="status">{notice}</p> : null}
+  </> : null;
+  const inDelivery = messageAt === "delivery" && minutes?.status === "approved";
+  const inFooter = editable && !inDelivery;
 
-    {!minutes || !draft ? <div className="mom-empty">
-      <div><b>No MOM draft yet.</b><p>{momDeleted ? "The MOM was deleted. Generate a new draft manually if needed." : postMeetingJob?.last_error ? `Automatic drafting ${postMeetingJob.exhausted ? "stopped after repeated failures" : "will retry"}: ${postMeetingJob.last_error}. You can try Generate MOM manually.` : postMeetingJob?.enabled === false ? "This meeting predates automatic drafting. Generate its MOM manually." : canGenerate ? `Automatic drafting is in progress. ${transcriptCount} transcript segment${transcriptCount === 1 ? " is" : "s are"} available; you can also generate manually.` : captureInProgress.has(meeting.status) ? "The MOM will be drafted after capture completes." : "A finalized transcript is required."}</p></div>
-      <div className="mom-review-actions">
-        <button className="button primary" disabled={!canGenerate || busy !== null} onClick={() => void generate()}>{busy === "generate" ? "Generating…" : "Generate MOM"}</button>
-        {postMeetingJob?.enabled && postMeetingJob.last_error && meeting.status === "ready" ? <button className="button secondary" disabled={busy !== null} onClick={() => void retryAutomaticDraft()}>{busy === "retry" ? "Retrying…" : "Retry automatic draft"}</button> : null}
+  return <div className="mom-stack">
+    <section className="card mom-card" aria-labelledby="minutes-title">
+      <div className="card-header">
+        <div><h2 id="minutes-title">MOM & follow-up</h2><p>{minutes ? minutesSubtitle[minutes.status] : "Drafted automatically after capture. Nothing is sent until you approve it."}</p></div>
+        {minutes ? <span className={`status ${minutes.status}`}>{minutesStatusLabel[minutes.status]}</span> : null}
       </div>
-    </div> : <div className="mom-editor">
-      <label>Title<input value={draft.title} disabled={minutes.status === "sent"} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /></label>
-      <label>Executive summary<textarea rows={5} value={draft.summary} disabled={minutes.status === "sent"} onChange={(event) => setDraft({ ...draft, summary: event.target.value })} /></label>
-      <div className="mom-columns">
-        <label>Discussion points <span>one per line</span><textarea rows={6} value={draft.discussion} disabled={minutes.status === "sent"} onChange={(event) => setDraft({ ...draft, discussion: event.target.value })} /></label>
-        <label>Decisions <span>one per line</span><textarea rows={6} value={draft.decisions} disabled={minutes.status === "sent"} onChange={(event) => setDraft({ ...draft, decisions: event.target.value })} /></label>
+      <div className="card-body mom-body">
+        {!inFooter && !inDelivery ? messages : null}
+        {locked ? <Alert tone="success" title="Recap sent">This delivered MOM is locked. Corrections require a future versioned workflow.</Alert> : null}
+        <MinutesFormat guidance={momGuidance} focusInput={momFocusInput} locked={locked} saving={savingGuidance} onGuidanceChange={setMomGuidance} onFocusInputChange={setMomFocusInput} onSave={() => void saveGuidance()} />
+        {!minutes || !draft ? <EmptyState plain icon={<FileText />} title="No MOM draft yet." action={<div className="button-group">
+          <button className="button primary" disabled={!canGenerate || busy !== null} onClick={() => void generate()}><Sparkles aria-hidden="true" />{busy === "generate" ? "Generating…" : "Generate MOM"}</button>
+          {postMeetingJob?.enabled && postMeetingJob.last_error && meeting.status === "ready" ? <button className="button secondary" disabled={busy !== null} onClick={() => void retryAutomaticDraft()}>{busy === "retry" ? "Retrying…" : "Retry automatic draft"}</button> : null}
+        </div>}>{emptyMessage({ momDeleted, postMeetingJob, canGenerate, transcriptCount, capturing: captureInProgress.has(meeting.status) })}</EmptyState>
+          : locked ? <MinutesDocument draft={draft} segments={segments} />
+            : <MinutesEditor draft={draft} segments={segments} onChange={setDraft} />}
+        {minutes && locked ? <p className="field-hint">Generated with {minutes.provider ?? "configured provider"} · {minutes.model ?? "selected model"}</p> : null}
+        {editable ? <div className="mom-delete">{confirmDelete ? <div className="mom-delete-confirm" role="group" aria-label="Confirm MOM deletion">
+          <p><b>Delete this MOM?</b> The transcript stays. The draft, approval, indexed facts and saved AI answers citing this meeting are removed.</p>
+          <div className="button-group end">
+            <button className="button ghost sm" disabled={busy !== null} onClick={() => setConfirmDelete(false)}>Cancel</button>
+            <button className="button danger sm" disabled={busy !== null} onClick={() => void deleteDraft()}>{busy === "delete" ? "Deleting…" : "Confirm delete MOM"}</button>
+          </div>
+        </div> : <button className="text-button destructive" disabled={busy !== null} onClick={() => setConfirmDelete(true)}><Trash2 aria-hidden="true" /> Delete MOM draft</button>}</div> : null}
       </div>
-      <div className="mom-action-list"><div className="section-heading"><div><h3>Action items</h3><p>Owners and dates should reflect what was explicitly agreed. Every action needs transcript evidence.</p></div>{minutes.status !== "sent" ? <button type="button" className="button secondary" onClick={() => setDraft({ ...draft, actions: [...draft.actions, { description: "", owner: null, due_date: null, evidence_segment_ids: [] }] })}>Add action</button> : null}</div>{draft.actions.map((item, index) => <div className="mom-action-card" key={index}><label>Action<input value={item.description} disabled={minutes.status === "sent"} onChange={(event) => setDraft({ ...draft, actions: draft.actions.map((entry, position) => position === index ? { ...entry, description: event.target.value } : entry) })} /></label><div className="mom-columns"><label>Owner<input value={item.owner ?? ""} disabled={minutes.status === "sent"} onChange={(event) => setDraft({ ...draft, actions: draft.actions.map((entry, position) => position === index ? { ...entry, owner: event.target.value || null } : entry) })} /></label><label>Due date<input value={item.due_date ?? ""} disabled={minutes.status === "sent"} onChange={(event) => setDraft({ ...draft, actions: draft.actions.map((entry, position) => position === index ? { ...entry, due_date: event.target.value || null } : entry) })} /></label></div><EvidenceLinks ids={item.evidence_segment_ids ?? []} segments={segments} />{minutes.status !== "sent" ? <><div className="mom-evidence-remove">{(item.evidence_segment_ids ?? []).map((id) => <button type="button" className="text-button" key={id} onClick={() => setDraft({ ...draft, actions: draft.actions.map((entry, position) => position === index ? { ...entry, evidence_segment_ids: (entry.evidence_segment_ids ?? []).filter((evidenceId) => evidenceId !== id) } : entry) })}>Remove {evidenceTime(id, segments)} evidence</button>)}</div><label className="mom-evidence-add">Add transcript evidence<select value="" onChange={(event) => { const value = event.target.value; if (value) setDraft({ ...draft, actions: draft.actions.map((entry, position) => position === index ? { ...entry, evidence_segment_ids: [...new Set([...(entry.evidence_segment_ids ?? []), value])] } : entry) }); }}><option value="">Choose a transcript turn</option>{segments.filter((segment) => segment.isFinal).map((segment) => <option key={segment.segmentId} value={segment.segmentId}>{evidenceTime(segment.segmentId, segments)} · {segment.speaker} · {segment.text.slice(0, 80)}</option>)}</select></label><button type="button" className="text-button destructive" onClick={() => setDraft({ ...draft, actions: draft.actions.filter((_, position) => position !== index) })}>Remove action</button></> : null}</div>)}</div>
-      <label>Open questions <span>one per line</span><textarea rows={5} value={draft.questions} disabled={minutes.status === "sent"} onChange={(event) => setDraft({ ...draft, questions: event.target.value })} /></label>
-      <div className="attribution-review"><h3>Who said what</h3><p>Each claim links to transcript evidence. Correct a speaker in the transcript and regenerate if attribution is wrong.</p>{draft.contributions.length ? draft.contributions.map((item, index) => <div className="attribution-item" key={`${item.speaker}-${index}`}><b>{item.speaker}</b><textarea aria-label={`Contribution by ${item.speaker}`} rows={2} value={item.summary} disabled={minutes.status === "sent"} onChange={(event) => setDraft({ ...draft, contributions: draft.contributions.map((entry, position) => position === index ? { ...entry, summary: event.target.value } : entry) })} /><EvidenceLinks ids={item.evidence_segment_ids} segments={segments} />{minutes.status !== "sent" ? <button className="text-button" onClick={() => setDraft({ ...draft, contributions: draft.contributions.filter((_, position) => position !== index) })}>Remove claim</button> : null}</div>) : <p>No named-speaker contributions were extracted.</p>}</div>
-      <div className="attribution-review"><h3>Questions asked</h3>{draft.questionsAsked.length ? draft.questionsAsked.map((item, index) => <div className="attribution-item" key={`${item.speaker ?? "unknown"}-${index}`}><b>{item.speaker ?? "Unidentified speaker"}</b><textarea aria-label={`Question asked by ${item.speaker ?? "unidentified speaker"}`} rows={2} value={item.question} disabled={minutes.status === "sent"} onChange={(event) => setDraft({ ...draft, questionsAsked: draft.questionsAsked.map((entry, position) => position === index ? { ...entry, question: event.target.value } : entry) })} /><EvidenceLinks ids={item.evidence_segment_ids} segments={segments} />{minutes.status !== "sent" ? <button className="text-button" onClick={() => setDraft({ ...draft, questionsAsked: draft.questionsAsked.filter((_, position) => position !== index) })}>Remove question</button> : null}</div>) : <p>No direct questions were extracted.</p>}</div>
-      <div className="mom-meta"><span>Generated with {minutes.provider ?? "configured provider"} · {minutes.model ?? "selected model"}</span>{minutes.status !== "sent" ? <button className="text-button" disabled={!canGenerate || busy !== null} onClick={() => void generate()}>Regenerate draft</button> : null}</div>
-      {minutes.status !== "sent" ? <div className="mom-delete-control">{confirmDelete ? <div className="mom-delete-confirm"><b>Delete this MOM?</b><p>The transcript stays, but the draft, approval, indexed facts, and saved AI answers citing this meeting will be removed.</p><button className="button secondary" disabled={busy !== null} onClick={() => setConfirmDelete(false)}>Cancel</button><button className="button danger" disabled={busy !== null} onClick={() => void deleteDraft()}>{busy === "delete" ? "Deleting…" : "Confirm delete MOM"}</button></div> : <button className="text-button destructive" disabled={busy !== null} onClick={() => setConfirmDelete(true)}>Delete MOM draft</button>}</div> : null}
-
-      {minutes.status !== "sent" ? <div className="mom-review-actions">
-        <button className="button secondary" disabled={busy !== null} onClick={() => void save()}>{busy === "save" ? "Saving…" : "Save draft"}</button>
-        <button className="button primary" disabled={busy !== null} onClick={() => void approve()}>{busy === "approve" ? "Approving…" : minutes.status === "approved" ? "Reapprove changes" : "Save & approve"}</button>
+      {editable && minutes ? <div className="card-footer mom-footer">
+        {inFooter ? <div className="mom-footer-messages">{messages}</div> : null}
+        <div className="mom-footer-row">
+          <span className="mom-generator">Generated with {minutes.provider ?? "configured provider"} · {minutes.model ?? "selected model"}<button className="text-button" disabled={!canGenerate || busy !== null} onClick={() => void generate()}><RotateCcw aria-hidden="true" /> Regenerate draft</button></span>
+          <div className="button-group end">
+            <button className="button secondary" disabled={busy !== null} onClick={() => void save()}>{busy === "save" ? "Saving…" : "Save draft"}</button>
+            <button className={minutes.status === "approved" ? "button secondary" : "button primary"} disabled={busy !== null} onClick={() => void approve()}><Check aria-hidden="true" />{busy === "approve" ? "Approving…" : minutes.status === "approved" ? "Reapprove changes" : "Save & approve"}</button>
+          </div>
+        </div>
       </div> : null}
-
-      {minutes.status === "approved" ? <div className="delivery-box">
-        <h3>Send approved recap</h3><p>The application sends only this approved version. Participant sharing is off unless you explicitly enable it.</p>
-        {!resendStatus?.can_attempt_send ? <p className="form-error" role="status">{resendStatusError ? "Could not check email delivery configuration. Refresh and try again." : !resendStatus ? "Checking email delivery configuration…" : !resendStatus.api_key_configured ? "Resend API key is missing. Set RESEND_API_KEY on the API service." : "Sender address is missing. Set RESEND_FROM_EMAIL on the API service."}</p> : <p role="status">Sender: {resendStatus.sender}. Domain verification is confirmed only when Resend accepts a send.</p>}
-        <label>Internal team recipients<textarea rows={2} placeholder="team@company.com" value={recipients} onChange={(event) => setRecipients(event.target.value)} /></label>
-        <label>Participant recipients<textarea rows={2} placeholder="optional, exact email addresses" value={participantRecipients} onChange={(event) => setParticipantRecipients(event.target.value)} /></label>
-        <label className="include-transcript"><input type="checkbox" checked={shareParticipants} onChange={(event) => setShareParticipants(event.target.checked)} /> Also send to listed participants</label>
-        <label className="include-transcript"><input type="checkbox" checked={includeTranscript} onChange={(event) => setIncludeTranscript(event.target.checked)} /> Attach the full timestamped transcript (.md)</label>
-        <div className="dialog-actions"><button className="button secondary" disabled={busy !== null} onClick={() => void saveDeliverySettings()}>Save recipients</button><button className="button primary" disabled={busy !== null || !recipientList.length || (shareParticipants && !participantList.length) || !resendStatus?.can_attempt_send} onClick={() => void send()}>{busy === "send" ? "Sending…" : "Send recap"}</button></div>
-      </div> : null}
-      {minutes.status === "sent" ? <div className="sent-banner"><b>Recap sent</b><p>This delivered MOM is locked. Corrections require a future versioned workflow.</p></div> : null}
-    </div>}
-  </section>;
+    </section>
+    {minutes?.status === "approved" ? <RecapDeliveryCard recipients={recipients} participantRecipients={participantRecipients} shareParticipants={shareParticipants} includeTranscript={includeTranscript}
+      resendStatus={resendStatus} resendStatusError={resendStatusError} busy={busy} canSend={Boolean(recipientList.length && !(shareParticipants && !participantList.length) && resendStatus?.can_attempt_send)}
+      messages={inDelivery ? messages : null} onRecipientsChange={setRecipients} onParticipantRecipientsChange={setParticipantRecipients} onShareParticipantsChange={setShareParticipants} onIncludeTranscriptChange={setIncludeTranscript}
+      onSave={() => void saveDeliverySettings()} onSend={() => void send()} /> : null}
+  </div>;
 }
 
-function toEditable(minutes: MeetingMinutes): EditableDraft {
-  return {
-    title: readableText(minutes.title),
-    summary: readableText(minutes.executive_summary),
-    discussion: minutes.discussion_points.map(readableText).join("\n"),
-    decisions: minutes.decisions.map(readableText).join("\n"),
-    actions: minutes.action_items.map((item) => ({ ...item, description: readableText(item.description) })),
-    questions: minutes.open_questions.map(readableText).join("\n"),
-    contributions: (minutes.speaker_contributions ?? []).map((item) => ({ ...item, summary: readableText(item.summary) })),
-    questionsAsked: (minutes.questions_asked ?? []).map((item) => ({ ...item, question: readableText(item.question) })),
-  };
-}
+const minutesStatusLabel: Record<MeetingMinutes["status"], string> = { draft: "Draft", approved: "Approved", sent: "Sent" };
+const minutesSubtitle: Record<MeetingMinutes["status"], string> = {
+  draft: "Review every field against the transcript, then approve.",
+  approved: "Approved and ready to send. Edits need reapproval.",
+  sent: "Delivered to recipients and locked.",
+};
 
-function lines(value: string): string[] {
-  return value.split("\n").map((line) => line.trim()).filter(Boolean);
-}
-
-function toPayload(draft: EditableDraft): MinutesDraft {
-  return {
-    title: draft.title.trim(),
-    executive_summary: draft.summary.trim(),
-    discussion_points: lines(draft.discussion),
-    decisions: lines(draft.decisions),
-    action_items: draft.actions.filter((item) => item.description.trim()).map((item) => ({ ...item, description: item.description.trim(), owner: item.owner?.trim() || null, due_date: item.due_date?.trim() || null })),
-    open_questions: lines(draft.questions),
-    speaker_contributions: draft.contributions,
-    questions_asked: draft.questionsAsked,
-  };
-}
-
-function EvidenceLinks({ ids, segments }: { ids: string[]; segments: TranscriptSegment[] }) {
-  return <div className="evidence-links">Transcript proof <small>(elapsed from first captured turn)</small>: {ids.map((id) => {
-    const segment = segments.find((item) => item.segmentId === id);
-    return <a key={id} href={`#transcript-${encodeURIComponent(id)}`} title={segment ? `Open ${segment.speaker}'s transcript turn: ${segment.text.slice(0, 100)}` : "Open transcript evidence"}>At {evidenceTime(id, segments)}</a>;
-  })}</div>;
-}
-
-function readableText(value: string): string {
-  return value.replace(/\[[^\]]*csrc-[^\]]+\]/g, "").replace(/csrc-[A-Za-z0-9:._-]+/g, "transcript source").replace(/\s{2,}/g, " ").trim();
-}
-
-function evidenceTime(id: string, segments: TranscriptSegment[]): string {
-  const segment = segments.find((item) => item.segmentId === id);
-  const first = segments.find((item) => item.startedAt !== null);
-  if (!segment || !first) return "View transcript";
-  const numeric = (value: string | number | null): number | null => typeof value === "number" ? value : value ? Date.parse(value) / 1000 : null;
-  const at = numeric(segment.startedAt);
-  const start = numeric(first.startedAt);
-  if (at === null || start === null || !Number.isFinite(at - start)) return "View transcript";
-  const seconds = Math.max(0, Math.floor(at - start));
-  return `${Math.floor(seconds / 60).toString().padStart(2, "0")}:${(seconds % 60).toString().padStart(2, "0")}`;
+function emptyMessage({ momDeleted, postMeetingJob, canGenerate, transcriptCount, capturing }: { momDeleted: boolean; postMeetingJob: PostMeetingJob | null; canGenerate: boolean; transcriptCount: number; capturing: boolean }): string {
+  if (momDeleted) return "The MOM was deleted. Generate a new draft manually if needed.";
+  if (postMeetingJob?.last_error) return `Automatic drafting ${postMeetingJob.exhausted ? "stopped after repeated failures" : "will retry"}: ${postMeetingJob.last_error}. You can try Generate MOM manually.`;
+  if (postMeetingJob?.enabled === false) return "This meeting predates automatic drafting. Generate its MOM manually.";
+  if (canGenerate) return `Automatic drafting is in progress. ${transcriptCount} transcript segment${transcriptCount === 1 ? " is" : "s are"} available; you can also generate manually.`;
+  if (capturing) return "The MOM will be drafted after capture completes.";
+  return "A finalized transcript is required.";
 }
 
 function messageFor(error: unknown): string {

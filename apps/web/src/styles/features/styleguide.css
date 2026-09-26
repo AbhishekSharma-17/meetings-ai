@@ -1,0 +1,10 @@
+/* Internal /styleguide page: light and dark specimens side by side. */
+.styleguide-page { max-width:1320px; margin:0 auto; padding:32px 32px 64px; background:var(--background); min-height:100dvh; }
+.styleguide-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; }
+.styleguide-preview { border:1px solid var(--border); border-radius:var(--radius-dialog); background:var(--background); color:var(--foreground); overflow:hidden; }
+.styleguide-preview-header { display:flex; align-items:center; gap:10px; padding:14px 20px; border-bottom:1px solid var(--border); background:var(--sidebar); }
+.styleguide-preview-header small { margin-left:auto; color:var(--text-tertiary); text-transform:capitalize; }
+.styleguide-preview-content { display:grid; gap:16px; padding:20px; }
+.styleguide-title { font-size:18px; }
+.styleguide-row { display:flex; align-items:center; gap:10px; font-size:13.5px; }
+@media (max-width: 900px) { .styleguide-grid { grid-template-columns:minmax(0,1fr); } .styleguide-page { padding:20px 16px 48px; } }

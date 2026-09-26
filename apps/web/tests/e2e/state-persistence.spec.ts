@@ -61,16 +61,15 @@ test("knowledge base and chat model survive navigation", async ({ page }) => {
   await navigation.getByRole("button", { name: "AI knowledge" }).click();
   await page.getByRole("button", { name: /Client B/ }).click();
   await expect(page.getByRole("button", { name: /Client B/ })).toHaveClass(/selected/);
-  await page.locator(".knowledge-chat-settings summary").click();
-  await page.locator("#chat-model-search").click();
+  await page.locator(".knowledge-model-trigger").click();
   await page.getByRole("option", { name: /Sol/ }).click();
   await navigation.getByRole("button", { name: "Meetings" }).click();
   await navigation.getByRole("button", { name: "AI knowledge" }).click();
   await expect(page.getByRole("button", { name: /Client B/ })).toHaveClass(/selected/);
-  await expect(page.locator(".knowledge-chat-settings summary")).toContainText("Sol");
+  await expect(page.locator(".knowledge-model-trigger")).toContainText("Sol");
   await page.reload();
   await expect(page.getByRole("button", { name: /Client B/ })).toHaveClass(/selected/);
-  await expect(page.locator(".knowledge-chat-settings summary")).toContainText("Sol");
+  await expect(page.locator(".knowledge-model-trigger")).toContainText("Sol");
 });
 
 test("preferences are isolated when the signed-in user changes", async ({ page }) => {

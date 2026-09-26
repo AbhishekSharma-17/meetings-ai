@@ -2,8 +2,25 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { meetingsService } from "@/lib/meetings-service";
-import type { AuditEvent, BriefDocument, CurrentAccount, InviteResult, OrganizationBrief, RetentionPolicy, UsageSummary, Workspace, WorkspaceMember, WorkspaceOperations, WorkspaceOption } from "@/lib/types";
-import { UiSelect } from "./ui-select";
+import { initials } from "@/lib/meeting-status";
+import type { CurrentAccount, InviteResult, Workspace, WorkspaceMember, WorkspaceOption } from "@/lib/types";
+import { PageHeader } from "./ui/page-header";
+import { Badge } from "./ui/feedback";
+import { SettingsToast } from "./settings-toast";
+import { roleLabel, WorkspacePeople, type InviteRole } from "./workspace-people";
+import { WorkspaceBrief } from "./workspace-brief";
+import { AuditCard, OperationsCard, RetentionCard } from "./workspace-admin-cards";
+
+type SectionLink = { id: string; label: string; adminOnly?: boolean };
+const sectionLinks: SectionLink[] = [
+  { id: "settings-organization", label: "Organization" },
+  { id: "settings-people", label: "People & access" },
+  { id: "settings-workspaces", label: "Your workspaces" },
+  { id: "settings-brief", label: "Company profile" },
+  { id: "settings-retention", label: "Data retention", adminOnly: true },
+  { id: "settings-operations", label: "Operations", adminOnly: true },
+  { id: "settings-activity", label: "Recent activity", adminOnly: true },
+];
 
 export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceChange, onSwitchWorkspace, onCreateWorkspace }: {
   workspace: Workspace;
@@ -16,110 +33,23 @@ export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceC
   const [name, setName] = useState(workspace.display_name);
   const [contactEmail, setContactEmail] = useState(workspace.contact_email ?? "");
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
-  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
-  const [auditError, setAuditError] = useState<string | null>(null);
-  const [operations, setOperations] = useState<WorkspaceOperations | null>(null);
-  const [usage, setUsage] = useState<UsageSummary | null>(null);
-  const [operationsError, setOperationsError] = useState<string | null>(null);
-  const [retention, setRetention] = useState<RetentionPolicy | null>(null);
-  const [retentionBusy, setRetentionBusy] = useState(false);
-  const [retentionError, setRetentionError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
   const [workspaceAction, setWorkspaceAction] = useState(false);
   const [workspaceActionError, setWorkspaceActionError] = useState<string | null>(null);
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteName, setInviteName] = useState("");
-  const [inviteRole, setInviteRole] = useState<"admin" | "member" | "viewer">("member");
   const [inviteResult, setInviteResult] = useState<InviteResult | null>(null);
   const [inviting, setInviting] = useState(false);
   const [memberBusy, setMemberBusy] = useState<string | null>(null);
   const [pendingRemovalId, setPendingRemovalId] = useState<string | null>(null);
-  const [brief, setBrief] = useState<OrganizationBrief | null>(null);
-  const [briefDocuments, setBriefDocuments] = useState<BriefDocument[]>([]);
-  const [briefBusy, setBriefBusy] = useState(false);
-  const [briefError, setBriefError] = useState<string | null>(null);
-  const [briefMessage, setBriefMessage] = useState<string | null>(null);
   const canManage = account?.role === "owner" || account?.role === "admin";
-  const ownerCount = members.filter((member) => member.role === "owner").length;
-
-  useEffect(() => {
-    void Promise.all([meetingsService.getOrganizationBrief(), meetingsService.listBriefDocuments()])
-      .then(([nextBrief, nextDocuments]) => { setBrief(nextBrief); setBriefDocuments(nextDocuments); })
-      .catch(() => setBriefError("Could not load the organization briefing profile."));
-  }, [workspace.id]);
-
-  async function saveBrief(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!brief) return;
-    setBriefBusy(true); setBriefError(null); setBriefMessage(null);
-    try { setBrief(await meetingsService.saveOrganizationBrief(brief)); setBriefMessage("Company context saved for meeting prep."); }
-    catch (cause) { setBriefError(cause instanceof Error ? cause.message : "Could not save company context."); }
-    finally { setBriefBusy(false); }
-  }
-
-  async function uploadBrief(file: File | undefined) {
-    if (!file) return;
-    setBriefBusy(true); setBriefError(null); setBriefMessage(null);
-    try {
-      const document = await meetingsService.uploadBriefDocument(file);
-      setBriefDocuments((current) => [document, ...current]);
-      setBriefMessage(`${file.name} added to private organization context.`);
-    } catch (cause) { setBriefError(cause instanceof Error ? cause.message : "Could not upload document."); }
-    finally { setBriefBusy(false); }
-  }
-
-  async function deleteBriefDocument(id: string) {
-    setBriefBusy(true); setBriefError(null);
-    try { await meetingsService.deleteBriefDocument(id); setBriefDocuments((current) => current.filter((item) => item.id !== id)); }
-    catch (cause) { setBriefError(cause instanceof Error ? cause.message : "Could not remove document."); }
-    finally { setBriefBusy(false); }
-  }
 
   useEffect(() => {
     void meetingsService.listWorkspaceMembers().then(setMembers).catch(() => {
       setError("Could not load workspace members.");
     });
   }, []);
-
-  useEffect(() => {
-    if (!canManage) return;
-    void meetingsService.listWorkspaceAudit().then(setAuditEvents).catch(() => {
-      setAuditError("Could not load recent activity.");
-    });
-    void meetingsService.getWorkspaceOperations().then(setOperations).catch(() => {
-      setOperationsError("Could not load operations status.");
-    });
-    void meetingsService.getWorkspaceUsage().then(setUsage).catch(() => setOperationsError("Could not load usage records."));
-    void meetingsService.getRetentionPolicy().then(setRetention).catch(() => {
-      setRetentionError("Could not load data retention policy.");
-    });
-  }, [canManage]);
-
-  async function saveRetention() {
-    if (!retention) return;
-    setRetentionBusy(true); setRetentionError(null);
-    try {
-      setRetention(await meetingsService.saveRetentionPolicy(retention));
-      setMessage(retention.enabled ? "Automatic retention policy saved. Eligible older data can be deleted by the background worker." : "Automatic retention is off. Records remain until manually deleted.");
-    } catch (cause) {
-      setRetentionError(cause instanceof Error ? cause.message : "Could not save retention policy.");
-    } finally { setRetentionBusy(false); }
-  }
-
-  async function refreshOperations() {
-    setOperationsError(null);
-    try { const [nextOperations, nextUsage] = await Promise.all([meetingsService.getWorkspaceOperations(), meetingsService.getWorkspaceUsage()]); setOperations(nextOperations); setUsage(nextUsage); }
-    catch { setOperationsError("Could not load operations status."); }
-  }
-
-  async function refreshAudit() {
-    setAuditError(null);
-    try { setAuditEvents(await meetingsService.listWorkspaceAudit()); }
-    catch { setAuditError("Could not load recent activity."); }
-  }
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -157,14 +87,16 @@ export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceC
     }
   }
 
-  async function invite(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setInviting(true); setError(null); setInviteResult(null);
+  async function invite(email: string, displayName: string, role: InviteRole): Promise<boolean> {
+    setInviting(true); setError(null); setInviteResult(null);
     try {
-      const result = await meetingsService.inviteMember(inviteEmail.trim(), inviteName.trim(), inviteRole);
-      setInviteResult(result); setInviteEmail(""); setInviteName("");
+      const result = await meetingsService.inviteMember(email, displayName, role);
+      setInviteResult(result);
       setMembers(await meetingsService.listWorkspaceMembers());
+      return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not create invitation.");
+      return false;
     } finally { setInviting(false); }
   }
 
@@ -201,80 +133,76 @@ export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceC
     } finally { setMemberBusy(null); }
   }
 
-  return <section className="page workspace-page" aria-labelledby="workspace-page-title">
-    <div className="workspace-heading">
-      <div><p className="eyebrow">ORGANIZATION</p><h1 id="workspace-page-title">Workspace settings</h1><p className="intro">Manage organization details, people, and access.</p></div>
+  const notice = error ? { tone: "danger" as const, text: error } : message ? { tone: "success" as const, text: message } : null;
+  const links = sectionLinks.filter((link) => canManage || !link.adminOnly);
+
+  return <section className="page wide workspace-page" aria-labelledby="workspace-page-title">
+    <PageHeader titleId="workspace-page-title" title="Workspace settings" description="Manage your organization, the people in it and what they can access." />
+    <div className="settings-layout">
+      <nav className="settings-nav" aria-label="Settings sections">
+        {links.map((link) => <button key={link.id} type="button" onClick={() => document.getElementById(link.id)?.scrollIntoView({ behavior: "smooth", block: "start" })}>{link.label}</button>)}
+      </nav>
+      <div className="settings-sections">
+        {canManage ? <OrganizationProfileForm slug={workspace.slug} name={name} contactEmail={contactEmail} saving={saving} onName={setName} onContactEmail={setContactEmail} onSubmit={save} /> : <OrganizationSummary workspace={workspace} />}
+        <WorkspacePeople members={members} account={account} canManage={canManage} memberBusy={memberBusy} pendingRemovalId={pendingRemovalId} inviteResult={inviteResult} inviting={inviting}
+          onChangeRole={(userId, role) => void changeRole(userId, role)} onReset={(userId) => void resetMember(userId)} onRequestRemoval={setPendingRemovalId} onCancelRemoval={() => setPendingRemovalId(null)}
+          onRemove={(userId) => void removeMember(userId)} onInvite={invite} onCopyFailed={() => setError("Could not copy the password. Select it and copy it manually.")} />
+        <section className="card settings-section" id="settings-workspaces" aria-labelledby="workspace-directory-title">
+          <div className="card-header"><div><h2 id="workspace-directory-title">Your workspaces</h2><p>Each workspace keeps its own meetings, people, providers and knowledge.</p></div></div>
+          <ul className="workspace-directory">{workspaces.map((item) => {
+            const current = item.id === account?.organization_id;
+            return <li key={item.id} className="list-row">
+              <span className="avatar workspace-avatar" aria-hidden="true">{initials(item.display_name)}</span>
+              <span className="workspace-directory-copy"><b>{item.display_name}</b><small>{roleLabel[item.role] ?? item.role}</small></span>
+              {current ? <Badge tone="brand">Current workspace</Badge> : <button className="button secondary sm" type="button" disabled={workspaceAction} onClick={() => void switchWorkspace(item.id)}>Switch</button>}
+            </li>;
+          })}</ul>
+          {canManage ? <form className="card-footer workspace-create" onSubmit={(event) => void createWorkspace(event)}>
+            <label className="sr-only" htmlFor="new-workspace-name">New workspace name</label>
+            <input id="new-workspace-name" value={newWorkspaceName} onChange={(event) => setNewWorkspaceName(event.target.value)} minLength={2} maxLength={120} required placeholder="New workspace, e.g. Novaala" disabled={workspaceAction} />
+            <button className="button secondary" type="submit" disabled={workspaceAction}>{workspaceAction ? "Creating…" : "Create workspace"}</button>
+          </form> : null}
+          {workspaceActionError ? <div className="card-body"><p className="form-error" role="alert">{workspaceActionError}</p></div> : null}
+        </section>
+        <WorkspaceBrief workspaceId={workspace.id} canManage={canManage} />
+        {canManage ? <RetentionCard onSaved={setMessage} /> : null}
+        {canManage ? <OperationsCard /> : null}
+        {canManage ? <AuditCard members={members} /> : null}
+      </div>
     </div>
-    {error ? <p className="form-error" role="alert">{error}</p> : null}
-    {message ? <p className="workspace-success" role="status">{message}</p> : null}
-    <section className="workspace-card workspace-directory" aria-labelledby="workspace-directory-title">
-      <div><h2 id="workspace-directory-title">Your workspaces</h2><p>Choose the organization whose meetings, people, providers, and knowledge you want to manage.</p></div>
-      <div className="workspace-directory-list">{workspaces.map((item) => <div className={item.id === account?.organization_id ? "workspace-directory-item current" : "workspace-directory-item"} key={item.id}><span className="workspace-avatar" aria-hidden="true">{item.display_name[0]}</span><div><b>{item.display_name}</b><small>{item.role === "owner" ? "Owner" : item.role}</small></div>{item.id === account?.organization_id ? <span className="workspace-current-pill">Current workspace</span> : <button className="button secondary" type="button" disabled={workspaceAction} onClick={() => void switchWorkspace(item.id)}>Switch</button>}</div>)}</div>
-      {canManage ? <form className="workspace-create-form" onSubmit={(event) => void createWorkspace(event)}><div><h3>Create another workspace</h3><p>Start a separate organization with its own meetings and knowledge. You can add teammates below after switching to it.</p></div><label className="sr-only" htmlFor="new-workspace-name">New workspace name</label><input id="new-workspace-name" value={newWorkspaceName} onChange={(event) => setNewWorkspaceName(event.target.value)} minLength={2} maxLength={120} required placeholder="e.g. Novaala" disabled={workspaceAction} /><button className="button secondary" type="submit" disabled={workspaceAction}>{workspaceAction ? "Creating…" : "Create workspace"}</button></form> : null}
-      {workspaceActionError ? <p className="form-error" role="alert">{workspaceActionError}</p> : null}
-    </section>
-    <section className="workspace-card organization-brief" aria-labelledby="organization-brief-title">
-      <div className="section-heading"><div><p className="eyebrow">MEETING PREP CONTEXT</p><h2 id="organization-brief-title">Your company profile</h2><p>Give the prep assistant a reliable view of what your organization offers. Only workspace members can read this context; administrators can edit it.</p></div></div>
-      {briefError ? <p className="form-error" role="alert">{briefError}</p> : null}
-      {briefMessage ? <p role="status" className="workspace-success">{briefMessage}</p> : null}
-      {brief ? <form className="organization-brief-form" onSubmit={(event) => void saveBrief(event)}>
-        <label htmlFor="brief-website">Company website</label><input id="brief-website" type="url" value={brief.website ?? ""} onChange={(event) => setBrief({ ...brief, website: event.target.value || null })} placeholder="https://yourcompany.com" disabled={!canManage || briefBusy} />
-        <label htmlFor="brief-overview">What your company does</label><textarea id="brief-overview" rows={4} value={brief.overview} onChange={(event) => setBrief({ ...brief, overview: event.target.value })} placeholder="Who you serve, the problems you solve, and how you work." disabled={!canManage || briefBusy} />
-        <div className="organization-brief-columns"><div><label htmlFor="brief-services">Services · one per line</label><textarea id="brief-services" rows={4} value={brief.services.join("\n")} onChange={(event) => setBrief({ ...brief, services: event.target.value.split("\n") })} placeholder="AI strategy\nWorkflow automation" disabled={!canManage || briefBusy} /></div><div><label htmlFor="brief-products">Products · one per line</label><textarea id="brief-products" rows={4} value={brief.products.join("\n")} onChange={(event) => setBrief({ ...brief, products: event.target.value.split("\n") })} placeholder="Product name — short description" disabled={!canManage || briefBusy} /></div></div>
-        <label htmlFor="brief-differentiators">What makes you different</label><textarea id="brief-differentiators" rows={3} value={brief.differentiators} onChange={(event) => setBrief({ ...brief, differentiators: event.target.value })} disabled={!canManage || briefBusy} />
-        <label htmlFor="brief-positioning">Preferred positioning and boundaries</label><textarea id="brief-positioning" rows={3} value={brief.positioning} onChange={(event) => setBrief({ ...brief, positioning: event.target.value })} placeholder="How to describe your offering; claims or pitches to avoid." disabled={!canManage || briefBusy} />
-        {canManage ? <button className="button primary" disabled={briefBusy}>{briefBusy ? "Saving…" : "Save company profile"}</button> : null}
-      </form> : <p>Loading company context…</p>}
-      <div className="organization-documents"><div><h3>Reference documents</h3><p>PDF, DOCX, Markdown or text, up to 8 MB. Extracted text is used as private context in meeting prep; scanned PDFs need OCR first.</p></div>{canManage ? <label className="button secondary organization-upload">Add document<input type="file" accept=".pdf,.docx,.md,.txt" disabled={briefBusy} onChange={(event) => { void uploadBrief(event.target.files?.[0]); event.target.value = ""; }} /></label> : null}</div>
-      {briefDocuments.length ? <ul className="organization-document-list">{briefDocuments.map((item) => <li key={item.id}><span><b>{item.filename}</b><small>{item.character_count.toLocaleString()} readable characters · {new Date(item.uploaded_at).toLocaleDateString()}</small></span>{canManage ? <button type="button" className="text-button destructive" disabled={briefBusy} onClick={() => void deleteBriefDocument(item.id)}>Remove</button> : null}</li>)}</ul> : <p className="field-hint">No company documents uploaded yet.</p>}
-    </section>
-    <div className="workspace-layout">
-      {canManage ? <form className="workspace-card" onSubmit={(event) => void save(event)}>
-        <h2>Organization profile</h2>
-        <p>These details are stored in PostgreSQL and survive an app restart.</p>
-        <label htmlFor="workspace-name">Workspace name</label>
-        <input id="workspace-name" value={name} minLength={2} maxLength={120} required onChange={(event) => setName(event.target.value)} disabled={saving} />
-        <label htmlFor="workspace-contact">Contact email <span className="optional">optional</span></label>
-        <input id="workspace-contact" type="email" maxLength={320} value={contactEmail} onChange={(event) => setContactEmail(event.target.value)} disabled={saving} placeholder="team@example.com" />
-        <div className="workspace-field-readonly"><span>Workspace slug</span><b>{workspace.slug}</b><small>Reserved for future organization URLs; it cannot be changed here.</small></div>
-        <div className="workspace-actions"><button className="button primary" type="submit" disabled={saving}>{saving ? "Saving…" : "Save workspace"}</button></div>
-      </form> : <div className="workspace-card"><h2>{workspace.display_name}</h2><p>{workspace.contact_email ?? "No organization contact email"}</p><p>Only an admin can edit this profile.</p></div>}
-      <section className="workspace-card" aria-labelledby="workspace-members-title">
-        <h2 id="workspace-members-title">People & access</h2>
-        <p>People in {workspace.display_name}. Invitations are emailed from Meetings AI when Resend is configured. New accounts must change their temporary password on first sign-in.</p>
-        <ul className="workspace-members">{members.map((member) => {
-          const canEdit = canManage && account?.user_id !== member.user_id && (account?.role === "owner" || member.role === "member" || member.role === "viewer");
-          const ownerProtected = member.role === "owner" && ownerCount <= 1;
-          return <li key={member.user_id}><span className="workspace-member-avatar" aria-hidden="true">{member.display_name[0]}</span><span className="workspace-member-identity"><b>{member.display_name}</b><small>{member.email ?? "Local password sign-in"} · {workspace.display_name}</small></span>{canEdit && !ownerProtected ? <div className="workspace-member-controls"><UiSelect id={`role-${member.user_id}`} label={`Role for ${member.display_name}`} value={member.role} disabled={memberBusy === member.user_id} onChange={(role) => void changeRole(member.user_id, role as WorkspaceMember["role"])} options={account?.role === "owner" ? [{ value: "owner", label: "Owner" }, { value: "admin", label: "Admin" }, { value: "member", label: "Member" }, { value: "viewer", label: "Viewer" }] : [{ value: "member", label: "Member" }, { value: "viewer", label: "Viewer" }]} />{member.role !== "owner" ? <button className="text-button" type="button" disabled={memberBusy === member.user_id} onClick={() => void resetMember(member.user_id)}>Reset access</button> : null}{pendingRemovalId === member.user_id ? <><button className="text-button" type="button" onClick={() => setPendingRemovalId(null)}>Cancel</button><button className="text-button destructive" type="button" disabled={memberBusy === member.user_id} onClick={() => void removeMember(member.user_id)}>Confirm remove</button></> : <button className="text-button destructive" type="button" onClick={() => setPendingRemovalId(member.user_id)}>Remove</button>}</div> : <em>{member.role} · {member.status}</em>}</li>;
-        })}</ul>
-        {canManage ? <><form className="workspace-invite" onSubmit={(event) => void invite(event)}><h3>Invite a teammate</h3><label htmlFor="invite-name">Name</label><input id="invite-name" value={inviteName} onChange={(event) => setInviteName(event.target.value)} minLength={2} maxLength={120} required /><label htmlFor="invite-email">Work email</label><input id="invite-email" type="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} required /><UiSelect id="invite-role" label="Role" value={inviteRole} onChange={(role) => setInviteRole(role as "admin" | "member" | "viewer")} options={account?.role === "owner" ? [{ value: "member", label: "Member · shared knowledge" }, { value: "admin", label: "Admin · workspace management" }, { value: "viewer", label: "Viewer · shared knowledge" }] : [{ value: "member", label: "Member · shared knowledge" }, { value: "viewer", label: "Viewer · shared knowledge" }]} /><button className="button primary" disabled={inviting}>{inviting ? "Sending invitation…" : "Send invitation"}</button></form>{inviteResult ? <div className="workspace-invite-secret" role="status"><b>{inviteResult.email_sent ? "Invitation email sent" : "Teammate added — email not sent"}</b><p>{inviteResult.note}</p><code>{inviteResult.account.email}</code>{inviteResult.temporary_password && !inviteResult.email_sent ? <><code>{inviteResult.temporary_password}</code><button type="button" className="text-button" onClick={() => void navigator.clipboard.writeText(inviteResult.temporary_password ?? "")}>Copy temporary password</button></> : null}</div> : null}</> : null}
-      </section>
-      {canManage ? <section className="workspace-card workspace-audit workspace-retention" aria-labelledby="workspace-retention-title">
-        <h2 id="workspace-retention-title">Data retention</h2>
-        <p>Automatic deletion is off by default. Choose how long to keep each category, then explicitly enable the policy. Meeting deletion also requests Vexa to erase its transcript and recordings; previously sent emails and external backups cannot be recalled.</p>
-        {retentionError ? <p className="form-error" role="alert">{retentionError}</p> : null}
-        {retention ? <><div className="retention-fields"><UiSelect id="retention-meetings" label="Meeting records, transcripts & MOMs" value={String(retention.meeting_days ?? "forever")} onChange={(value) => setRetention({ ...retention, meeting_days: value === "forever" ? null : Number(value) })} options={retentionOptions} /><UiSelect id="retention-chats" label="Saved AI chats" value={String(retention.chat_days ?? "forever")} onChange={(value) => setRetention({ ...retention, chat_days: value === "forever" ? null : Number(value) })} options={retentionOptions} /><UiSelect id="retention-audit" label="Workspace audit events" value={String(retention.audit_days ?? "forever")} onChange={(value) => setRetention({ ...retention, audit_days: value === "forever" ? null : Number(value) })} options={retentionOptions} /></div><label className="retention-enable"><input type="checkbox" checked={retention.enabled} onChange={(event) => setRetention({ ...retention, enabled: event.target.checked })} /> Enable scheduled deletion for the selected periods</label><button type="button" className="button secondary" disabled={retentionBusy || (retention.enabled && !retention.meeting_days && !retention.chat_days && !retention.audit_days)} onClick={() => void saveRetention()}>{retentionBusy ? "Saving…" : "Save retention policy"}</button></> : !retentionError ? <p>Loading retention policy…</p> : null}
-      </section> : null}
-      {canManage ? <section className="workspace-card workspace-audit" aria-labelledby="workspace-operations-title">
-        <div className="workspace-audit-heading"><div><h2 id="workspace-operations-title">Operations</h2><p>Live workload and jobs needing review in this organization.</p></div><button type="button" className="button secondary" onClick={() => void refreshOperations()}>Refresh</button></div>
-        {operationsError ? <p className="form-error" role="alert">{operationsError}</p> : null}
-        {operations ? <dl className="workspace-operations-grid"><div><dt>People</dt><dd>{operations.people}</dd></div><div><dt>Meetings captured</dt><dd>{operations.meetings_captured}</dd></div><div><dt>Completed meetings</dt><dd>{operations.completed_meetings}</dd></div><div><dt>Saved AI chats</dt><dd>{operations.saved_chats}</dd></div><div><dt>Active captures</dt><dd>{operations.active_captures}</dd></div><div><dt>Capture failures</dt><dd>{operations.failed_captures}</dd></div><div><dt>MOM jobs with errors</dt><dd>{operations.failed_mom_jobs}</dd></div><div><dt>Knowledge jobs pending</dt><dd>{operations.pending_index_jobs}</dd></div><div><dt>Knowledge jobs failed</dt><dd>{operations.failed_index_jobs}</dd></div><div><dt>Email delivery failures</dt><dd>{operations.failed_email_deliveries}</dd></div></dl> : !operationsError ? <p>Loading operations status…</p> : null}
-        {usage ? <div className="workspace-usage"><h3>AI model usage</h3><dl className="workspace-operations-grid"><div><dt>Model requests</dt><dd>{usage.total_requests}</dd></div><div><dt>Input tokens</dt><dd>{usage.input_tokens.toLocaleString()}</dd></div><div><dt>Output tokens</dt><dd>{usage.output_tokens.toLocaleString()}</dd></div><div><dt>Estimated model spend</dt><dd>${usage.estimated_usd.toFixed(4)}</dd></div></dl><p className="field-hint">{usage.unpriced_requests} request{usage.unpriced_requests === 1 ? "" : "s"} have no verified price. Spend is an estimate from published model rates, not a provider invoice. Vexa transcription cost is not reported here yet.</p>{usage.by_meeting.length ? <><h4>By meeting</h4><div className="workspace-usage-list" role="table" aria-label="AI usage by meeting"><div role="row"><b>Meeting record</b><b>Requests</b><b>Tokens in / out</b><b>Estimated cost</b></div>{usage.by_meeting.map((item) => <div role="row" key={item.meeting_id}><span>{item.meeting_id.slice(0, 8)}…<small>{item.unpriced_requests ? `${item.unpriced_requests} unpriced request(s)` : "All calls priced"}</small></span><span>{item.requests}</span><span>{item.input_tokens.toLocaleString()} / {item.output_tokens.toLocaleString()}</span><span>${item.estimated_usd.toFixed(5)}</span></div>)}</div></> : null}<h4>Recent model calls</h4>{usage.recent.length ? <div className="workspace-usage-list" role="table" aria-label="Recent AI usage"><div role="row"><b>Operation</b><b>Model</b><b>Tokens in / out</b><b>Estimated cost</b></div>{usage.recent.map((event) => <div role="row" key={event.id}><span>{event.purpose.replaceAll("_", " ")}<small>{new Date(event.created_at).toLocaleString()}{event.meeting_id ? ` · meeting ${event.meeting_id.slice(0, 8)}` : event.knowledge_base_id ? ` · knowledge ${event.knowledge_base_id.slice(0, 8)}` : ""}</small></span><span>{event.model}<small>{event.provider}</small></span><span>{event.input_tokens ?? "—"} / {event.output_tokens ?? "—"}</span><span>{event.estimated_usd === null ? "Unpriced" : `$${event.estimated_usd.toFixed(5)}`}</span></div>)}</div> : <p className="field-hint">No model calls recorded yet. New MOM and Ask AI requests will appear here.</p>}</div> : null}
-        <p className="field-hint">All counts and usage records are workspace-scoped. This does not replace infrastructure logs or alerts.</p>
-      </section> : null}
-      {canManage ? <section className="workspace-card workspace-audit" aria-labelledby="workspace-audit-title">
-        <div className="workspace-audit-heading"><div><h2 id="workspace-audit-title">Recent activity</h2><p>Workspace changes and sign-ins. Request bodies and credentials are never shown.</p></div><button type="button" className="button secondary" onClick={() => void refreshAudit()}>Refresh</button></div>
-        {auditError ? <p className="form-error" role="alert">{auditError}</p> : null}
-        {auditEvents.length ? <ul className="workspace-audit-list">{auditEvents.map((event) => <li key={event.id}><span><b>{event.action === "auth.login.succeeded" ? "Signed in" : event.action}</b><small>{members.find((member) => member.user_id === event.actor_user_id)?.display_name ?? "Workspace account"}{event.resource_id ? ` · ${event.resource_id.slice(0, 8)}…` : ""}</small></span><time dateTime={event.created_at}>{new Date(event.created_at).toLocaleString()}</time></li>)}</ul> : <p>No workspace activity recorded yet.</p>}
-      </section> : null}
-    </div>
+    <SettingsToast notice={notice} onDismiss={() => { setError(null); setMessage(null); }} />
   </section>;
 }
 
-const retentionOptions = [
-  { value: "forever", label: "Keep until manually deleted" },
-  { value: "30", label: "30 days" },
-  { value: "90", label: "90 days" },
-  { value: "365", label: "1 year" },
-  { value: "730", label: "2 years" },
-];
+function OrganizationProfileForm({ slug, name, contactEmail, saving, onName, onContactEmail, onSubmit }: {
+  slug: string; name: string; contactEmail: string; saving: boolean;
+  onName(value: string): void; onContactEmail(value: string): void; onSubmit(event: FormEvent<HTMLFormElement>): void;
+}) {
+  return <section className="card settings-section" id="settings-organization" aria-labelledby="organization-profile-title">
+    <div className="card-header"><div><h2 id="organization-profile-title">Organization profile</h2><p>How this workspace is named across Meetings AI.</p></div></div>
+    <form onSubmit={(event) => void onSubmit(event)}>
+      <div className="card-body form-stack">
+        <div className="field-row">
+          <div className="field"><label htmlFor="workspace-name">Workspace name</label><input id="workspace-name" value={name} minLength={2} maxLength={120} required onChange={(event) => onName(event.target.value)} disabled={saving} /></div>
+          <div className="field"><label htmlFor="workspace-contact">Contact email <span className="optional">optional</span></label><input id="workspace-contact" type="email" maxLength={320} value={contactEmail} onChange={(event) => onContactEmail(event.target.value)} disabled={saving} placeholder="team@example.com" /></div>
+        </div>
+        <div className="field">
+          <span className="field-label">Workspace slug</span>
+          <code className="settings-readonly">{slug}</code>
+          <p className="field-hint">Reserved for organization URLs; it can’t be changed here.</p>
+        </div>
+      </div>
+      <div className="card-footer"><button className="button primary" type="submit" disabled={saving}>{saving ? "Saving…" : "Save workspace"}</button></div>
+    </form>
+  </section>;
+}
+
+function OrganizationSummary({ workspace }: { workspace: Workspace }) {
+  return <section className="card settings-section" id="settings-organization" aria-labelledby="organization-profile-title">
+    <div className="card-header"><div><h2 id="organization-profile-title">Organization profile</h2><p>Only an admin can edit this profile.</p></div></div>
+    <div className="card-body"><dl className="meta-list">
+      <div><dt>Workspace name</dt><dd>{workspace.display_name}</dd></div>
+      <div><dt>Contact email</dt><dd>{workspace.contact_email ?? "No organization contact email"}</dd></div>
+    </dl></div>
+  </section>;
+}

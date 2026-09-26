@@ -1,20 +1,23 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, CheckCircle2, ExternalLink, Sparkles } from "lucide-react";
+import { Building2, CalendarDays, Clock, Sparkles, Users } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
 import { useUiPreference } from "@/lib/ui-preferences";
-import type { CachedCalendarEvent, CalendarConnection, CalendarSnapshot, KnowledgeTextProfile, PrepReport } from "@/lib/types";
-import { CalendarBrandIcon } from "./calendar-import-dialog";
+import type { CachedCalendarEvent, CalendarSnapshot, KnowledgeTextProfile, PrepReport } from "@/lib/types";
+import { CalendarBrandIcon } from "./brand-icons";
+import { calendarProviderNames, platformLabel } from "./calendar-providers";
+import { PrepReportView } from "./meeting-prep-report";
+import { PageHeader } from "./ui/page-header";
+import { EmptyState, LoadingRow, Skeleton } from "./ui/feedback";
+import { SwitchField } from "./ui/switch";
 import { UiSelect } from "./ui-select";
-
-const sourceNames: Record<CalendarConnection["provider"], string> = {
-  googlecalendar: "Google Calendar", outlook: "Outlook Calendar", calendly: "Calendly", zoom: "Zoom",
-};
 
 function dateKey(value: Date): string {
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 }
+
+const listDate: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" };
 
 export function MeetingPrepWorkspace({ identity, initialEvent, onOpenCalendar, onOpenOrganization }: {
   identity: string;
@@ -51,17 +54,53 @@ export function MeetingPrepWorkspace({ identity, initialEvent, onOpenCalendar, o
   }, [initialEvent, snapshot.events]);
   const selectedEvent = events.find((event) => event.id === selectedId) ?? null;
 
-  return <section className="page meeting-prep-workspace" aria-labelledby="meeting-prep-title">
-    <div className="meeting-prep-heading"><div><p className="eyebrow">BEFORE THE CONVERSATION</p><h1 id="meeting-prep-title">Meeting prep</h1><p className="intro">Turn a scheduled conversation into a useful, source-backed briefing. Review every claim before your call.</p></div><button type="button" className="button secondary" onClick={onOpenOrganization}>Company profile</button></div>
-    <div className="meeting-prep-note"><Sparkles size={17} /><span>Showing saved events for the next 90 days. Sync more events in Calendar; nothing is researched until you ask.</span><button type="button" onClick={onOpenCalendar}>Open calendar</button></div>
-    {error ? <p className="form-error" role="alert">{error}</p> : null}
-    <div className="meeting-prep-layout">
-      <aside className="meeting-prep-list" aria-label="Meetings to prepare"><div className="meeting-prep-list-heading"><h2>Upcoming meetings</h2><small>{events.length} saved</small></div>
-        {loading ? <p className="meeting-prep-empty">Loading saved meetings…</p> : events.length ? events.map((event) => <button type="button" key={event.id} className={selectedId === event.id ? "meeting-prep-event selected" : "meeting-prep-event"} aria-current={selectedId === event.id ? "true" : undefined} onClick={() => setSelectedId(event.id)}><CalendarBrandIcon provider={event.provider} /><span><b>{event.title}</b><small>{new Date(event.starts_at).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</small><small>{sourceNames[event.provider]}</small></span></button>) : <div className="meeting-prep-empty"><CalendarDays /><b>No saved upcoming meetings</b><p>Connect and sync a meeting source in Calendar, then come back to prepare.</p><button type="button" className="button secondary" onClick={onOpenCalendar}>Go to Calendar</button></div>}
+  return <section className="page wide meeting-prep-workspace" aria-labelledby="meeting-prep-title">
+    <PageHeader
+      titleId="meeting-prep-title"
+      title="Meeting prep"
+      description="Build a source-backed briefing for an upcoming meeting. Nothing is researched until you ask."
+      actions={<>
+        <button type="button" className="button ghost" onClick={onOpenCalendar}><CalendarDays aria-hidden="true" /> Open calendar</button>
+        <button type="button" className="button secondary" onClick={onOpenOrganization}><Building2 aria-hidden="true" /> Company profile</button>
+      </>}
+    />
+    {error ? <p className="form-error prep-error" role="alert">{error}</p> : null}
+    {!loading && !events.length ? <EmptyState icon={<CalendarDays />} title="No saved upcoming meetings" action={<button type="button" className="button secondary" onClick={onOpenCalendar}>Go to Calendar</button>}>Connect and sync a meeting source in Calendar, then come back to prepare.</EmptyState> : <div className="prep-layout">
+      <aside className="card prep-list" aria-label="Meetings to prepare">
+        <div className="card-header">
+          <div><h2>Upcoming meetings</h2><p>{loading ? "Next 90 days" : `${events.length} saved · next 90 days`}</p></div>
+        </div>
+        {loading ? <LoadingRow>Loading saved meetings…</LoadingRow> : <ul className="prep-event-list">
+          {events.map((event) => <li key={event.id}>
+            <button type="button" className={selectedId === event.id ? "meeting-prep-event selected" : "meeting-prep-event"} aria-current={selectedId === event.id ? "true" : undefined} onClick={() => setSelectedId(event.id)}>
+              <CalendarBrandIcon provider={event.provider} size="sm" />
+              <span className="prep-event-copy"><b>{event.title}</b><small>{new Date(event.starts_at).toLocaleString(undefined, listDate)}</small></span>
+            </button>
+          </li>)}
+        </ul>}
       </aside>
-      <div className="meeting-prep-main">{selectedEvent ? <><header className="meeting-prep-event-heading"><div className="calendar-event-source"><CalendarBrandIcon provider={selectedEvent.provider} /><span>{sourceNames[selectedEvent.provider]} · {selectedEvent.platform.replaceAll("_", " ")}</span></div><h2>{selectedEvent.title}</h2><p>{new Date(selectedEvent.starts_at).toLocaleString()} · {selectedEvent.invitees?.length ?? 0} invited people</p>{selectedEvent.agenda ? <p className="meeting-prep-agenda"><b>Agenda</b> {selectedEvent.agenda}</p> : null}</header><MeetingPrepPanel key={selectedEvent.id} event={selectedEvent} /></> : <div className="meeting-prep-placeholder"><Sparkles /><h2>Select a meeting</h2><p>Its details and saved briefing will appear here.</p></div>}</div>
-    </div>
+      <div className="prep-main">
+        {selectedEvent ? <>
+          <EventSummary event={selectedEvent} />
+          <MeetingPrepPanel key={selectedEvent.id} event={selectedEvent} />
+        </> : loading ? <div className="card card-body"><Skeleton lines={4} /></div> : <div className="card"><EmptyState plain icon={<Sparkles />} title="Select a meeting">Its details and saved briefing appear here.</EmptyState></div>}
+      </div>
+    </div>}
   </section>;
+}
+
+function EventSummary({ event }: { event: CachedCalendarEvent }) {
+  const starts = new Date(event.starts_at);
+  const invitees = event.invitees?.length ?? 0;
+  return <header className="card prep-summary-card">
+    <div className="prep-summary-source"><CalendarBrandIcon provider={event.provider} size="sm" />{calendarProviderNames[event.provider]} · {platformLabel(event.platform)}</div>
+    <h2>{event.title}</h2>
+    <ul className="prep-summary-facts">
+      <li><Clock aria-hidden="true" />{starts.toLocaleString(undefined, { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })}</li>
+      <li><Users aria-hidden="true" />{invitees} invited {invitees === 1 ? "person" : "people"}</li>
+    </ul>
+    {event.agenda ? <p className="prep-summary-agenda"><b>Agenda</b>{event.agenda}</p> : null}
+  </header>;
 }
 
 export function MeetingPrepPanel({ event }: { event: CachedCalendarEvent }) {
@@ -93,10 +132,36 @@ export function MeetingPrepPanel({ event }: { event: CachedCalendarEvent }) {
     finally { setBusy(false); }
   }
 
-  return <section className="calendar-prep meeting-prep-panel" aria-label="Meeting preparation"><div className="section-heading"><div><p className="eyebrow">PRE-MEETING RECON</p><h2>Build your briefing</h2><p>Use your private company profile and, optionally, cited public research.</p></div></div><div className="calendar-prep-inputs"><div><label htmlFor="prep-company">Target company</label><input id="prep-company" value={targetCompany} onChange={(change) => setTargetCompany(change.target.value)} placeholder="Optional; inferred from invitee domains if blank" /></div><div><label htmlFor="prep-profiles">Public profile or company URLs · one per line</label><textarea id="prep-profiles" rows={3} value={profileUrls} onChange={(change) => setProfileUrls(change.target.value)} placeholder="https://www.linkedin.com/in/…" /></div><div className="full"><label htmlFor="prep-context">What you already know or want to learn</label><textarea id="prep-context" rows={3} value={context} onChange={(change) => setContext(change.target.value)} placeholder="Relationship history, meeting objective, specific questions…" /></div><UiSelect id="prep-model" label="Analysis provider" value={textProfileId} onChange={setTextProfileId} options={[{ value: "", label: "Workspace text-generation default" }, ...textProfiles.map((item) => ({ value: item.id, label: item.name }))]} /><label className="calendar-research-toggle"><input type="checkbox" checked={researchEnabled} onChange={(change) => setResearchEnabled(change.target.checked)} /> Research public web with a configured OpenAI provider</label></div><p className="field-hint">Public searches use the company, public profile URLs and attendee names—not meeting titles, agendas, emails or private company documents. Final analysis uses the selected text provider. Public web research may incur tool charges.</p><button type="button" className="button primary" disabled={busy} onClick={() => void generate()}>{busy ? "Researching and preparing…" : report ? "Refresh briefing" : "Generate briefing"}</button>{error ? <p role="alert" className="form-error">{error}</p> : null}{report ? <PrepReportView report={report} /> : null}</section>;
-}
-
-function PrepReportView({ report }: { report: PrepReport }) {
-  const sourceMap = new Map(report.sources.map((source) => [source.id, source]));
-  return <article className="prep-report"><div className="prep-report-header"><span className="calendar-connection-badge"><CheckCircle2 /> Saved briefing</span><small>{new Date(report.generated_at).toLocaleString()} · {report.provider} / {report.model}</small></div><h3>{report.target_company ? `Briefing: ${report.target_company}` : "Meeting briefing"}</h3><p className="prep-summary">{report.executive_brief}</p>{!report.public_research_performed ? <p className="calendar-note">Context-only: no public web research was run.</p> : null}{report.findings.length ? <section><h4>Public findings</h4><ul>{report.findings.map((finding, index) => <li key={index}>{finding.statement}<span className="prep-citations">{finding.source_ids.map((id) => { const source = sourceMap.get(id); return source ? <a key={id} href={source.url} target="_blank" rel="noreferrer noopener">{id} <ExternalLink size={12} /><span className="sr-only">{source.title}</span></a> : null; })}</span></li>)}</ul></section> : null}<div className="prep-report-columns">{([["Relevant offerings", report.relevant_offerings], ["Talking points", report.talking_points], ["Questions to ask", report.questions_to_ask], ["People & roles to verify", report.people_notes], ["Watchouts", report.watchouts]] as [string, string[]][]).map(([title, items]) => items.length ? <section key={title}><h4>{title}</h4><ul>{items.map((item, index) => <li key={index}>{item}</li>)}</ul></section> : null)}</div>{report.sources.length ? <details className="prep-sources"><summary>{report.sources.length} public source{report.sources.length === 1 ? "" : "s"}</summary>{report.sources.map((source) => <a key={source.id} href={source.url} target="_blank" rel="noreferrer noopener">{source.id} · {source.title} <ExternalLink size={12} /></a>)}</details> : null}</article>;
+  return <>
+    {report ? <PrepReportView report={report} /> : null}
+    <section className="card meeting-prep-panel" aria-label="Meeting preparation">
+      <div className="card-header">
+        <div><h2>{report ? "Refresh your briefing" : "Build your briefing"}</h2><p>Uses your private company profile and, if you allow it, cited public research.</p></div>
+      </div>
+      <div className="card-body form-stack">
+        <div className="field-row">
+          <div className="field">
+            <label htmlFor="prep-company">Target company</label>
+            <input id="prep-company" value={targetCompany} onChange={(change) => setTargetCompany(change.target.value)} placeholder="Inferred from invitee domains if blank" />
+          </div>
+          <UiSelect id="prep-model" label="Analysis provider" value={textProfileId} onChange={setTextProfileId} options={[{ value: "", label: "Workspace default" }, ...textProfiles.map((item) => ({ value: item.id, label: item.name }))]} />
+        </div>
+        <div className="field">
+          <label htmlFor="prep-context">What you already know or want to learn</label>
+          <textarea id="prep-context" rows={3} value={context} onChange={(change) => setContext(change.target.value)} placeholder="Relationship history, meeting goal, specific questions…" />
+        </div>
+        <div className="field">
+          <label htmlFor="prep-profiles">Public profile or company URLs <span className="optional">one per line</span></label>
+          <textarea id="prep-profiles" rows={2} value={profileUrls} onChange={(change) => setProfileUrls(change.target.value)} placeholder="https://www.linkedin.com/in/…" />
+        </div>
+        <div className="inset-panel">
+          <SwitchField id="prep-research" label="Research the public web" description="Needs a configured OpenAI provider and may incur tool charges. Searches use the company, profile URLs and attendee names only — never titles, agendas, emails or private documents." checked={researchEnabled} onChange={setResearchEnabled} />
+        </div>
+        {error ? <p role="alert" className="form-error">{error}</p> : null}
+        <div className="button-group">
+          <button type="button" className="button primary" disabled={busy} onClick={() => void generate()}>{busy ? "Researching and preparing…" : report ? "Refresh briefing" : "Generate briefing"}</button>
+        </div>
+      </div>
+    </section>
+  </>;
 }

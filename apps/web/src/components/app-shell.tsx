@@ -1,13 +1,13 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState, type ReactNode } from "react";
 import Image from "next/image";
 import { meetingsService } from "@/lib/meetings-service";
 import { readUiPreference } from "@/lib/ui-preferences";
 import type { CachedCalendarEvent, CurrentAccount, Meeting, ProviderProfile, Workspace, WorkspaceOption } from "@/lib/types";
 import { Dashboard } from "./dashboard";
 import { NewMeetingDialog } from "./new-meeting-dialog";
-import { CalendarImportDialog, type CalendarSelection } from "./calendar-import-dialog";
+import type { CalendarSelection } from "./calendar-import-dialog";
 import { CalendarWorkspace } from "./calendar-workspace";
 import { MeetingPrepWorkspace } from "./meeting-prep-workspace";
 import { MeetingsLibrary } from "./meetings-library";
@@ -21,7 +21,10 @@ import { ObservabilityScreen } from "./observability-screen";
 import { ProvidersIcon } from "./ui-icons";
 import { ThemeSwitcher } from "./theme-switcher";
 import { Dialog } from "@base-ui/react/dialog";
-import { Activity, BookOpenText, Building2, CalendarDays, ChevronUp, LayoutDashboard, LogOut, Menu, Sparkles, UserRound, Video, X } from "lucide-react";
+import { Popover } from "@base-ui/react/popover";
+import { Activity, Building2, CalendarDays, Check, ChevronsUpDown, FileCheck2, House, LogOut, Menu, Mic, NotebookPen, Sparkles, UserRound, Users, Video, X } from "lucide-react";
+import { initials } from "@/lib/meeting-status";
+import { EmptyState, LoadingRow } from "./ui/feedback";
 
 type View = "dashboard" | "meetings" | "calendar" | "prep" | "providers" | "meeting" | "workspace" | "knowledge" | "observability" | "profile";
 const views: View[] = ["dashboard", "meetings", "calendar", "prep", "providers", "meeting", "workspace", "knowledge", "observability", "profile"];
@@ -172,55 +175,68 @@ export function AppShell() {
     window.location.reload();
   }, []);
 
-  if (!authenticated) return <main className="login-page">
+  if (!authenticated) return <LoginLayout>
     <form className="login-card" onSubmit={(event) => void signIn(event)}>
-      <div className="login-brand"><span className="brand-mark" aria-hidden="true"><Image src="/icon.svg" width={28} height={28} alt="" /></span><span>Meetings <b>AI</b></span></div>
-      <p className="eyebrow">YOUR MEETING WORKSPACE</p>
-      <h1>Make every conversation count.</h1>
-      <p>{authenticated === null ? "Checking your session…" : "Sign in to review conversations, decisions, and next steps."}</p>
-      <ThemeSwitcher />
-      {authenticated === false ? <><label htmlFor="login-email">Work email</label><input id="login-email" type="email" autoComplete="username" value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} required /><label htmlFor="admin-password">Password</label><input id="admin-password" type="password" autoComplete="current-password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} required /><button className="button primary" disabled={loggingIn}>{loggingIn ? "Signing in…" : "Sign in"}</button></> : null}
+      <div>
+        <h1>Welcome back</h1>
+        <p className="intro">{authenticated === null ? "Checking your session…" : "Sign in to review conversations, decisions and next steps."}</p>
+      </div>
+      {authenticated === false ? <>
+        <div className="field"><label htmlFor="login-email">Work email</label><input id="login-email" type="email" autoComplete="username" placeholder="you@company.com" value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} required /></div>
+        <div className="field"><label htmlFor="admin-password">Password</label><input id="admin-password" type="password" autoComplete="current-password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} required /></div>
+        <button className="button primary lg block" disabled={loggingIn}>{loggingIn ? "Signing in…" : "Sign in"}</button>
+      </> : <div className="login-checking" role="status"><span className="spinner" aria-hidden="true" />Connecting to your workspace…</div>}
       {loginError ? <p className="form-error" role="alert">{loginError} <button type="button" onClick={() => void meetingsService.getSession().then(setAuthenticated).catch(() => setLoginError("Could not reach the API."))}>Retry</button></p> : null}
+      <p className="login-footnote">Invited by a teammate? Use the temporary password from your invitation; you will choose a new one next.</p>
     </form>
-  </main>;
+  </LoginLayout>;
 
-  if (account?.must_change_password) return <main className="login-page"><form className="login-card" onSubmit={(event) => void changePassword(event)}><p className="eyebrow">ACCOUNT SETUP</p><h1>Change your temporary password.</h1><p>{account.email} · {account.display_name}</p><label htmlFor="temporary-password">Temporary password</label><input id="temporary-password" type="password" autoComplete="current-password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} required /><label htmlFor="new-password">New password</label><input id="new-password" type="password" autoComplete="new-password" minLength={12} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required /><button className="button primary" disabled={loggingIn}>{loggingIn ? "Saving…" : "Set new password"}</button>{loginError ? <p className="form-error" role="alert">{loginError}</p> : null}</form></main>;
+  if (account?.must_change_password) return <LoginLayout>
+    <form className="login-card" onSubmit={(event) => void changePassword(event)}>
+      <div><p className="eyebrow">Account setup</p><h1>Choose your password</h1><p className="intro">{account.email} · {account.display_name}</p></div>
+      <div className="field"><label htmlFor="temporary-password">Temporary password</label><input id="temporary-password" type="password" autoComplete="current-password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} required /></div>
+      <div className="field"><label htmlFor="new-password">New password</label><input id="new-password" type="password" autoComplete="new-password" minLength={12} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required /><p className="field-hint">At least 12 characters.</p></div>
+      <button className="button primary lg block" disabled={loggingIn}>{loggingIn ? "Saving…" : "Set new password"}</button>
+      {loginError ? <p className="form-error" role="alert">{loginError}</p> : null}
+    </form>
+  </LoginLayout>;
 
+  const liveCount = meetings.filter((meeting) => meeting.status === "live" || meeting.status === "joining" || meeting.status === "waiting_room").length;
   return (
     <div className="app-frame">
       <a className="skip-link" href="#main-content">Skip to content</a>
-      <SidebarPanel view={view} onNavigate={setView} workspaces={workspaces} account={account} onSignOut={signOut} onSwitchWorkspace={switchWorkspace} className="desktop-sidebar" />
+      <SidebarPanel view={view} onNavigate={setView} workspaces={workspaces} account={account} liveCount={liveCount} onSignOut={signOut} onSwitchWorkspace={switchWorkspace} className="desktop-sidebar" />
       <div className="workspace-main">
-      <header className="topbar">
-        <button className="mobile-nav-trigger" aria-label="Open navigation" onClick={() => setMobileNavOpen(true)}><Menu /></button>
-        <div className="topbar-context"><span className="topbar-kicker">{workspace?.display_name ?? "Meetings AI"}</span><span className="topbar-location">{view === "providers" ? "AI providers" : view === "workspace" ? "Organization & people" : view === "knowledge" ? "AI knowledge" : view === "observability" ? "Observability" : view === "profile" ? "My profile" : view === "meeting" ? "Meeting details" : view === "meetings" ? "Meetings" : view === "calendar" ? "Calendar" : view === "prep" ? "Meeting prep" : "Overview"}</span></div>
-        <span className="topbar-environment"><span aria-hidden="true" /> Local environment</span>
-      </header>
-      <main id="main-content">
-        {view === "dashboard" ? <Dashboard meetings={meetings} onNewMeeting={() => { setCalendarSelection(null); setDialogOpen(true); }} onOpenCalendar={() => setView("calendar")} onOpenProviders={() => setView("providers")} onOpenMeeting={openMeeting} /> : null}
-        {view === "meetings" && identity ? <MeetingsLibrary key={identity} identity={identity} meetings={meetings} onOpen={openMeeting} onNew={() => { setCalendarSelection(null); setDialogOpen(true); }} onCalendar={() => setView("calendar")} /> : null}
-        {view === "calendar" && account && account.role !== "viewer" ? <CalendarWorkspace key={identity} calendarIdentity={`${account.organization_id}:${account.user_id}`} preferredConnectionId={preferredCalendarConnectionId} onPreferredConnectionApplied={() => setPreferredCalendarConnectionId(null)} canSchedule={account.role === "owner" || account.role === "admin"} onChoose={(selection) => { setCalendarSelection(selection); setDialogOpen(true); }} onPrepare={(event) => { setPrepEvent(event); setView("prep"); }} /> : null}
-        {view === "prep" && account && account.role !== "viewer" && identity ? <MeetingPrepWorkspace key={identity} identity={identity} initialEvent={prepEvent} onOpenCalendar={() => setView("calendar")} onOpenOrganization={() => setView("workspace")} /> : null}
-        {view === "providers" ? providersLoadError ? <section className="page" role="alert"><h1>AI providers are unavailable</h1><p className="intro">{providersLoadError}</p><button className="button secondary" onClick={() => void meetingsService.listProviderProfiles().then((nextProfiles) => { setProfiles(nextProfiles); setProvidersLoadError(null); }).catch(() => undefined)}>Retry</button></section> : identity ? <ProviderSettings key={identity} identity={identity} profiles={profiles} onProfilesChange={setProfiles} /> : null : null}
-        {view === "knowledge" && identity ? <KnowledgeScreen key={identity} identity={identity} account={account} onOpenSource={openMeeting} /> : null}
-        {view === "observability" && (account?.role === "owner" || account?.role === "admin") ? <ObservabilityScreen /> : null}
-        {view === "workspace" ? workspace
-          ? <WorkspaceSettings workspace={workspace} workspaces={workspaces} account={account} onWorkspaceChange={setWorkspace} onSwitchWorkspace={switchWorkspace} onCreateWorkspace={createWorkspace} />
-          : <section className="page" role="status">{workspaceLoading ? "Loading workspace…" : "Workspace profile is unavailable. Refresh the page to try again."}</section>
-          : null}
-        {view === "profile" && account ? <ProfileSettings account={account} workspace={workspace} onAccountChange={setAccount} /> : null}
-        {view === "meeting" && activeMeetingId ? account?.role === "owner" || account?.role === "admin"
-          ? <MeetingDetailScreen meetingId={activeMeetingId} focusSegmentId={focusSegmentId} onBack={() => setView(meetingReturnView)} onMeetingChange={updateMeeting} onDeleted={(id) => { setMeetings((current) => current.filter((meeting) => meeting.id !== id)); setActiveMeetingId(null); setView("dashboard"); }} />
-          : <KnowledgeEvidenceScreen meetingId={activeMeetingId} focusSegmentId={focusSegmentId} onBack={() => setView("knowledge")} /> : null}
-      </main>
+        <header className="topbar">
+          <button className="icon-button mobile-nav-trigger" aria-label="Open navigation" onClick={() => setMobileNavOpen(true)}><Menu /></button>
+          <nav className="topbar-context" aria-label="Breadcrumb"><span className="topbar-kicker">{workspace?.display_name ?? "Meetings AI"}</span><span className="topbar-sep" aria-hidden="true">/</span><span className="topbar-location" aria-current="page">{viewTitle[view]}</span></nav>
+          <div className="topbar-actions">{liveCount && view !== "meetings" ? <button type="button" className="status live" onClick={() => setView("meetings")}>{liveCount} live</button> : null}</div>
+        </header>
+        <main id="main-content">
+          {view === "dashboard" ? <Dashboard meetings={meetings} account={account} onNewMeeting={() => { setCalendarSelection(null); setDialogOpen(true); }} onOpenCalendar={() => setView("calendar")} onOpenProviders={() => setView("providers")} onOpenKnowledge={() => setView("knowledge")} onOpenMeetings={() => setView("meetings")} onOpenMeeting={openMeeting} /> : null}
+          {view === "meetings" && identity ? <MeetingsLibrary key={identity} identity={identity} meetings={meetings} onOpen={openMeeting} onNew={() => { setCalendarSelection(null); setDialogOpen(true); }} onCalendar={() => setView("calendar")} /> : null}
+          {view === "calendar" && account && account.role !== "viewer" ? <CalendarWorkspace key={identity} calendarIdentity={`${account.organization_id}:${account.user_id}`} preferredConnectionId={preferredCalendarConnectionId} onPreferredConnectionApplied={() => setPreferredCalendarConnectionId(null)} canSchedule={account.role === "owner" || account.role === "admin"} onChoose={(selection) => { setCalendarSelection(selection); setDialogOpen(true); }} onPrepare={(event) => { setPrepEvent(event); setView("prep"); }} onNewMeeting={account.role === "owner" || account.role === "admin" ? () => { setCalendarSelection(null); setDialogOpen(true); } : undefined} /> : null}
+          {view === "prep" && account && account.role !== "viewer" && identity ? <MeetingPrepWorkspace key={identity} identity={identity} initialEvent={prepEvent} onOpenCalendar={() => setView("calendar")} onOpenOrganization={() => setView("workspace")} /> : null}
+          {view === "providers" ? providersLoadError ? <section className="page narrow"><EmptyState icon={<ProvidersIcon />} title="AI providers are unavailable" action={<button className="button secondary" onClick={() => void meetingsService.listProviderProfiles().then((nextProfiles) => { setProfiles(nextProfiles); setProvidersLoadError(null); }).catch(() => undefined)}>Retry</button>}><span role="alert">{providersLoadError}</span></EmptyState></section> : identity ? <ProviderSettings key={identity} identity={identity} profiles={profiles} onProfilesChange={setProfiles} /> : null : null}
+          {view === "knowledge" && identity ? <KnowledgeScreen key={identity} identity={identity} account={account} onOpenSource={openMeeting} /> : null}
+          {view === "observability" && (account?.role === "owner" || account?.role === "admin") ? <ObservabilityScreen /> : null}
+          {view === "workspace" ? workspace
+            ? <WorkspaceSettings workspace={workspace} workspaces={workspaces} account={account} onWorkspaceChange={setWorkspace} onSwitchWorkspace={switchWorkspace} onCreateWorkspace={createWorkspace} />
+            : <section className="page narrow">{workspaceLoading ? <LoadingRow>Loading workspace…</LoadingRow> : <EmptyState icon={<Building2 />} title="Workspace profile is unavailable">Refresh the page to try again.</EmptyState>}</section>
+            : null}
+          {view === "profile" && account ? <ProfileSettings account={account} workspace={workspace} onAccountChange={setAccount} /> : null}
+          {view === "meeting" && activeMeetingId ? account?.role === "owner" || account?.role === "admin"
+            ? <MeetingDetailScreen meetingId={activeMeetingId} focusSegmentId={focusSegmentId} backLabel={backLabel[meetingReturnView] ?? "Back"} onBack={() => setView(meetingReturnView)} onMeetingChange={updateMeeting} onDeleted={(id) => { setMeetings((current) => current.filter((meeting) => meeting.id !== id)); setActiveMeetingId(null); setView("dashboard"); }} />
+            : <KnowledgeEvidenceScreen meetingId={activeMeetingId} focusSegmentId={focusSegmentId} onBack={() => setView("knowledge")} /> : null}
+        </main>
       </div>
       <Dialog.Root open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
         <Dialog.Portal>
           <Dialog.Backdrop className="mobile-nav-backdrop" />
           <Dialog.Popup className="mobile-nav-sheet">
             <Dialog.Title className="sr-only">Workspace navigation</Dialog.Title>
-            <Dialog.Close className="mobile-nav-close" aria-label="Close navigation"><X /></Dialog.Close>
-            <SidebarPanel view={view} onNavigate={(next) => { setView(next); setMobileNavOpen(false); }} workspaces={workspaces} account={account} onSignOut={signOut} onSwitchWorkspace={switchWorkspace} className="drawer-sidebar" />
+            <Dialog.Close className="icon-button mobile-nav-close" aria-label="Close navigation"><X /></Dialog.Close>
+            <SidebarPanel view={view} onNavigate={(next) => { setView(next); setMobileNavOpen(false); }} workspaces={workspaces} account={account} liveCount={liveCount} onSignOut={signOut} onSwitchWorkspace={switchWorkspace} className="drawer-sidebar" />
           </Dialog.Popup>
         </Dialog.Portal>
       </Dialog.Root>
@@ -234,42 +250,85 @@ export function AppShell() {
   );
 }
 
-function SidebarPanel({ view, onNavigate, workspaces, account, onSignOut, onSwitchWorkspace, className }: { view: View; onNavigate(view: View): void; workspaces: WorkspaceOption[]; account: CurrentAccount | null; onSignOut(): void; onSwitchWorkspace(id: string): Promise<void>; className: string }) {
+const viewTitle: Record<View, string> = {
+  dashboard: "Overview", meetings: "Meetings", calendar: "Calendar", prep: "Meeting prep", providers: "AI providers",
+  meeting: "Meeting details", workspace: "Organization & people", knowledge: "AI knowledge", observability: "Observability", profile: "My profile",
+};
+const backLabel: Partial<Record<View, string>> = { dashboard: "Overview", meetings: "All meetings", calendar: "Calendar", knowledge: "AI knowledge" };
+
+function LoginLayout({ children }: { children: ReactNode }) {
+  return <main className="login-page">
+    <div className="login-panel">
+      <div className="login-panel-top"><span className="cluster"><span className="brand-mark" aria-hidden="true"><Image src="/icon.svg" width={26} height={26} alt="" /></span><span className="brand-word">Meetings <b>AI</b></span></span><ThemeSwitcher /></div>
+      {children}
+      <p className="login-footnote">Recordings start only after the host is told: “Meetings AI has joined and will record and transcribe this conversation.”</p>
+    </div>
+    <aside className="login-showcase" aria-label="What Meetings AI does">
+      <h2>From conversation to clarity, without losing the evidence.</h2>
+      <p>An assistant that joins your calls, drafts reviewed minutes, and turns every approved meeting into searchable team knowledge.</p>
+      <div className="login-steps">
+        <div className="login-step"><span className="step-icon"><Mic aria-hidden="true" /></span><span><b>Capture</b><small>Send the assistant to Meet, Zoom or Teams for a timestamped, speaker-attributed transcript.</small></span></div>
+        <div className="login-step"><span className="step-icon"><FileCheck2 aria-hidden="true" /></span><span><b>Review & share</b><small>Edit the drafted minutes, confirm owners and send an approved recap.</small></span></div>
+        <div className="login-step"><span className="step-icon"><Sparkles aria-hidden="true" /></span><span><b>Ask your meetings</b><small>Chat across a knowledge base and follow every answer back to its source.</small></span></div>
+      </div>
+    </aside>
+  </main>;
+}
+
+function SidebarPanel({ view, onNavigate, workspaces, account, liveCount, onSignOut, onSwitchWorkspace, className }: { view: View; onNavigate(view: View): void; workspaces: WorkspaceOption[]; account: CurrentAccount | null; liveCount: number; onSignOut(): void; onSwitchWorkspace(id: string): Promise<void>; className: string }) {
   const canManageMeetings = account?.role === "owner" || account?.role === "admin";
   const canUseCalendar = Boolean(account && account.role !== "viewer");
   const [menuOpen, setMenuOpen] = useState(false);
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onPointerDown = (event: PointerEvent) => { if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false); };
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") setMenuOpen(false); };
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => { document.removeEventListener("pointerdown", onPointerDown); document.removeEventListener("keydown", onKeyDown); };
-  }, [menuOpen]);
   const navigate = (next: View) => { setMenuOpen(false); onNavigate(next); };
   const changeWorkspace = async (id: string) => {
     setWorkspaceBusy(true); setWorkspaceError(null);
     try { await onSwitchWorkspace(id); }
     catch (error) { setWorkspaceError(error instanceof Error ? error.message : "Could not switch workspace."); setWorkspaceBusy(false); }
   };
+  const item = (target: View, label: string, icon: ReactNode, active = view === target, extra?: ReactNode) => <button aria-current={active ? "page" : undefined} className={active ? "nav-link active" : "nav-link"} onClick={() => onNavigate(target)}>{icon}{label}{extra}</button>;
   return <aside className={`workspace-sidebar ${className}`} aria-label="Workspace navigation">
-    <button className="brand" onClick={() => navigate("dashboard")} aria-label="Meetings AI home"><span className="brand-mark" aria-hidden="true"><Image src="/icon.svg" width={28} height={28} alt="" /></span><span>Meetings <b>AI</b></span></button>
-    <p className="sidebar-label">YOUR WORK</p>
+    <button className="sidebar-brand" onClick={() => navigate(canManageMeetings ? "dashboard" : "knowledge")} aria-label="Meetings AI home"><span className="brand-mark" aria-hidden="true"><Image src="/icon.svg" width={26} height={26} alt="" /></span><span className="brand-word">Meetings <b>AI</b></span></button>
     <nav aria-label="Main navigation">
-      {canManageMeetings ? <button aria-current={view === "dashboard" ? "page" : undefined} className={view === "dashboard" ? "nav-link active" : "nav-link"} onClick={() => onNavigate("dashboard")}><LayoutDashboard /> Overview</button> : null}
-      {canManageMeetings ? <button aria-current={view === "meetings" || view === "meeting" ? "page" : undefined} className={view === "meetings" || view === "meeting" ? "nav-link active" : "nav-link"} onClick={() => onNavigate("meetings")}><Video /> Meetings</button> : null}
-      {canUseCalendar ? <button aria-current={view === "calendar" ? "page" : undefined} className={view === "calendar" ? "nav-link active" : "nav-link"} onClick={() => onNavigate("calendar")}><CalendarDays /> Calendar</button> : null}
-      {canManageMeetings ? <button aria-current={view === "providers" ? "page" : undefined} className={view === "providers" ? "nav-link active" : "nav-link"} onClick={() => onNavigate("providers")}><ProvidersIcon /> AI providers</button> : null}
-      <button aria-current={view === "knowledge" ? "page" : undefined} className={view === "knowledge" ? "nav-link active" : "nav-link"} onClick={() => onNavigate("knowledge")}><BookOpenText /> AI knowledge</button>
-      {canManageMeetings ? <button aria-current={view === "observability" ? "page" : undefined} className={view === "observability" ? "nav-link active" : "nav-link"} onClick={() => onNavigate("observability")}><Activity /> Observability</button> : null}
-      {canUseCalendar ? <div className="sidebar-prep-section"><p className="sidebar-label">PREPARE</p><button aria-current={view === "prep" ? "page" : undefined} className={view === "prep" ? "nav-link active" : "nav-link"} onClick={() => onNavigate("prep")}><Sparkles /> Meeting prep</button></div> : null}
+      <div className="sidebar-group">
+        {canManageMeetings ? item("dashboard", "Overview", <House />) : null}
+        {canManageMeetings ? item("meetings", "Meetings", <Video />, view === "meetings" || view === "meeting", liveCount ? <span className="nav-live" aria-hidden="true" /> : null) : null}
+        {canUseCalendar ? item("calendar", "Calendar", <CalendarDays />) : null}
+      </div>
+      <div className="sidebar-group">
+        <p className="sidebar-label">Intelligence</p>
+        {item("knowledge", "AI knowledge", <Sparkles />)}
+        {canUseCalendar ? item("prep", "Meeting prep", <NotebookPen />) : null}
+      </div>
+      {canManageMeetings ? <div className="sidebar-group">
+        <p className="sidebar-label">Administration</p>
+        {item("providers", "AI providers", <ProvidersIcon />)}
+        {item("observability", "Observability", <Activity />)}
+      </div> : null}
     </nav>
-    <div className="sidebar-foot" ref={menuRef}>
-      {menuOpen ? <div className="profile-popover" aria-label="Account and workspace menu"><div className="profile-popover-heading"><b>Signed in as {account?.display_name ?? "Account"}</b><small>{account?.email ?? "Local account"}</small></div><div className="profile-workspaces"><span className="profile-workspaces-label">WORKSPACES</span>{workspaces.map((item) => <button key={item.id} type="button" className={item.id === account?.organization_id ? "profile-workspace current" : "profile-workspace"} disabled={workspaceBusy || item.id === account?.organization_id} onClick={() => void changeWorkspace(item.id)}><Building2 size={15} /><span>{item.display_name}</span><small>{item.id === account?.organization_id ? "Current" : item.role}</small></button>)}{workspaceError ? <p role="alert" className="form-error">{workspaceError}</p> : null}</div><button onClick={() => navigate("workspace")}><Building2 /> Organization & people</button><button onClick={() => navigate("profile")}><UserRound /> My profile & password</button><div className="profile-popover-theme"><span>Appearance</span><ThemeSwitcher /></div><button className="profile-signout" onClick={() => { setMenuOpen(false); onSignOut(); }}><LogOut /> Sign out</button></div> : null}
-      <button className="profile-trigger" aria-expanded={menuOpen} aria-haspopup="menu" onClick={() => setMenuOpen((value) => !value)}><span className="profile-trigger-avatar" aria-hidden="true">{account?.display_name[0]?.toUpperCase() ?? "U"}</span><span className="profile-trigger-copy"><b>{account?.display_name ?? "Account"}</b><small>{account?.email ?? account?.role ?? "User"}</small></span><ChevronUp className={menuOpen ? "profile-chevron open" : "profile-chevron"} /></button>
+    <div className="sidebar-spacer" />
+    <div className="sidebar-foot">
+      <Popover.Root open={menuOpen} onOpenChange={setMenuOpen}>
+        <Popover.Trigger className="profile-trigger"><span className="avatar" aria-hidden="true">{initials(account?.display_name)}</span><span className="profile-trigger-copy"><span className="profile-trigger-name">{account?.display_name ?? "Account"}</span><span className="profile-trigger-meta">{account?.email ?? account?.role ?? "User"}</span></span><ChevronsUpDown aria-hidden="true" /></Popover.Trigger>
+        <Popover.Portal>
+          <Popover.Positioner side="top" align="start" sideOffset={6} className="ui-select-positioner">
+            <Popover.Popup className="popover profile-popover" aria-label="Account and workspace menu">
+              <div className="profile-popover-heading"><span className="avatar lg" aria-hidden="true">{initials(account?.display_name)}</span><span><b>{account?.display_name ?? "Account"}</b><small>{account?.email ?? "Local account"}</small></span></div>
+              <div className="menu-separator" />
+              <p className="menu-label">Workspaces</p>
+              {workspaces.map((option) => <button key={option.id} type="button" className={option.id === account?.organization_id ? "menu-item profile-workspace current" : "menu-item profile-workspace"} disabled={workspaceBusy || option.id === account?.organization_id} onClick={() => void changeWorkspace(option.id)}><Building2 /><span>{option.display_name}</span>{option.id === account?.organization_id ? <Check className="check" aria-label="Current" /> : <small>{option.role}</small>}</button>)}
+              {workspaceError ? <p role="alert" className="form-error">{workspaceError}</p> : null}
+              <div className="menu-separator" />
+              <button type="button" className="menu-item" onClick={() => navigate("workspace")}><Users /> Organization & people</button>
+              <button type="button" className="menu-item" onClick={() => navigate("profile")}><UserRound /> My profile & password</button>
+              <div className="profile-popover-theme"><span>Appearance</span><ThemeSwitcher /></div>
+              <div className="menu-separator" />
+              <button type="button" className="menu-item" onClick={() => { setMenuOpen(false); onSignOut(); }}><LogOut /> Sign out</button>
+            </Popover.Popup>
+          </Popover.Positioner>
+        </Popover.Portal>
+      </Popover.Root>
     </div>
   </aside>;
 }

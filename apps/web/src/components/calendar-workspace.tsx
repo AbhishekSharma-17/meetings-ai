@@ -1,16 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight, CheckCircle2, Plus, RefreshCw, Sparkles } from "lucide-react";
+import { Popover } from "@base-ui/react/popover";
+import { Tabs } from "@base-ui/react/tabs";
+import { CalendarDays, CalendarRange, ChevronLeft, ChevronRight, Plug, Plus, RefreshCw } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
 import type { CachedCalendarEvent, CalendarConnection, CalendarSchedule, CalendarSnapshot } from "@/lib/types";
-import { CalendarAliasForm, CalendarBrandIcon, type CalendarSelection } from "./calendar-import-dialog";
+import type { CalendarSelection } from "./calendar-import-dialog";
+import { CalendarIntegrations } from "./calendar-integrations";
+import { DayAgenda, EventDetail, MonthGrid, dayKey, eventDay } from "./calendar-month";
+import { browserTimeZone, calendarProviderNames } from "./calendar-providers";
+import { Alert } from "./ui/feedback";
+import { PageHeader } from "./ui/page-header";
 import { UiSelect } from "./ui-select";
 
-const providerNames: Record<CalendarConnection["provider"], string> = {
-  googlecalendar: "Google Calendar", outlook: "Outlook Calendar", calendly: "Calendly", zoom: "Zoom",
-};
 const AUTO_REFRESH_AFTER_MS = 5 * 60_000;
+const shortDate: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
 
 type CalendarPreferences = {
   startDate: string; endDate: string; selectedDay: string; month: string;
@@ -51,25 +56,21 @@ function coveredBySync(startDate: string, endDate: string, timezone: string, ran
   return startDate >= first && endDate <= last;
 }
 
-function dayKey(value: Date): string {
-  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
-}
-
-function eventDay(value: string, timezone: string): string {
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(value));
-  const get = (type: string) => parts.find((item) => item.type === type)?.value ?? "";
-  return `${get("year")}-${get("month")}-${get("day")}`;
-}
-
 function currentMonth(): Date { const now = new Date(); return new Date(now.getFullYear(), now.getMonth(), 1); }
 
-export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onPreferredConnectionApplied, canSchedule = true, onChoose, onPrepare }: {
+function formatDay(key: string): string {
+  return validDate(key) ? new Date(`${key}T12:00:00`).toLocaleDateString(undefined, shortDate) : "—";
+}
+
+export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onPreferredConnectionApplied, canSchedule = true, onChoose, onPrepare, onNewMeeting }: {
   calendarIdentity: string;
   preferredConnectionId?: string | null;
   onPreferredConnectionApplied?(): void;
   canSchedule?: boolean;
   onChoose(selection: CalendarSelection): void;
   onPrepare(event: CachedCalendarEvent): void;
+  /** Optional: shows a "New meeting" action in the header for people who can schedule. */
+  onNewMeeting?(): void;
 }) {
   const storageKey = `meetings-ai:calendar-view:${calendarIdentity}`;
   const [initial] = useState(() => initialPreferences(storageKey));
@@ -78,10 +79,7 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
   const [startDate, setStartDate] = useState(initial.startDate);
   const [endDate, setEndDate] = useState(initial.endDate);
   const [selectedDay, setSelectedDay] = useState(initial.selectedDay);
-  const [timezone] = useState(() => {
-    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-    return zone === "Asia/Calcutta" ? "Asia/Kolkata" : zone;
-  });
+  const [timezone] = useState(browserTimeZone);
   const [connections, setConnections] = useState<CalendarConnection[]>([]);
   const [schedules, setSchedules] = useState<CalendarSchedule[]>([]);
   const [snapshot, setSnapshot] = useState<CalendarSnapshot>({ events: [], syncs: [] });
@@ -89,10 +87,6 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
   const [selectedEvent, setSelectedEvent] = useState<CachedCalendarEvent | null>(null);
   const restoredEventId = useRef(initial.selectedEventId);
   const [loaded, setLoaded] = useState(false);
-  const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null);
-  const [connectProvider, setConnectProvider] = useState<CalendarConnection["provider"] | null>(null);
-  const [editTarget, setEditTarget] = useState<string | null>(null);
-  const [editAlias, setEditAlias] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const autoRefreshKey = useRef<string | null>(null);
@@ -160,18 +154,37 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
 
   const active = connections.filter((item) => item.status === "ACTIVE");
   const visibleEvents = useMemo(() => snapshot.events.filter((item) => accountFilter === "all" || item.connection_id === accountFilter), [snapshot.events, accountFilter]);
-  const dayEvents = visibleEvents.filter((item) => eventDay(item.starts_at, timezone) === selectedDay);
+  const eventsByDay = useMemo(() => {
+    const groups = new Map<string, CachedCalendarEvent[]>();
+    for (const event of visibleEvents) {
+      const key = eventDay(event.starts_at, timezone);
+      groups.set(key, [...(groups.get(key) ?? []), event]);
+    }
+    return groups;
+  }, [visibleEvents, timezone]);
+  const dayEvents = eventsByDay.get(selectedDay) ?? [];
   const monthDays = useMemo(() => {
     const first = new Date(month.getFullYear(), month.getMonth(), 1);
     const gridStart = new Date(first); gridStart.setDate(1 - first.getDay());
     return Array.from({ length: 42 }, (_, index) => new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + index));
   }, [month]);
+  const lastSynced = snapshot.syncs
+    .filter((item) => accountFilter === "all" || item.connection_id === accountFilter)
+    .reduce<string | null>((latest, item) => !latest || item.last_synced_at > latest ? item.last_synced_at : latest, null);
+  const selectedScheduled = selectedEvent ? schedules.some((item) => item.connection_id === selectedEvent.connection_id && item.event_id === selectedEvent.event_id && new Date(item.starts_at).getTime() === new Date(selectedEvent.starts_at).getTime()) : false;
 
   function changeMonth(offset: number) {
     const next = new Date(month.getFullYear(), month.getMonth() + offset, 1);
     setMonth(next); setStartDate(dayKey(next));
     setEndDate(dayKey(new Date(next.getFullYear(), next.getMonth() + 1, 0)));
     setSelectedDay(dayKey(next)); setSelectedEvent(null);
+  }
+
+  function goToToday() {
+    const next = currentMonth();
+    setMonth(next); setStartDate(dayKey(next));
+    setEndDate(dayKey(new Date(next.getFullYear(), next.getMonth() + 1, 0)));
+    setSelectedDay(dayKey(new Date())); setSelectedEvent(null);
   }
 
   async function sync() {
@@ -191,47 +204,102 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
     catch (cause) { setError(cause instanceof Error ? cause.message : "Could not connect this account."); setBusy(false); }
   }
 
-  async function rename(connectionId: string) {
+  async function rename(connectionId: string, alias: string): Promise<boolean> {
     setBusy(true); setError(null);
     try {
-      const updated = await meetingsService.renameCalendarConnection(connectionId, editAlias);
+      const updated = await meetingsService.renameCalendarConnection(connectionId, alias);
       setConnections((current) => current.map((item) => item.id === connectionId ? updated : item));
-      setEditTarget(null);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not rename this account."); }
+      return true;
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not rename this account."); return false; }
     finally { setBusy(false); }
   }
 
-  async function disconnect(connectionId: string) {
+  async function disconnect(connectionId: string): Promise<boolean> {
     setBusy(true); setError(null);
     try {
       await meetingsService.disconnectCalendar(connectionId);
       setConnections(await meetingsService.listCalendarConnections());
       setAccountFilter((current) => current === connectionId ? "all" : current);
-      setDisconnectTarget(null);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not disconnect this account."); }
+      return true;
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not disconnect this account."); return false; }
     finally { setBusy(false); }
   }
 
-  const calendarSources: CalendarConnection["provider"][] = ["googlecalendar", "outlook", "calendly", "zoom"];
-  return <section className="page calendar-workspace" aria-labelledby="calendar-workspace-title">
-    <div className="calendar-workspace-heading"><div><p className="eyebrow">YOUR SCHEDULE</p><h1 id="calendar-workspace-title">Calendar</h1><p className="intro">Your last synced meetings stay saved across reloads. Older snapshots refresh automatically; use Sync now for an immediate update.</p></div><button type="button" className="button secondary" disabled={busy || !active.length || !rangeValid} onClick={() => void sync()}><RefreshCw size={16} /> {busy ? "Syncing…" : "Sync now"}</button></div>
-    <div className="calendar-tabs" role="tablist" aria-label="Calendar sections"><button type="button" role="tab" aria-selected={tab === "calendar"} onClick={() => setTab("calendar")}><CalendarDays size={16} /> Calendar</button><button type="button" role="tab" aria-selected={tab === "integrations"} onClick={() => setTab("integrations")}>Integrations <span>{active.length}</span></button></div>
-    {error ? <p className="form-error" role="alert">{error}</p> : null}
-    {tab === "integrations" ? <div className="calendar-integrations"><div className="section-heading"><div><h2>Connected meeting sources</h2><p>Connect multiple accounts. Each event keeps its original source and account identity.</p></div></div><div className="calendar-provider-grid">{calendarSources.map((provider) => {
-      const count = active.filter((item) => item.provider === provider).length;
-      return <div key={provider} className={count ? "calendar-provider-card connected" : "calendar-provider-card"}><CalendarBrandIcon provider={provider} /><div><b>{providerNames[provider]}</b><small>{count ? `${count} connected account${count === 1 ? "" : "s"}` : provider === "outlook" ? "Includes Microsoft Teams calendar meetings" : "Not connected"}</small></div>{count ? <button type="button" className="calendar-card-add" aria-label={`Add another ${providerNames[provider]} account`} onClick={() => setConnectProvider(provider)}><Plus size={16} /></button> : null}<div className="calendar-provider-actions">{count ? <span className="calendar-connection-badge"><CheckCircle2 /> Connected</span> : <button type="button" className="button secondary" onClick={() => setConnectProvider(provider)}>Connect account</button>}</div></div>;
-    })}</div>
-    {connectProvider ? <CalendarAliasForm key={connectProvider} provider={connectProvider} busy={busy} onCancel={() => setConnectProvider(null)} onSubmit={(alias) => void connect(connectProvider, alias)} /> : null}
-    <div className="calendar-account-list"><h3>Accounts</h3>{connections.length ? connections.map((item) => <div key={item.id} className="calendar-account-row"><CalendarBrandIcon provider={item.provider} /><span><b>{item.label}</b><small>{providerNames[item.provider]}{item.identity && item.identity !== item.label ? ` · ${item.identity}` : ""} · {item.status === "ACTIVE" ? "Connected" : item.status}</small></span>{editTarget === item.id ? <form className="calendar-rename-form" onSubmit={(event) => { event.preventDefault(); void rename(item.id); }}><label htmlFor={`calendar-alias-${item.id}`}>Connection name</label><input id={`calendar-alias-${item.id}`} value={editAlias} maxLength={80} onChange={(event) => setEditAlias(event.target.value)} autoFocus /><button type="button" className="button secondary" disabled={busy} onClick={() => setEditTarget(null)}>Cancel</button><button type="submit" className="button primary" disabled={busy}>{busy ? "Saving…" : "Save"}</button></form> : disconnectTarget === item.id ? <div className="calendar-disconnect-confirm"><small>Disconnect this account? Saved meetings and scheduled assistants remain.</small><button type="button" className="button secondary" disabled={busy} onClick={() => setDisconnectTarget(null)}>Cancel</button><button type="button" className="button danger" disabled={busy} onClick={() => void disconnect(item.id)}>{busy ? "Disconnecting…" : "Confirm"}</button></div> : <><small>{snapshot.syncs.find((sync) => sync.connection_id === item.id) ? `Last sync ${new Date(snapshot.syncs.find((sync) => sync.connection_id === item.id)!.last_synced_at).toLocaleString()}` : "Not synced yet"}</small><button type="button" className="calendar-disconnect-button" disabled={busy} onClick={() => { setEditAlias(item.identity === item.label ? "" : item.label); setEditTarget(item.id); }}>Rename</button><button type="button" className="calendar-disconnect-button" disabled={busy} onClick={() => setDisconnectTarget(item.id)}>Disconnect</button></>}</div>) : <p className="calendar-note">No accounts yet. Connect a source above to import meetings.</p>}</div><p className="calendar-note">Microsoft Teams meetings already appear from Outlook Calendar when the event contains a Teams join link. A separate Teams connection is not required for those events.</p></div> : null}
-    {tab === "calendar" ? <><div className="calendar-toolbar"><div className="calendar-month-nav"><button type="button" aria-label="Previous month" onClick={() => changeMonth(-1)}><ChevronLeft /></button><h2>{month.toLocaleString(undefined, { month: "long", year: "numeric" })}</h2><button type="button" aria-label="Next month" onClick={() => changeMonth(1)}><ChevronRight /></button></div><UiSelect id="calendar-account-filter" label="Account" value={accountFilter} onChange={setAccountFilter} options={[{ value: "all", label: "All connected accounts" }, ...active.map((item) => ({ value: item.id, label: `${providerNames[item.provider]} · ${item.label}` }))]} disabled={!active.length} /></div>
-      <div className="calendar-range"><div><label htmlFor="calendar-from">From</label><input id="calendar-from" type="date" value={startDate} onChange={(event) => { setStartDate(event.target.value); setSelectedEvent(null); }} /></div><div><label htmlFor="calendar-to">Through</label><input id="calendar-to" type="date" value={endDate} onChange={(event) => { setEndDate(event.target.value); setSelectedEvent(null); }} /></div><p>Choose up to 90 days, then sync any or all accounts. Times shown in {timezone}.</p></div>
-      {!rangeValid ? <p className="form-error" role="alert">Choose a valid date range of 1 to 90 days.</p> : null}
-      <div className="calendar-month-grid" role="grid" aria-label="Month view"><div className="calendar-weekdays">{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => <b key={day}>{day}</b>)}</div><div className="calendar-days">{monthDays.map((day) => {
-        const key = dayKey(day); const matches = visibleEvents.filter((event) => eventDay(event.starts_at, timezone) === key);
-        return <button type="button" key={key} className={["calendar-day", day.getMonth() !== month.getMonth() ? "outside" : "", key === selectedDay ? "selected" : ""].join(" ")} aria-label={`${day.toDateString()}, ${matches.length} meetings`} onClick={() => { setSelectedDay(key); setSelectedEvent(null); }}><span>{day.getDate()}</span><small>{matches.slice(0, 2).map((event) => <i key={event.id} className={`source-${event.provider}`}>{event.title}</i>)}{matches.length > 2 ? `+${matches.length - 2} more` : null}</small></button>;
-      })}</div></div>
-      <div className="calendar-content-grid"><section className="calendar-agenda"><div className="section-heading"><div><h2>Meetings on {new Date(`${selectedDay}T12:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" })}</h2><p>{dayEvents.length} saved event{dayEvents.length === 1 ? "" : "s"} · {visibleEvents.length} in the selected range</p></div></div>{dayEvents.length ? dayEvents.map((event) => <button type="button" key={event.id} className={selectedEvent?.id === event.id ? "calendar-agenda-event selected" : "calendar-agenda-event"} onClick={() => setSelectedEvent(event)}><span className={`calendar-source-dot source-${event.provider}`} /><span><b>{event.title}</b><small>{new Date(event.starts_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} · {providerNames[event.provider]} · {event.platform.replaceAll("_", " ")}</small></span><ChevronRight size={16} /></button>) : <div className="empty-state"><b>No saved meetings on this day.</b><p>{active.length ? "Sync your accounts or choose another date." : "Connect an account in Integrations, then sync."}</p></div>}{visibleEvents.length && !dayEvents.length ? <div className="calendar-other-events"><h3>Other events in range</h3>{visibleEvents.slice(0, 10).map((event) => <button key={event.id} type="button" onClick={() => { setSelectedDay(eventDay(event.starts_at, timezone)); setSelectedEvent(event); }}>{new Date(event.starts_at).toLocaleDateString()} · {event.title} · {providerNames[event.provider]}</button>)}</div> : null}</section>
-      <aside className="calendar-event-detail" aria-label="Meeting details">{selectedEvent ? <><div className="calendar-event-source"><CalendarBrandIcon provider={selectedEvent.provider} /><span>{providerNames[selectedEvent.provider]} · {selectedEvent.platform.replaceAll("_", " ")}</span></div><h2>{selectedEvent.title}</h2><p>{new Date(selectedEvent.starts_at).toLocaleString()} – {new Date(selectedEvent.ends_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</p>{selectedEvent.organizer ? <p><b>Organizer</b> {selectedEvent.organizer}</p> : null}{selectedEvent.agenda ? <div className="calendar-event-agenda"><b>Agenda</b><p>{selectedEvent.agenda}</p></div> : null}<div className="calendar-invitees"><b>Invited people · {selectedEvent.invitees?.length ?? 0}</b><p className="field-hint">Invitees are not verified attendees or speakers.</p>{selectedEvent.invitees?.map((person, index) => <p key={`${person.email ?? person.name}-${index}`}>{person.name}{person.email ? <small>{person.email}</small> : null}</p>)}</div><div className="calendar-event-actions">{canSchedule ? schedules.some((item) => item.connection_id === selectedEvent.connection_id && item.event_id === selectedEvent.event_id && new Date(item.starts_at).getTime() === new Date(selectedEvent.starts_at).getTime()) ? <span className="calendar-scheduled">Assistant already scheduled</span> : <button type="button" className="button secondary" onClick={() => onChoose({ event: selectedEvent, period: "this_week", timezone, eventDate: eventDay(selectedEvent.starts_at, timezone), willSchedule: new Date(selectedEvent.starts_at).getTime() > Date.now() + 60_000 })}>Set up assistant</button> : null}<button type="button" className="button primary" onClick={() => onPrepare(selectedEvent)}><Sparkles size={16} /> Prepare for meeting</button></div><small className="calendar-sync-meta">Last synced {new Date(selectedEvent.synced_at).toLocaleString()}</small></> : <div className="calendar-detail-empty"><CalendarDays /><h2>Select a meeting</h2><p>See the source, agenda, invitees and your research brief here.</p></div>}</aside></div>
-    </> : null}
+  function scheduleSelected(event: CachedCalendarEvent) {
+    onChoose({ event, period: "this_week", timezone, eventDate: eventDay(event.starts_at, timezone), willSchedule: new Date(event.starts_at).getTime() > Date.now() + 60_000 });
+  }
+
+  const accountOptions = [{ value: "all", label: "All connected accounts" }, ...active.map((item) => ({ value: item.id, label: `${calendarProviderNames[item.provider]} · ${item.label}` }))];
+  return <section className="page wide calendar-workspace" aria-labelledby="calendar-workspace-title">
+    <PageHeader
+      titleId="calendar-workspace-title"
+      title="Calendar"
+      description="Meetings from your connected calendars, saved between visits."
+      actions={<>
+        <button type="button" className="button secondary" disabled={busy || !active.length || !rangeValid} onClick={() => void sync()}><RefreshCw aria-hidden="true" className={busy ? "calendar-spin" : undefined} /> {busy ? "Syncing…" : "Sync now"}</button>
+        {onNewMeeting && canSchedule ? <button type="button" className="button primary" onClick={onNewMeeting}><Plus aria-hidden="true" /> New meeting</button> : null}
+      </>}
+    />
+    <Tabs.Root value={tab} onValueChange={(value) => setTab(value === "integrations" ? "integrations" : "calendar")}>
+      <Tabs.List className="tabs-list" aria-label="Calendar sections">
+        <Tabs.Tab value="calendar"><CalendarDays aria-hidden="true" />Calendar</Tabs.Tab>
+        <Tabs.Tab value="integrations"><Plug aria-hidden="true" />Integrations <span className="count">{active.length}</span></Tabs.Tab>
+      </Tabs.List>
+      {error ? <p className="form-error calendar-error" role="alert">{error}</p> : null}
+
+      <Tabs.Panel value="calendar" className="calendar-panel">
+        <div className="calendar-toolbar">
+          <div className="calendar-month-nav">
+            <button type="button" className="button secondary icon sm" aria-label="Previous month" onClick={() => changeMonth(-1)}><ChevronLeft aria-hidden="true" /></button>
+            <button type="button" className="button secondary icon sm" aria-label="Next month" onClick={() => changeMonth(1)}><ChevronRight aria-hidden="true" /></button>
+            <h2>{month.toLocaleString(undefined, { month: "long", year: "numeric" })}</h2>
+            <button type="button" className="button ghost sm" onClick={goToToday}>Today</button>
+          </div>
+          <div className="calendar-toolbar-end">
+            {lastSynced ? <span className="calendar-sync-status">Synced {new Date(lastSynced).toLocaleString(undefined, { ...shortDate, hour: "numeric", minute: "2-digit" })}</span> : null}
+            <RangePicker startDate={startDate} endDate={endDate} timezone={timezone} onStartChange={(value) => { setStartDate(value); setSelectedEvent(null); }} onEndChange={(value) => { setEndDate(value); setSelectedEvent(null); }} />
+            <UiSelect id="calendar-account-filter" label="Account" hideLabel size="sm" className="calendar-account-select" value={accountFilter} onChange={setAccountFilter} options={accountOptions} disabled={!active.length} />
+          </div>
+        </div>
+        {loaded && !active.length ? <Alert tone="brand" className="calendar-connect-hint" actions={<button type="button" className="button secondary sm" onClick={() => setTab("integrations")}>Connect a calendar</button>}>No calendars connected yet. Connect one to see your meetings here.</Alert> : null}
+        {!rangeValid ? <p className="form-error" role="alert">Choose a valid date range of 1 to 90 days.</p> : null}
+        <div className="calendar-layout">
+          <MonthGrid month={month} days={monthDays} selectedDay={selectedDay} eventsByDay={eventsByDay} onSelectDay={(key) => { setSelectedDay(key); setSelectedEvent(null); }} />
+          <div className="calendar-side">
+            <DayAgenda selectedDay={selectedDay} dayEvents={dayEvents} rangeEvents={visibleEvents} selectedEventId={selectedEvent?.id ?? null} hasAccounts={active.length > 0} timezone={timezone} onSelectEvent={setSelectedEvent} onJumpToEvent={(event, day) => { setSelectedDay(day); setSelectedEvent(event); }} />
+            <EventDetail event={selectedEvent} canSchedule={canSchedule} alreadyScheduled={selectedScheduled} onSchedule={() => { if (selectedEvent) scheduleSelected(selectedEvent); }} onPrepare={() => { if (selectedEvent) onPrepare(selectedEvent); }} />
+          </div>
+        </div>
+      </Tabs.Panel>
+
+      <Tabs.Panel value="integrations">
+        <CalendarIntegrations connections={connections} syncs={snapshot.syncs} busy={busy} onConnect={(provider, alias) => void connect(provider, alias)} onRename={rename} onDisconnect={disconnect} />
+      </Tabs.Panel>
+    </Tabs.Root>
   </section>;
+}
+
+function RangePicker({ startDate, endDate, timezone, onStartChange, onEndChange }: {
+  startDate: string;
+  endDate: string;
+  timezone: string;
+  onStartChange(value: string): void;
+  onEndChange(value: string): void;
+}) {
+  const label = `${formatDay(startDate)} – ${formatDay(endDate)}`;
+  return <Popover.Root>
+    <Popover.Trigger className="button secondary sm calendar-range-trigger" aria-label={`Date range, ${label}`}><CalendarRange aria-hidden="true" />{label}</Popover.Trigger>
+    <Popover.Portal>
+      <Popover.Positioner side="bottom" align="end" sideOffset={6} className="ui-select-positioner">
+        <Popover.Popup className="popover calendar-range-popover">
+          <Popover.Title className="calendar-range-title">Date range</Popover.Title>
+          <div className="field-row">
+            <div className="field"><label htmlFor="calendar-from">From</label><input id="calendar-from" type="date" value={startDate} onChange={(event) => onStartChange(event.target.value)} /></div>
+            <div className="field"><label htmlFor="calendar-to">Through</label><input id="calendar-to" type="date" value={endDate} onChange={(event) => onEndChange(event.target.value)} /></div>
+          </div>
+          <p className="field-hint">Up to 90 days. Times shown in {timezone}.</p>
+        </Popover.Popup>
+      </Popover.Positioner>
+    </Popover.Portal>
+  </Popover.Root>;
 }

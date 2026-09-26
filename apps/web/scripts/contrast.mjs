@@ -29,7 +29,7 @@ export function contrast(foreground, background) {
 }
 
 function tokensFor(selector, source) {
-  const block = source.match(new RegExp(`\\${selector}\\s*\\{([^}]*)\\}`));
+  const block = source.match(new RegExp(`(?:^|\\n)\\${selector}(?:\\s*,\\s*\\.theme-light)?\\s*\\{([^}]*)\\}`));
   if (!block) throw new Error(`Missing ${selector} tokens`);
   return Object.fromEntries([...block[1].matchAll(/--([a-z-]+)\s*:\s*([^;]+);/g)].map((match) => [match[1], match[2].trim()]));
 }
@@ -44,7 +44,8 @@ for (const [theme, tokens] of Object.entries(themes)) {
     pair(`secondary on ${surface}`, "text-secondary", surface, 4.5);
   }
   pair("tertiary on card", "text-tertiary", "card", 4.5);
-  pair("strong input border on card", "border-strong", "card", 3);
+  pair("strong border on card", "border-strong", "card", 3);
+  pair("input border on card", "input", "card", 3);
   pair("brand text on card", "brand", "card", 4.5);
   pair("brand text on subtle", "brand", "brand-subtle", 4.5);
   pair("brand on card", "brand", "card", 3);

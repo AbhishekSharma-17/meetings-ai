@@ -307,7 +307,7 @@ test("meeting prep accepts context and shows a cited saved briefing", async ({ p
 
 test("meeting prep opens from the sidebar and guides an empty workspace to Calendar", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("navigation", { name: "Main navigation" }).getByText("PREPARE")).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Main navigation" }).getByText("Intelligence")).toBeVisible();
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Meeting prep" }).click();
   await expect(page.getByRole("heading", { name: "Meeting prep" })).toBeVisible();
   await expect(page.getByText("No saved upcoming meetings")).toBeVisible();
