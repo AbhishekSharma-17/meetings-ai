@@ -33,6 +33,15 @@ OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 # https://developers.openai.com/api/docs/models/gpt-6-luna). Add others only after checking.
 OPENAI_IMAGE_INPUT_MODELS = frozenset({"gpt-6-luna"})
 OPENAI_DEFAULT_VISION_MODEL = "gpt-6-luna"
+# OpenRouter id, used only when the live catalog lists it with image input.
+OPENROUTER_DEFAULT_VISION_MODEL = "openai/gpt-6-luna"
+
+
+def _is_openrouter(profile: ProviderProfile) -> bool:
+    if profile.provider_type is not ProviderType.OPENAI_COMPATIBLE or not profile.base_url:
+        return False
+    parsed = urlparse(profile.base_url)
+    return parsed.scheme == "https" and parsed.hostname == "openrouter.ai" and parsed.path.rstrip("/") == "/api/v1"
 
 
 def _is_openai_direct(profile: ProviderProfile) -> bool:
@@ -93,6 +102,10 @@ class VisionService:
             text_model = profile.models.get(Capability.TEXT_GENERATION)
             if not text_model:
                 continue
+            if _is_openrouter(profile) and text_model != OPENROUTER_DEFAULT_VISION_MODEL \
+                    and OPENROUTER_DEFAULT_VISION_MODEL in await self._openrouter_image_models(profile):
+                # Cheapest image-capable GPT-6 on the same key, confirmed by the live catalog.
+                return VisionRoute(profile.id, OPENROUTER_DEFAULT_VISION_MODEL, OPENROUTER_DEFAULT_VISION_MODEL, "openrouter_default_vision")
             if await self.is_vision_capable(profile, text_model):
                 return VisionRoute(profile.id, text_model, None, "workspace_default")
             if _is_openai_direct(profile):

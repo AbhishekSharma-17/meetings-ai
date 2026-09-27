@@ -245,7 +245,7 @@
 .menu-label { padding:8px 10px 4px; color:var(--text-tertiary); font-size:12px; font-weight:500; }
 .menu-separator { height:1px; margin:6px -6px; background:var(--border); }
 
-.ui-select-field { display:grid; gap:6px; min-width:0; align-content:start; }
+.ui-select-field { display:grid; grid-template-columns:minmax(0,1fr); gap:6px; min-width:0; align-content:start; }
 .ui-select-field > label { font-size:13px; font-weight:500; }
 .ui-select-trigger { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; min-height:36px; padding:0 10px 0 11px; border:1px solid var(--input); border-radius:var(--radius); background:var(--card); color:var(--foreground); font-size:13.5px; text-align:left; transition:border-color var(--duration-fast) ease; }
 .ui-select-trigger:hover:not([data-disabled]) { border-color:var(--border-strong); }

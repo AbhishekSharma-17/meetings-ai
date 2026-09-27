@@ -94,7 +94,7 @@ export function ProviderSettings({ identity, profiles, onProfilesChange }: { ide
     />
     <div className="provider-overview">
       <ApiKeysCard credentials={credentials} loading={keysLoading} error={keysError} canManage={isOwner} onRefresh={refreshCredentials} onNotice={setNotice} />
-      <WorkspaceAiCard view={aiSettings} error={aiError} profiles={textProfiles} exaKeys={credentials.filter((item) => item.provider_type === "exa")} onSaved={(view) => { setAiSettings(view); void refreshCredentials(); }} onNotice={setNotice} />
+      <WorkspaceAiCard view={aiSettings} error={aiError} profiles={textProfiles} exaKeys={credentials.filter((item) => item.provider_type === "exa")} keys={credentials} onProfileCreated={(created) => { onProfilesChange([...profiles.map((candidate) => created.isDefault && candidate.kind === created.kind ? { ...candidate, isDefault: false } : candidate), created]); void refreshCredentials(); }} onSaved={(view) => { setAiSettings(view); void refreshCredentials(); }} onNotice={setNotice} />
     </div>
     <div className="provider-layout">
       <div className="provider-groups">

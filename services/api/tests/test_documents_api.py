@@ -335,3 +335,25 @@ def test_openai_default_uses_gpt_6_luna_for_vision_when_no_vision_model_is_set(t
         route = asyncio.run(vision.resolve(LEGACY_ORGANIZATION_ID))
         assert route is not None and route.source == "openai_default_vision"
         assert route.model == "gpt-6-luna" and route.model_override == "gpt-6-luna"
+
+
+def test_openrouter_default_prefers_gpt_6_luna_for_vision_when_the_catalog_lists_it(tmp_path) -> None:
+    app = _app(tmp_path)
+    catalog = {"data": [
+        {"id": "openai/gpt-6-sol", "architecture": {"input_modalities": ["file", "image", "text"]}},
+        {"id": "openai/gpt-6-luna", "architecture": {"input_modalities": ["file", "image", "text"]}},
+    ]}
+    vision = app.state.document_service.vision
+    vision.transport = httpx.MockTransport(lambda request: httpx.Response(200, json=catalog))
+    with TestClient(app) as client:
+        profile = client.post("/v1/provider-profiles", json={
+            "name": "GPT-6 via OpenRouter", "provider_type": "openai_compatible", "execution_location": "cloud",
+            "base_url": "https://openrouter.ai/api/v1", "api_key": "sk-or-test-key",
+            "capabilities": [{"capability": "text_generation", "model": "openai/gpt-6-sol"}],
+        }).json()
+        assert client.put("/v1/provider-defaults/text_generation", json={
+            "policy": "cloud_only", "cloud_profile_id": profile["id"],
+        }).status_code == 200
+        route = asyncio.run(vision.resolve(LEGACY_ORGANIZATION_ID))
+        assert route is not None and route.source == "openrouter_default_vision"
+        assert route.model == "openai/gpt-6-luna"

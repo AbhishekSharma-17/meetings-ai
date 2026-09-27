@@ -31,20 +31,46 @@ function toInput(draft: Draft): AiSettingsInput {
   };
 }
 
-// Recommended GPT-6 routing (checked 2026-09-27 in OpenAI's model docs and pricing):
-// gpt-6-luna reads text and images at $0.10 / $0.50 per 1M tokens; gpt-6-sol ($2 / $10)
-// writes the longer research briefs. Only offered when an OpenAI profile exists.
-const RECOMMENDED = { chat: "gpt-6-luna", vision: "gpt-6-luna", research: "gpt-6-sol" } as const;
+// Recommended GPT-6 routing, checked 2026-09-27 in OpenAI's model docs/pricing and
+// OpenRouter's live catalog: gpt-6-luna reads text and images at $0.10 / $0.50 per 1M
+// tokens; gpt-6-sol ($2 / $10) drafts minutes and writes research briefs.
+const RECOMMENDED = { chat: "gpt-6-luna", vision: "gpt-6-luna", research: "gpt-6-sol", minutes: "gpt-6-sol" } as const;
+const OPENROUTER_URL = "https://openrouter.ai/api/v1";
+
+function isOpenAiDirect(profile: ProviderProfile): boolean {
+  return profile.provider === "OpenAI" && (!profile.endpoint || profile.endpoint.startsWith("https://api.openai.com"));
+}
+
+function isOpenRouter(profile: ProviderProfile): boolean {
+  return profile.endpoint.replace(/\/$/, "") === OPENROUTER_URL;
+}
+
+/** Model id for a GPT-6 variant on this profile's route (OpenRouter prefixes the vendor). */
+function routedModel(profile: ProviderProfile, model: string): string {
+  return isOpenRouter(profile) ? `openai/${model}` : model;
+}
 
 function recommendedDraft(draft: Draft, profiles: ProviderProfile[]): Draft | null {
-  const openai = profiles.find((profile) => profile.provider === "OpenAI" && profile.capabilities.includes("text_generation")
-    && !profile.id.startsWith("new-") && (!profile.endpoint || profile.endpoint.startsWith("https://api.openai.com")));
-  if (!openai) return null;
+  const usable = profiles.filter((profile) => profile.capabilities.includes("text_generation") && !profile.id.startsWith("new-"));
+  const route = usable.find(isOpenAiDirect) ?? usable.find(isOpenRouter);
+  if (!route) return null;
   return {
     ...draft,
-    chat: { profileId: openai.id, model: RECOMMENDED.chat },
-    vision: { profileId: openai.id, model: RECOMMENDED.vision },
-    research: { profileId: openai.id, model: RECOMMENDED.research },
+    chat: { profileId: route.id, model: routedModel(route, RECOMMENDED.chat) },
+    vision: { profileId: route.id, model: routedModel(route, RECOMMENDED.vision) },
+    research: { profileId: route.id, model: routedModel(route, RECOMMENDED.research) },
+  };
+}
+
+/** A minutes/text profile on a saved OpenAI or OpenRouter key, for workspaces with none yet. */
+function starterProfile(key: VaultCredential, makeDefault: boolean): ProviderProfile {
+  const openai = key.provider_type === "openai";
+  return {
+    id: "new-recommended", kind: "mom", label: openai ? "GPT-6 (OpenAI)" : "GPT-6 via OpenRouter",
+    provider: openai ? "OpenAI" : "OpenRouter", executionLocation: "cloud",
+    endpoint: openai ? "" : OPENROUTER_URL, model: openai ? RECOMMENDED.minutes : `openai/${RECOMMENDED.minutes}`,
+    capabilities: ["text_generation"], connectionState: "not_configured", isDefault: makeDefault,
+    apiKeyConfigured: false, credentialHint: null, credentialId: key.id, credentialLabel: key.label,
   };
 }
 
@@ -56,11 +82,13 @@ export function effectiveChatText(view: AiSettingsView): string {
   return route.source === "workspace_settings" ? `Ask AI uses ${route.model}${name}` : `Ask AI uses the workspace default, ${route.model}${name}`;
 }
 
-export function WorkspaceAiCard({ view, error, profiles, exaKeys, onSaved, onNotice }: {
+export function WorkspaceAiCard({ view, error, profiles, exaKeys, keys = [], onProfileCreated, onSaved, onNotice }: {
   view: AiSettingsView | null;
   error: string | null;
   profiles: ProviderProfile[];
   exaKeys: VaultCredential[];
+  keys?: VaultCredential[];
+  onProfileCreated?(profile: ProviderProfile): void;
   onSaved(view: AiSettingsView): void;
   onNotice(notice: SettingsNotice): void;
 }) {
@@ -75,7 +103,7 @@ export function WorkspaceAiCard({ view, error, profiles, exaKeys, onSaved, onNot
       <p><b>{effectiveChatText(view)}</b><small>Set by the workspace owner.{view.research_configured ? " Web research is on." : ""}</small></p>
     </div>
   </section>;
-  return <OwnerForm key={JSON.stringify(toInput(draftFrom(view)))} view={view} profiles={profiles} exaKeys={exaKeys} onSaved={onSaved} onNotice={onNotice} />;
+  return <OwnerForm key={JSON.stringify(toInput(draftFrom(view)))} view={view} profiles={profiles} exaKeys={exaKeys} keys={keys} onProfileCreated={onProfileCreated} onSaved={onSaved} onNotice={onNotice} />;
 }
 
 function CardHead({ readOnly = false }: { readOnly?: boolean }) {
@@ -86,10 +114,12 @@ function CardHead({ readOnly = false }: { readOnly?: boolean }) {
   </div>;
 }
 
-function OwnerForm({ view, profiles, exaKeys, onSaved, onNotice }: {
+function OwnerForm({ view, profiles, exaKeys, keys, onProfileCreated, onSaved, onNotice }: {
   view: AiSettingsView;
   profiles: ProviderProfile[];
   exaKeys: VaultCredential[];
+  keys: VaultCredential[];
+  onProfileCreated?(profile: ProviderProfile): void;
   onSaved(view: AiSettingsView): void;
   onNotice(notice: SettingsNotice): void;
 }) {
@@ -99,6 +129,23 @@ function OwnerForm({ view, profiles, exaKeys, onSaved, onNotice }: {
   const dirty = JSON.stringify(toInput(draft)) !== JSON.stringify(toInput(draftFrom(view)));
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((current) => ({ ...current, [key]: value }));
   const recommended = recommendedDraft(draft, profiles);
+  const starterKey = recommended ? undefined : keys.find((key) => key.provider_type === "openai") ?? keys.find((key) => key.provider_type === "openrouter");
+  const [settingUp, setSettingUp] = useState(false);
+
+  async function setUpRecommended() {
+    if (!starterKey) return;
+    setSettingUp(true); setError(null);
+    try {
+      const hasTextDefault = profiles.some((profile) => profile.isDefault && profile.capabilities.includes("text_generation"));
+      const created = await meetingsService.saveProviderProfile(starterProfile(starterKey, !hasTextDefault), undefined, { credentialId: starterKey.id });
+      onProfileCreated?.(created);
+      const next = recommendedDraft(draft, [created]);
+      if (next) setDraft(next);
+      onNotice({ tone: "success", text: `Created “${created.label}” on ${starterKey.label}. Review the models below, then save.` });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not create the recommended profile.");
+    } finally { setSettingUp(false); }
+  }
 
   async function save() {
     setSaving(true); setError(null);
@@ -121,12 +168,12 @@ function OwnerForm({ view, profiles, exaKeys, onSaved, onNotice }: {
       </fieldset>
       <fieldset className="workspace-ai-section">
         <legend><ScanText aria-hidden="true" /> Vision & OCR</legend>
-        <p className="field-hint">Reads scanned pages and images in documents. gpt-6-luna accepts images and is economical; with an OpenAI default and no choice here, it is used automatically.</p>
-        <ModelRoutePicker id="ai-vision" name="Vision" profiles={profiles} value={draft.vision} onChange={(value) => set("vision", value)} noneLabel="Automatic (gpt-6-luna with an OpenAI default)" />
+        <p className="field-hint">Reads scanned pages and images. Automatic uses gpt-6-luna on your OpenAI or OpenRouter default.</p>
+        <ModelRoutePicker id="ai-vision" name="Vision" profiles={profiles} value={draft.vision} onChange={(value) => set("vision", value)} noneLabel="Automatic" />
       </fieldset>
       <fieldset className="workspace-ai-section">
         <legend><Globe aria-hidden="true" /> Web research</legend>
-        <p className="field-hint">Public research for meeting prep uses an Exa key; a text model writes the brief.</p>
+        <p className="field-hint">Meeting prep: Exa searches the web and a text model writes the brief.</p>
         <UiSelect id="ai-research-key" label="Exa key" value={draft.researchKey || NONE} onChange={(value) => set("researchKey", value === NONE ? "" : value)}
           options={[{ value: NONE, label: exaKeys.length ? "Off" : "Off · add an Exa key first" }, ...exaKeys.map((key) => ({ value: key.id, label: `${key.label} · ${key.hint}` }))]} />
         <ModelRoutePicker id="ai-research" name="Research writing" profiles={profiles} value={draft.research} onChange={(value) => set("research", value)} noneLabel="Workspace default (MOM & actions)" />
@@ -135,8 +182,9 @@ function OwnerForm({ view, profiles, exaKeys, onSaved, onNotice }: {
     {error ? <div className="workspace-ai-error"><Alert tone="danger">{error}</Alert></div> : null}
     <div className="card-footer split">
       <span className="cluster">
-        {recommended ? <button type="button" className="button secondary sm" onClick={() => setDraft(recommended)} title="Ask AI and vision: gpt-6-luna · research writing: gpt-6-sol">Apply recommended models</button> : null}
-        <span className="field-hint">{profiles.length ? "Leave a model blank to use the profile's own model." : "Add a MOM & actions profile first; its models are offered here."}</span>
+        {recommended ? <button type="button" className="button secondary sm" onClick={() => setDraft(recommended)} title="Ask AI and vision: gpt-6-luna · research writing: gpt-6-sol">Apply recommended models</button>
+          : starterKey ? <button type="button" className="button secondary sm" disabled={settingUp} onClick={() => void setUpRecommended()} title={`Creates a GPT-6 minutes profile on ${starterKey.label}`}>{settingUp ? "Setting up…" : "Set up recommended models"}</button> : null}
+        <span className="field-hint">{profiles.length ? "Leave a model blank to use the profile's own model." : starterKey ? `No model profile yet. Set up uses your saved key “${starterKey.label}”.` : "Add an OpenAI or OpenRouter key above, or a MOM & actions profile below."}</span>
       </span>
       <button type="button" className={dirty ? "button primary" : "button secondary"} disabled={saving || !dirty} onClick={() => void save()}>{saving ? "Saving…" : "Save workspace AI"}</button>
     </div>
