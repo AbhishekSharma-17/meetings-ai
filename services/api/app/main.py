@@ -54,6 +54,8 @@ from .calendar_schedule import CalendarScheduleError, CalendarSchedulePublic, Ca
 from .calendar_cache import CalendarCacheService, CalendarSyncRequest, CalendarSyncResponse, CachedCalendarResponse
 from .meeting_prep import OrganizationBriefService, OrganizationBrief, BriefDocument, MeetingPrepService, PrepError
 from .routes_prep import register_prep_routes
+from .routes_people import register_people_routes
+from .profile_photos import ProfilePhotoService
 from .database import Database, SchemaVersionRow, LEGACY_ADMIN_USER_ID, LEGACY_ORGANIZATION_ID
 from .accounts import AccountError, AccountPublic, AccountService, Actor, ChangePasswordRequest, InviteRequest, InviteResult, MemberRolePatch, OrganizationCreateRequest, OrganizationOption, ProfilePatch
 from .meeting_service import MeetingConflictError, MeetingService, MeetingValidationError
@@ -72,6 +74,7 @@ from .service import ProfilePermissionError, ProfileValidationError, ProviderPro
 from .credential_vault import CredentialVault
 from .ai_settings import AiSettingsService
 from .routes_ai import register_ai_routes
+from .routes_models import register_model_catalog_routes
 from .chunk_store import ChunkStore
 from .retrieval import ChunkRetriever
 from .document_vision import VisionService
@@ -175,6 +178,7 @@ def create_app(
                                       retriever=chunk_retriever)
     calendar_schedule = CalendarScheduleService(database, calendar, meeting_service)
     document_service = DocumentService(database, VisionService(database, service, ai_settings), chunk_store)
+    ai_settings.vision = document_service.vision
     indexing_worker = IndexingWorker(database, document_service, chunk_store, knowledge_index, service)
     if bool(admin_password) != bool(session_secret):
         raise RuntimeError("admin password and session secret must both be configured")
@@ -205,7 +209,7 @@ def create_app(
         allow_origins=[os.getenv("WEB_ORIGIN", "http://localhost:3020")],
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "Authorization", "Idempotency-Key"],
+        allow_headers=["Content-Type", "Authorization", "Idempotency-Key", "X-Provider-Key"],
     )
     app.state.database = database
     app.state.repository = repository
@@ -233,11 +237,14 @@ def create_app(
     app.state.credential_vault = vault
     app.state.ai_settings = ai_settings
     register_ai_routes(app, vault=vault, ai_settings=ai_settings)
+    register_model_catalog_routes(app, model_catalog=model_catalog, repository=repository, vault=vault)
     app.state.chunk_retriever = chunk_retriever
     app.state.document_service = document_service
     app.state.indexing_worker = indexing_worker
     register_document_routes(app, documents=document_service)
     register_prep_routes(app, meeting_prep=meeting_prep)
+    profile_photos = ProfilePhotoService(database)
+    register_people_routes(app, accounts=accounts, photos=profile_photos)
 
     @app.middleware("http")
     async def require_admin(request: Request, call_next):
@@ -275,6 +282,9 @@ def create_app(
                         or (method == "GET" and path == "/v1/knowledge/text-profiles")
                         or (method == "GET" and path == "/v1/ai/settings")
                         or path == "/v1/auth/me"
+                        or (method in {"PUT", "DELETE"} and path == "/v1/auth/me/photo")
+                        or (method == "PUT" and path == "/v1/workspaces/default")
+                        or (method == "GET" and re.fullmatch(r"/v1/users/[0-9a-f-]{36}/photo", path))
                         or (path == "/v1/calendar/connections" and method == "GET")
                         or (method == "DELETE" and re.fullmatch(r"/v1/calendar/connections/[^/]+", path))
                         or (method == "PATCH" and re.fullmatch(r"/v1/calendar/connections/[^/]+", path))
@@ -363,12 +373,14 @@ def create_app(
 
     @app.get("/v1/auth/me")
     def auth_me(request: Request) -> dict[str, object]:
-        return accounts.public(request.state.actor).model_dump(mode="json")
+        actor = request.state.actor
+        return accounts.public(actor).model_copy(update={"photo_url": profile_photos.url_for(actor.user_id)}).model_dump(mode="json")
 
     @app.patch("/v1/auth/me", response_model=AccountPublic)
     def update_auth_profile(payload: ProfilePatch, request: Request) -> AccountPublic:
         try:
-            return accounts.public(accounts.update_profile(request.state.actor, payload))
+            updated = accounts.public(accounts.update_profile(request.state.actor, payload))
+            return updated.model_copy(update={"photo_url": profile_photos.url_for(updated.user_id)})
         except AccountError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 

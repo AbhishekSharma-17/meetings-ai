@@ -2,7 +2,7 @@
 
 import { CalendarDays, ChevronRight, Clock, NotebookPen } from "lucide-react";
 import type { CalendarConnection } from "@/lib/types";
-import { initials } from "@/lib/meeting-status";
+import { Avatar } from "./ui/avatar";
 import { CalendarBrandIcon } from "./brand-icons";
 import { CalendlyPill, PlatformMark, PlatformPill, SourceStack, entryOrigin, uniqueByAccount } from "./calendar-event-marks";
 import { meetingPlatform, viaCalendly, type CalendarEntry } from "./calendar-events";
@@ -165,7 +165,7 @@ export function EventDetail({ entry, connections, canSchedule, alreadyScheduled,
       <p className="field-hint">Invitees are not verified attendees or speakers.</p>
       {invitees.length ? <ul className="calendar-invitees">
         {invitees.map((person, index) => <li key={`${person.email ?? person.name}-${index}`}>
-          <span className="avatar sm" aria-hidden="true">{initials(person.name || person.email)}</span>
+          <Avatar name={person.name || person.email} size="sm" />
           <span><b>{person.name}</b>{person.email ? <small>{person.email}</small> : null}</span>
         </li>)}
       </ul> : null}

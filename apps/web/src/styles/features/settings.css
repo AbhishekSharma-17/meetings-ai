@@ -36,18 +36,42 @@
 .provider-editor-kind { color:var(--text-tertiary); font-size:12px; font-weight:500; }
 .provider-editor-header h2 { overflow-wrap:anywhere; }
 .provider-editor-empty .empty-state { padding:56px 24px; }
-.provider-field-label { display:flex; align-items:center; justify-content:space-between; gap:12px; }
-.provider-catalog { display:grid; gap:10px; }
-.provider-catalog-results { list-style:none; display:grid; gap:2px; max-height:240px; overflow-y:auto; margin:0 -6px; padding:0 6px; }
-.provider-catalog-item { display:flex; align-items:center; gap:10px; width:100%; padding:7px 10px; border:1px solid transparent; border-radius:var(--radius-sm); background:transparent; color:var(--foreground); text-align:left; }
-.provider-catalog-item:hover { background:var(--card); border-color:var(--border); }
-.provider-catalog-item[aria-pressed=true] { background:var(--card); border-color:var(--brand-border); }
-.provider-catalog-item > span { display:grid; min-width:0; flex:1; }
-.provider-catalog-item b { font-size:13px; font-weight:500; }
-.provider-catalog-item small { color:var(--text-tertiary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.provider-catalog-price { flex:none; font-variant-numeric:tabular-nums; }
-.provider-catalog-item .lucide { width:15px; height:15px; color:var(--brand); }
-.provider-catalog-empty { padding:8px 10px; color:var(--text-tertiary); font-size:13px; }
+/* ---------- Model picker (ModelCombobox): search a live catalog or type any id ---------- */
+.model-combobox-control { position:relative; display:block; }
+.model-combobox-control .model-combobox-input { padding-right:64px; }
+.model-combobox-trigger { position:absolute; top:50%; right:4px; display:grid; place-items:center; width:28px; height:28px; transform:translateY(-50%); border:0; border-radius:var(--radius-sm); background:transparent; color:var(--text-tertiary); cursor:pointer; }
+.model-combobox-trigger:hover:not(:disabled) { background:var(--muted); color:var(--foreground); }
+.model-combobox-trigger:focus-visible { outline:none; box-shadow:var(--focus-shadow); }
+.model-combobox-trigger .lucide { width:15px; height:15px; }
+.model-combobox-control[data-disabled] .model-combobox-trigger { cursor:not-allowed; opacity:.6; }
+.model-combobox-spinner { position:absolute; top:50%; right:36px; width:14px; height:14px; margin-top:-7px; color:var(--text-tertiary); animation:model-combobox-spin 900ms linear infinite; }
+@keyframes model-combobox-spin { to { transform:rotate(360deg); } }
+.model-combobox-popup { width:max(var(--anchor-width), min(420px, 92vw)); max-width:min(92vw, var(--available-width)); max-height:min(380px, var(--available-height)); overflow-y:auto; overscroll-behavior:contain; padding:5px; border:1px solid var(--border); border-radius:var(--radius-lg); background:var(--popover); box-shadow:var(--elevation-overlay); outline:none; transform-origin:var(--transform-origin); transition:opacity var(--duration-base) ease, transform var(--duration-base) ease; }
+.model-combobox-popup[data-starting-style], .model-combobox-popup[data-ending-style] { opacity:0; transform:scale(.98); }
+.model-combobox-status:not(:empty) { padding:8px 10px 6px; color:var(--text-secondary); font-size:12px; line-height:1.45; }
+.model-combobox-list { outline:none; }
+.model-combobox-group + .model-combobox-group { margin-top:4px; padding-top:4px; border-top:1px solid var(--border); }
+.model-combobox-group-label { padding:6px 10px 4px; color:var(--text-tertiary); font-size:11px; font-weight:600; letter-spacing:.02em; text-transform:uppercase; }
+.model-combobox-item { display:grid; grid-template-columns:minmax(0,1fr) auto 16px; grid-template-areas:"main meta check"; align-items:center; column-gap:10px; min-height:40px; padding:6px 10px; border-radius:var(--radius-sm); cursor:pointer; outline:none; }
+.model-combobox-item[data-highlighted] { background:var(--muted); }
+.model-combobox-item-main { grid-area:main; display:grid; min-width:0; }
+.model-combobox-item-main b { overflow:hidden; font-size:13px; font-weight:500; text-overflow:ellipsis; white-space:nowrap; }
+.model-combobox-item-main small { overflow:hidden; color:var(--text-tertiary); font-size:12px; text-overflow:ellipsis; white-space:nowrap; }
+.model-combobox-item-meta { grid-area:meta; display:flex; align-items:center; gap:6px; }
+.model-combobox-images { display:inline-grid; place-items:center; color:var(--text-tertiary); }
+.model-combobox-images .lucide { width:14px; height:14px; }
+.model-combobox-price { color:var(--text-secondary); font-size:12px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.model-combobox-check { grid-area:check; width:15px; height:15px; color:var(--brand); }
+.model-combobox-custom { grid-column:1 / -1; display:flex; align-items:center; gap:8px; min-width:0; overflow:hidden; color:var(--brand); font-size:13px; font-weight:500; text-overflow:ellipsis; white-space:nowrap; }
+.model-combobox-custom .lucide { width:14px; height:14px; flex:none; }
+.model-combobox-foot { overflow-wrap:anywhere; }
+@media (prefers-reduced-motion: reduce) {
+  .model-combobox-spinner { animation:none; }
+  .model-combobox-popup { transition:none; }
+}
+@media (max-width: 480px) {
+  .model-combobox-item { grid-template-columns:minmax(0,1fr) 16px; grid-template-areas:"main check" "meta meta"; row-gap:2px; }
+}
 .provider-capabilities legend { font-weight:500; }
 .provider-delete-confirm .button-group { margin-top:8px; }
 .provider-editor-footer { gap:10px; }
@@ -118,6 +142,9 @@
 .workspace-ai-section legend .lucide { width:16px; height:16px; color:var(--text-secondary); }
 .workspace-ai-section > .field-hint { margin-top:-6px; }
 .ai-route { display:grid; gap:10px; }
+.workspace-ai-resolved { display:grid; gap:2px; padding:9px 12px; border:1px solid var(--border); border-radius:var(--radius); background:var(--muted); line-height:1.45; overflow-wrap:anywhere; }
+.workspace-ai-resolved b { font-size:13px; font-weight:500; }
+.workspace-ai-resolved small { color:var(--text-secondary); font-size:12px; }
 .workspace-ai-error { padding:0 20px 12px; }
 .workspace-ai-readonly { display:flex; align-items:center; gap:12px; }
 .workspace-ai-readonly > .lucide { width:18px; height:18px; flex:none; color:var(--brand); }
@@ -484,3 +511,34 @@
 .obs-table { overflow-x:auto; }
 .obs-table .num { white-space:nowrap; }
 @media (max-width: 1400px) { .obs-grid { grid-template-columns:minmax(0,1fr); } }
+
+/* ===== Avatars, profile photos and default workspace (people & workspaces) =====
+   Shared <Avatar> (components/ui/avatar.tsx) extends the .avatar primitive. Append-only section. */
+.avatar.avatar-photo, .avatar.avatar-assistant { overflow:hidden; background:var(--muted); }
+.avatar.avatar-photo > img, .avatar.avatar-assistant > img { display:block; width:100%; height:100%; border-radius:inherit; object-fit:cover; }
+.avatar.avatar-assistant { border-radius:28%; background:transparent; }
+.inline-actor { display:inline-flex; align-items:center; gap:6px; }
+.activity-avatar { margin-right:6px; vertical-align:-6px; }
+
+.profile-photo-row { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px 16px; border-bottom:1px solid var(--border); }
+.profile-photo-copy { display:grid; gap:2px; min-width:0; }
+.profile-photo-copy .field-hint { margin:0; }
+.profile-photo-row .button .lucide { width:15px; height:15px; }
+
+.workspace-directory-row { flex-wrap:wrap; }
+.workspace-directory-name { display:flex; align-items:center; gap:8px; min-width:0; }
+.workspace-directory-name b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.workspace-directory-actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; margin-left:auto; }
+.workspace-landing { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:4px 12px; padding:10px 20px; border-top:1px solid var(--border); background:var(--muted); color:var(--text-secondary); font-size:13px; }
+.workspace-landing p { margin:0; }
+.workspace-landing b { color:var(--foreground); font-weight:500; }
+
+.profile-workspace > span:not(.tag) { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.profile-workspace-default { height:18px; margin-left:auto; padding:0 6px; font-size:11px; }
+.profile-workspace-default ~ small, .profile-workspace-default ~ .check { margin-left:0; }
+
+@media (max-width: 640px) {
+  .workspace-directory-actions { width:100%; justify-content:flex-start; padding-left:40px; }
+  .workspace-directory-actions > .button.ghost:first-child { margin-left:-10px; }
+  .workspace-landing { padding:10px 16px; }
+}

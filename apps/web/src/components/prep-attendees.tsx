@@ -2,6 +2,7 @@ import { ExternalLink, Target } from "lucide-react";
 import type { PrepAttendee, PrepMatchConfidence, PrepPersona, PrepSourceV2 } from "@/lib/types";
 import { Badge } from "./ui/feedback";
 import { Citations, safeHref } from "./prep-shared";
+import { Avatar } from "./ui/avatar";
 
 export const personaLabels: Record<PrepPersona, string> = {
   technical: "Technical", business: "Business", sales: "Sales", executive: "Executive", unknown: "Role unknown",
@@ -11,10 +12,6 @@ const matchCopy: Record<PrepMatchConfidence, { label: string; tone: "success" | 
   likely: { label: "Likely profile", tone: "info" },
   unconfirmed: { label: "Profile unconfirmed", tone: "neutral" },
 };
-
-function initials(name: string): string {
-  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("") || "?";
-}
 
 /** Invitees from the calendar with public-profile context. Only name-and-company matches carry a profile link. */
 export function PrepAttendees({ attendees, sources }: { attendees: PrepAttendee[]; sources: Map<string, PrepSourceV2> }) {
@@ -28,7 +25,7 @@ function PersonCard({ person, sources }: { person: PrepAttendee; sources: Map<st
   const profile = safeHref(person.linkedin_url);
   return <article className="prep-person" aria-label={person.name}>
     <header className="prep-person-head">
-      <span className="avatar" aria-hidden="true">{initials(person.name)}</span>
+      <Avatar name={person.name} fallback={person.name.trim() ? undefined : "?"} />
       <div className="prep-person-id">
         <p className="prep-person-name">{person.name}</p>
         <p className="prep-person-title">{person.title || person.email || "Title not confirmed"}</p>

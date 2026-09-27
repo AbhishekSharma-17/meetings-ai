@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import { Dialog } from "@base-ui/react/dialog";
 import { Download, Maximize2, MessageSquareText, X } from "lucide-react";
-import { initials } from "@/lib/meeting-status";
+import { Avatar, DEFAULT_ASSISTANT_NAME, isAssistantName } from "./ui/avatar";
 import type { TranscriptSegment } from "@/lib/types";
 import { EmptyState } from "./ui/feedback";
 
@@ -30,7 +30,7 @@ export function namedSpeakersOf(segments: TranscriptSegment[]): string[] {
 }
 
 /** One transcript turn: avatar, speaker, timestamp and text. Shared by the meeting record and the evidence view. */
-export function TranscriptTurn({ id, segment, time, timeTitle, focused, flags, actions, children }: {
+export function TranscriptTurn({ id, segment, time, timeTitle, focused, flags, actions, children, assistantName = DEFAULT_ASSISTANT_NAME }: {
   id: string;
   segment: TranscriptSegment;
   time: string;
@@ -39,10 +39,13 @@ export function TranscriptTurn({ id, segment, time, timeTitle, focused, flags, a
   flags?: ReactNode;
   actions?: ReactNode;
   children?: ReactNode;
+  /** The meeting's bot name; its own turns show the Meetings AI logo. */
+  assistantName?: string;
 }) {
   const unidentified = segment.speaker === UNIDENTIFIED_SPEAKER;
+  const assistant = !unidentified && isAssistantName(segment.speaker, assistantName);
   return <li id={id} className={focused ? "turn focused-source" : "turn"}>
-    <span className={unidentified ? "avatar turn-avatar unknown" : "avatar turn-avatar"} aria-hidden="true">{unidentified ? "?" : initials(segment.speaker)}</span>
+    <Avatar name={segment.speaker} kind={assistant ? "assistant" : "person"} fallback={unidentified ? "?" : undefined} className={unidentified ? "turn-avatar unknown" : "turn-avatar"} />
     <div className="turn-body">
       <div className="turn-head">
         <b className="turn-speaker">{segment.speaker}</b>
@@ -56,8 +59,9 @@ export function TranscriptTurn({ id, segment, time, timeTitle, focused, flags, a
   </li>;
 }
 
-export function MeetingTranscript({ meetingTitle, segments, focusSegmentId, isPolling, isLive, saving, onSaveSpeaker, onDownload }: {
+export function MeetingTranscript({ meetingTitle, assistantName, segments, focusSegmentId, isPolling, isLive, saving, onSaveSpeaker, onDownload }: {
   meetingTitle: string;
+  assistantName?: string;
   isLive: boolean;
   segments: TranscriptSegment[];
   focusSegmentId?: string | null;
@@ -92,7 +96,7 @@ export function MeetingTranscript({ meetingTitle, segments, focusSegmentId, isPo
       {segment.rawSpeaker && segment.rawSpeaker !== segment.speaker && segment.speaker === UNIDENTIFIED_SPEAKER ? <span className="turn-flag">Capture label: {segment.rawSpeaker}</span> : null}
     </>;
     const review = <button className="text-button neutral" type="button" onClick={() => { setEditingSpeakerId(segment.segmentId); setSpeakerName(segment.speaker === UNIDENTIFIED_SPEAKER ? "" : segment.speaker); setApplyToSameLabel(false); }}>Review speaker</button>;
-    return <TranscriptTurn key={segment.id} id={`transcript-${encodeURIComponent(segment.segmentId)}`} segment={segment} focused={focusSegmentId === segment.segmentId}
+    return <TranscriptTurn key={segment.id} id={`transcript-${encodeURIComponent(segment.segmentId)}`} segment={segment} focused={focusSegmentId === segment.segmentId} assistantName={assistantName}
       time={relativeTime(at - firstSegmentAt)} timeTitle={at > 1_000_000_000 ? new Date(at * 1000).toLocaleString() : "Elapsed from first captured turn"} flags={flags} actions={review}>
       {editingSpeakerId === segment.segmentId ? <div className="turn-review-form">
         {segment.rawSpeaker ? <p className="field-hint">Capture label: {segment.rawSpeaker}</p> : null}

@@ -1,4 +1,4 @@
-import type { AuditEvent, BriefDocument, CalendarConnection, CalendarEvent, CalendarPeriod, CalendarSchedule, CalendarSnapshot, Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeTextProfile, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, MomGuidance, OrganizationBrief, PostMeetingJob, PrepReport, AiSettingsInput, AiSettingsView, CredentialTestResult, ProfileKeyChoice, ProfileKind, ProviderProfile, ResendStatus, VaultCredential, VaultCredentialInput, VaultProviderType, RetentionPolicy, SpeakerIdentity, TextModelCatalog, TranscriptSegment, TranscriptionRoute, UsageSummary, Workspace, WorkspaceCalendarConnection, WorkspaceMember, WorkspaceOperations, WorkspaceOption } from "./types";
+import type { AuditEvent, BriefDocument, CalendarConnection, CalendarEvent, CalendarPeriod, CalendarSchedule, CalendarSnapshot, Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeTextProfile, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, MomGuidance, OrganizationBrief, PostMeetingJob, PrepReport, AiSettingsInput, AiSettingsView, CredentialTestResult, ModelCatalog, ModelCatalogQuery, ProfileKeyChoice, ProfileKind, ProviderProfile, ResendStatus, VaultCredential, VaultCredentialInput, VaultProviderType, RetentionPolicy, SpeakerIdentity, TextModelCatalog, TranscriptSegment, TranscriptionRoute, UsageSummary, Workspace, WorkspaceCalendarConnection, WorkspaceMember, WorkspaceOperations, WorkspaceOption } from "./types";
 
 export interface MeetingsService {
   getSession(): Promise<boolean>;
@@ -15,6 +15,9 @@ export interface MeetingsService {
   listWorkspaces(): Promise<WorkspaceOption[]>;
   createWorkspace(displayName: string): Promise<CurrentAccount>;
   switchWorkspace(id: string): Promise<CurrentAccount>;
+  setDefaultWorkspace(id: string | null): Promise<WorkspaceOption[]>;
+  uploadProfilePhoto(file: File): Promise<CurrentAccount>;
+  removeProfilePhoto(): Promise<CurrentAccount>;
   updateWorkspace(patch: { display_name: string; contact_email: string | null }): Promise<Workspace>;
   getOrganizationBrief(): Promise<OrganizationBrief>;
   saveOrganizationBrief(brief: OrganizationBrief): Promise<OrganizationBrief>;
@@ -101,6 +104,8 @@ export interface MeetingsService {
   testCredential(id: string): Promise<CredentialTestResult>;
   getAiSettings(): Promise<AiSettingsView>;
   updateAiSettings(input: AiSettingsInput): Promise<AiSettingsView>;
+  /** Live model list for one capability; a pasted key travels in a header and is never stored. */
+  browseModelCatalog(query: ModelCatalogQuery, apiKey?: string): Promise<ModelCatalog>;
 }
 
 /** Deleting a saved key that profiles or workspace settings still use (HTTP 409). */
@@ -233,6 +238,12 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+/** Profile photo URLs are API paths; resolve them against the configured API origin. */
+function withPhoto<T extends { photo_url?: string | null }>(record: T): T {
+  const path = record.photo_url;
+  return { ...record, photo_url: path && path.startsWith("/v1/") ? `${API_BASE_URL}${path}` : null };
+}
+
 function apiErrorMessage(payload: unknown): string | null {
   if (typeof payload === "string") return payload || null;
   if (Array.isArray(payload)) {
@@ -342,13 +353,27 @@ class HttpMeetingsService implements MeetingsService {
   }
 
   async getCurrentAccount(): Promise<CurrentAccount> {
-    return api<CurrentAccount>("/v1/auth/me");
+    return withPhoto(await api<CurrentAccount>("/v1/auth/me"));
   }
 
   async updateProfile(displayName: string): Promise<CurrentAccount> {
-    return api<CurrentAccount>("/v1/auth/me", {
+    return withPhoto(await api<CurrentAccount>("/v1/auth/me", {
       method: "PATCH", body: JSON.stringify({ display_name: displayName }),
-    });
+    }));
+  }
+
+  async uploadProfilePhoto(file: File): Promise<CurrentAccount> {
+    const body = new FormData(); body.append("file", file);
+    const response = await fetch(`${API_BASE_URL}/v1/auth/me/photo`, { method: "PUT", body });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as unknown;
+      throw new ApiError(apiErrorMessage(payload) ?? `Upload failed (${response.status})`, response.status);
+    }
+    return withPhoto(await response.json() as CurrentAccount);
+  }
+
+  async removeProfilePhoto(): Promise<CurrentAccount> {
+    return withPhoto(await api<CurrentAccount>("/v1/auth/me/photo", { method: "DELETE" }));
   }
 
   async login(email: string, password: string): Promise<void> {
@@ -401,6 +426,10 @@ class HttpMeetingsService implements MeetingsService {
     return api<CurrentAccount>(`/v1/workspaces/${id}/switch`, { method: "POST" });
   }
 
+  async setDefaultWorkspace(id: string | null): Promise<WorkspaceOption[]> {
+    return api<WorkspaceOption[]>("/v1/workspaces/default", { method: "PUT", body: JSON.stringify({ organization_id: id }) });
+  }
+
   async updateWorkspace(patch: { display_name: string; contact_email: string | null }): Promise<Workspace> {
     return api<Workspace>("/v1/workspace", { method: "PATCH", body: JSON.stringify(patch) });
   }
@@ -422,7 +451,7 @@ class HttpMeetingsService implements MeetingsService {
   async deleteBriefDocument(id: string): Promise<void> { await api<void>(`/v1/workspace/brief/documents/${id}`, { method: "DELETE" }); }
 
   async listWorkspaceMembers(): Promise<WorkspaceMember[]> {
-    return api<WorkspaceMember[]>("/v1/workspace/members");
+    return (await api<WorkspaceMember[]>("/v1/workspace/members")).map(withPhoto);
   }
 
   async listWorkspaceAudit(): Promise<AuditEvent[]> {
@@ -928,6 +957,15 @@ class HttpMeetingsService implements MeetingsService {
 
   async updateAiSettings(input: AiSettingsInput): Promise<AiSettingsView> {
     return api<AiSettingsView>("/v1/ai/settings", { method: "PUT", body: JSON.stringify(input) });
+  }
+
+  async browseModelCatalog(query: ModelCatalogQuery, apiKey?: string): Promise<ModelCatalog> {
+    const params = new URLSearchParams({ capability: query.capability });
+    if (query.provider) params.set("provider", query.provider);
+    if (query.profileId) params.set("profile_id", query.profileId);
+    if (query.credentialId) params.set("credential_id", query.credentialId);
+    if (query.baseUrl) params.set("base_url", query.baseUrl);
+    return api<ModelCatalog>(`/v1/model-catalog?${params.toString()}`, apiKey ? { headers: { "X-Provider-Key": apiKey } } : undefined);
   }
 }
 

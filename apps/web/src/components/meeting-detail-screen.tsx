@@ -241,11 +241,11 @@ export function MeetingDetailScreen({ meetingId, focusSegmentId, backLabel = "Al
           </div>
         </section> : null}
         <MinutesPanel key={`${meeting.id}:${speakerRevision}`} meeting={meeting} transcriptCount={finalizedCount} segments={segments} />
-        <MeetingTranscript meetingTitle={meeting.title} segments={segments} focusSegmentId={focusSegmentId} isPolling={pollableStatuses.has(meeting.status)} isLive={meeting.status === "live"} saving={savingSpeaker} onSaveSpeaker={saveSpeaker} onDownload={downloadTranscript} />
+        <MeetingTranscript meetingTitle={meeting.title} assistantName={meeting.botName} segments={segments} focusSegmentId={focusSegmentId} isPolling={pollableStatuses.has(meeting.status)} isLive={meeting.status === "live"} saving={savingSpeaker} onSaveSpeaker={saveSpeaker} onDownload={downloadTranscript} />
       </div>
       <aside className="record-side" aria-label="Meeting information">
         <MeetingDetailsCard meeting={meeting} route={transcriptionRoute} />
-        <MeetingPeopleCard participants={participants} namedSpeakers={namedSpeakers} speakerIdentities={speakerIdentities} source={source} onSaveIdentity={saveIdentity} />
+        <MeetingPeopleCard participants={participants} assistantName={meeting.botName} namedSpeakers={namedSpeakers} speakerIdentities={speakerIdentities} source={source} onSaveIdentity={saveIdentity} />
         {source ? <MeetingSourceCard source={source} /> : null}
         <MeetingKnowledgeSettings key={meeting.id} meeting={meeting} onSaved={acceptMeeting} />
         {deletableStatuses.has(meeting.status) ? <MeetingDangerZone deleting={deleting} onDelete={() => void deleteMeeting()} /> : null}

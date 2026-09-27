@@ -1,19 +1,20 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Check, Search, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
 import { readUiPreference } from "@/lib/ui-preferences";
-import type { Capability, ProfileKeyChoice, ProviderProfile, TextModelCatalog, VaultCredential } from "@/lib/types";
+import type { Capability, ModelCatalogQuery, ProfileKeyChoice, ProviderProfile, VaultCredential } from "@/lib/types";
 import { UiSelect } from "./ui-select";
 import { Alert, Badge } from "./ui/feedback";
 import type { SettingsNotice } from "./settings-toast";
-import { capabilityLabel, compatibleCredentials, isUnsavedProfile, profileInfo, providerOptions } from "./provider-profile-info";
+import { capabilityLabel, catalogProviderFor, compatibleCredentials, isUnsavedProfile, keyTag, normalizeBaseUrl, profileInfo, providerOptions, recommendedModelIds } from "./provider-profile-info";
 import { initialKeyChoice, keyChoiceChanged, keyChoicePayload, ProviderKeyField, type KeyChoiceState } from "./provider-key-field";
+import { ModelCombobox } from "./model-combobox";
+import { useModelCatalog, type CatalogRequest } from "./use-model-catalog";
 
 type DraftFields = Pick<ProviderProfile, "label" | "provider" | "executionLocation" | "endpoint" | "model" | "capabilities" | "isDefault">;
 type DraftEnvelope = { baseline: string; fields: DraftFields };
-const CATALOG_RESULT_LIMIT = 35;
 
 function draftFields(profile: ProviderProfile): DraftFields {
   return { label: profile.label, provider: profile.provider, executionLocation: profile.executionLocation,
@@ -41,13 +42,29 @@ function isDraftEnvelope(value: unknown): value is DraftEnvelope {
     && typeof fields.isDefault === "boolean";
 }
 
-const defaultLabel: Record<ProviderProfile["kind"], string> = { transcription: "transcription", mom: "MOM & actions", embedding: "knowledge embeddings" };
+type CatalogPlan = { request: CatalogRequest | null; unavailable?: string };
 
-const defaultHint: Record<ProviderProfile["kind"], string> = {
-  mom: "Used for new MOM drafts.",
-  transcription: "Used for the next bot join; active bots keep their route.",
-  embedding: "Saved for the knowledge-base workflow.",
-};
+/**
+ * Which key lists models for the draft: OpenRouter's lists are public; a saved key the draft
+ * links; the saved profile while its route is unchanged; otherwise the provider plus a pasted key.
+ */
+function catalogPlan(draft: ProviderProfile, profile: ProviderProfile, keyChoice: KeyChoiceState, isNew: boolean): CatalogPlan {
+  const provider = catalogProviderFor[draft.provider];
+  if (!provider) return { request: null, unavailable: "This provider has no model list. Type the model id your server runs." };
+  const endpoint = normalizeBaseUrl(draft.endpoint);
+  const compatible = provider === "openai_compatible";
+  if (compatible && !endpoint) return { request: null, unavailable: "Enter the base endpoint to list its models." };
+  const capability = profileInfo[draft.kind].catalog;
+  const pasted = keyChoice.mode === "paste" ? keyChoice.apiKey.trim() || undefined : undefined;
+  const savedKey = keyChoice.mode === "saved" ? keyChoice.credentialId || undefined : undefined;
+  const sameRoute = !isNew && draft.provider === profile.provider && endpoint === normalizeBaseUrl(profile.endpoint);
+  const baseUrl = compatible ? endpoint : undefined;
+  const query: ModelCatalogQuery = provider === "openrouter" ? { capability, provider }
+    : savedKey ? { capability, provider, credentialId: savedKey, baseUrl }
+      : sameRoute ? { capability, provider, profileId: profile.id }
+        : { capability, provider, baseUrl };
+  return { request: { key: JSON.stringify(query) + (pasted ? `:${keyTag(pasted)}` : ""), query, apiKey: pasted } };
+}
 
 export function ProviderEditor({ identity, profile, credentials, canSaveKeys, onSave, onDelete, onChange, onNotice }: {
   identity: string;
@@ -69,18 +86,16 @@ export function ProviderEditor({ identity, profile, credentials, canSaveKeys, on
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [catalog, setCatalog] = useState<TextModelCatalog | null>(null);
-  const [catalogSearch, setCatalogSearch] = useState("");
-  const [catalogBusy, setCatalogBusy] = useState(false);
-  const [catalogError, setCatalogError] = useState<string | null>(null);
   const capabilities = useMemo(() => profileInfo[draft.kind].capabilities, [draft.kind]);
   const isNew = isUnsavedProfile(profile.id);
   const hasUnsavedChanges = keyChoiceChanged(keyChoice, profile) || draft.label !== profile.label || draft.provider !== profile.provider
     || draft.executionLocation !== profile.executionLocation || draft.endpoint !== profile.endpoint
     || draft.model !== profile.model || draft.isDefault !== profile.isDefault
     || draft.capabilities.join(",") !== profile.capabilities.join(",");
-  const canBrowseModels = draft.kind === "mom" && !isNew && (draft.provider === "OpenAI" || draft.provider === "OpenRouter");
-  const Icon = profileInfo[draft.kind].icon;
+  const info = profileInfo[draft.kind];
+  const Icon = info.icon;
+  const plan = useMemo(() => catalogPlan(draft, profile, keyChoice, isNew), [draft, profile, keyChoice, isNew]);
+  const catalog = useModelCatalog(plan.request);
 
   useEffect(() => {
     try {
@@ -135,24 +150,17 @@ export function ProviderEditor({ identity, profile, credentials, canSaveKeys, on
       model: value === "OpenAI" && current.kind === "mom" && !current.model ? "gpt-6-luna" : current.model,
     }));
   }
-  async function discoverModels() {
-    setCatalogBusy(true); setCatalogError(null);
-    try { setCatalog(await meetingsService.listKnowledgeModels(profile.id)); }
-    catch (cause) { setCatalogError(cause instanceof Error ? cause.message : "Could not load models."); }
-    finally { setCatalogBusy(false); }
-  }
   function toggleCapability(capability: Capability) {
     const hasCapability = draft.capabilities.includes(capability);
     update("capabilities", hasCapability ? draft.capabilities.filter((item) => item !== capability) : [...draft.capabilities, capability]);
   }
   const validateBlocked = isNew || hasUnsavedChanges;
-  const catalogMatches = catalog?.models.filter((item) => `${item.name} ${item.id}`.toLowerCase().includes(catalogSearch.toLowerCase())).slice(0, CATALOG_RESULT_LIMIT) ?? [];
 
   return <aside id="provider-editor" className="card provider-editor" aria-label={`Edit ${profile.label}`}>
     <div className="card-header provider-editor-header">
       <span className="settings-icon" aria-hidden="true"><Icon /></span>
       <div>
-        <p className="provider-editor-kind">{profileInfo[draft.kind].title}{isNew ? " · not saved yet" : ""}</p>
+        <p className="provider-editor-kind">{info.title}{isNew ? " · not saved yet" : ""}</p>
         <h2>{draft.label || "Untitled profile"}</h2>
       </div>
       {profile.isDefault ? <Badge tone="brand">Default</Badge> : null}
@@ -168,38 +176,20 @@ export function ProviderEditor({ identity, profile, credentials, canSaveKeys, on
           <UiSelect id="location" label="Execution location" value={draft.executionLocation} onChange={(value) => update("executionLocation", value as ProviderProfile["executionLocation"])} disabled={draft.provider === "OpenAI" || draft.provider === "OpenRouter"} options={[{ value: "local", label: "Local / self-hosted" }, { value: "cloud", label: "Cloud" }]} />
         </div>
         <div className="field">
-          <div className="provider-field-label">
-            <label htmlFor="model">Model</label>
-            {canBrowseModels ? <button type="button" className="text-button" disabled={catalogBusy} onClick={() => void discoverModels()}>{catalogBusy ? "Loading models…" : catalog ? "Refresh live models" : "Browse live models"}</button> : null}
-          </div>
-          <input id="model" value={draft.model} onChange={(event) => update("model", event.target.value)} placeholder="Model ID" required />
-          {catalogError ? <p className="form-error" role="alert">{catalogError}</p> : null}
-        </div>
-        {canBrowseModels && catalog ? <div className="inset-panel provider-catalog">
-          <p className="field-hint">{catalog.models.length} models from {catalog.provider}. Pick one, then save. Availability and prices can change.</p>
-          <div className="input-with-icon"><Search aria-hidden="true" /><input aria-label="Search provider models" value={catalogSearch} onChange={(event) => setCatalogSearch(event.target.value)} placeholder="Search by name or ID" /></div>
-          <ul className="provider-catalog-results">
-            {catalogMatches.map((item) => <li key={item.id}><button type="button" className="provider-catalog-item" aria-pressed={draft.model === item.id} onClick={() => update("model", item.id)}>
-              <span><b>{item.name}</b><small>{item.id}</small></span>
-              {item.input_per_million_usd !== null ? <small className="provider-catalog-price">${item.input_per_million_usd}/M in · ${item.output_per_million_usd}/M out</small> : null}
-              {draft.model === item.id ? <Check aria-hidden="true" /> : null}
-            </button></li>)}
-            {catalogMatches.length ? null : <li className="provider-catalog-empty">No models match this search.</li>}
-          </ul>
-        </div> : null}
-        <div className="field">
           <label htmlFor="endpoint">Base endpoint</label>
           <input id="endpoint" type="url" value={draft.endpoint} onChange={(event) => update("endpoint", event.target.value)} disabled={draft.provider === "OpenAI"} placeholder="https://api.example.com/v1" aria-describedby={draft.provider === "OpenRouter" || draft.provider === "OpenAI-compatible" ? "endpoint-hint" : undefined} />
           {draft.provider === "OpenRouter" || draft.provider === "OpenAI-compatible" ? <p id="endpoint-hint" className="field-hint">For a private server, choose OpenAI-compatible and enter its URL.</p> : null}
         </div>
         <ProviderKeyField draft={draft} credentials={credentials} canSaveKeys={canSaveKeys} value={keyChoice} onChange={setKeyChoice} />
+        <ModelCombobox id="model" label="Model" value={draft.model} onChange={(value) => update("model", value)} catalog={catalog}
+          unavailableNote={plan.unavailable} recommendedIds={recommendedModelIds[info.catalog]} required />
         <fieldset className="provider-capabilities">
           <legend>Capabilities</legend>
           <div className="cluster">{capabilities.map((capability) => <label className="check-label" key={capability}><input type="checkbox" checked={draft.capabilities.includes(capability)} onChange={() => toggleCapability(capability)} />{capabilityLabel[capability]}</label>)}</div>
         </fieldset>
         <label className="choice-card">
           <input type="checkbox" checked={draft.isDefault} onChange={(event) => update("isDefault", event.target.checked)} />
-          <span><b>Use as the default {defaultLabel[draft.kind]} profile</b><small>{defaultHint[draft.kind]}</small></span>
+          <span><b>{info.defaultLabel}</b><small>{info.defaultHint}</small></span>
         </label>
         {confirmDelete ? <div id="provider-delete-confirm"><Alert tone="danger" className="provider-delete-confirm" title={`Delete ${profile.label}?`}>
           <p>Its stored key is removed and defaults are cleared. Meeting history stays.</p>

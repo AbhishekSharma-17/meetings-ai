@@ -93,6 +93,10 @@ class VisionService:
             if not chosen:
                 return None
             return VisionRoute(profile.id, chosen, chosen if chosen != configured else None, "workspace_settings")
+        return await self.automatic()
+
+    async def automatic(self) -> VisionRoute | None:
+        """The route "Automatic" picks from the workspace text-generation default (current tenant)."""
         selection = self.providers.repository.get_default(Capability.TEXT_GENERATION)
         for candidate in selection.ordered_profile_ids() if selection else []:
             try:

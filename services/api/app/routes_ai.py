@@ -109,9 +109,9 @@ def register_ai_routes(app: FastAPI, *, vault: CredentialVault, ai_settings: AiS
             raise HTTPException(status_code=404, detail="saved key not found") from exc
 
     @app.get("/v1/ai/settings", response_model=AiSettingsPublic)
-    def get_ai_settings(request: Request) -> AiSettingsPublic:
+    async def get_ai_settings(request: Request) -> AiSettingsPublic:
         actor = _actor(request)
-        return ai_settings.public(actor.organization_id, actor)
+        return await ai_settings.public_view(actor.organization_id, actor)
 
     @app.put("/v1/ai/settings", response_model=AiSettingsPublic)
     async def put_ai_settings(payload: AiSettingsUpdate, request: Request) -> AiSettingsPublic:
@@ -124,4 +124,4 @@ def register_ai_routes(app: FastAPI, *, vault: CredentialVault, ai_settings: AiS
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except AiSettingsUnavailableError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
-        return ai_settings.public(actor.organization_id, actor)
+        return await ai_settings.public_view(actor.organization_id, actor)

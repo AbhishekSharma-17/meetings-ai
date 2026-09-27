@@ -23,7 +23,7 @@ import { ThemeSwitcher } from "./theme-switcher";
 import { Dialog } from "@base-ui/react/dialog";
 import { Popover } from "@base-ui/react/popover";
 import { BrainCircuit, Building2, CalendarDays, ChartNoAxesCombined, Check, ChevronsUpDown, FileCheck2, House, LogOut, Menu, MessagesSquare, Mic, NotebookPen, UserRound, Users, Video, X } from "lucide-react";
-import { initials } from "@/lib/meeting-status";
+import { Avatar } from "./ui/avatar";
 import { EmptyState, LoadingRow } from "./ui/feedback";
 
 type View = "dashboard" | "meetings" | "calendar" | "prep" | "providers" | "meeting" | "workspace" | "knowledge" | "observability" | "profile";
@@ -221,7 +221,7 @@ export function AppShell() {
           {view === "knowledge" && identity ? <KnowledgeScreen key={identity} identity={identity} account={account} onOpenSource={openMeeting} onOpenProviders={account?.role === "owner" || account?.role === "admin" ? () => setView("providers") : undefined} /> : null}
           {view === "observability" && (account?.role === "owner" || account?.role === "admin") ? <ObservabilityScreen /> : null}
           {view === "workspace" ? workspace
-            ? <WorkspaceSettings workspace={workspace} workspaces={workspaces} account={account} onWorkspaceChange={setWorkspace} onSwitchWorkspace={switchWorkspace} onCreateWorkspace={createWorkspace} />
+            ? <WorkspaceSettings workspace={workspace} workspaces={workspaces} account={account} onWorkspaceChange={setWorkspace} onSwitchWorkspace={switchWorkspace} onCreateWorkspace={createWorkspace} onWorkspacesChange={setWorkspaces} />
             : <section className="page narrow">{workspaceLoading ? <LoadingRow>Loading workspace…</LoadingRow> : <EmptyState icon={<Building2 />} title="Workspace profile is unavailable">Refresh the page to try again.</EmptyState>}</section>
             : null}
           {view === "profile" && account ? <ProfileSettings account={account} workspace={workspace} onAccountChange={setAccount} /> : null}
@@ -335,14 +335,14 @@ function SidebarPanel({ view, onNavigate, workspaces, account, liveCount, onSign
     <div className="sidebar-spacer" />
     <div className="sidebar-foot">
       <Popover.Root open={menuOpen} onOpenChange={setMenuOpen}>
-        <Popover.Trigger className="profile-trigger"><span className="avatar" aria-hidden="true">{initials(account?.display_name)}</span><span className="profile-trigger-copy"><span className="profile-trigger-name">{account?.display_name ?? "Account"}</span><span className="profile-trigger-meta">{account?.email ?? account?.role ?? "User"}</span></span><ChevronsUpDown aria-hidden="true" /></Popover.Trigger>
+        <Popover.Trigger className="profile-trigger"><Avatar name={account?.display_name} photoUrl={account?.photo_url} /><span className="profile-trigger-copy"><span className="profile-trigger-name">{account?.display_name ?? "Account"}</span><span className="profile-trigger-meta">{account?.email ?? account?.role ?? "User"}</span></span><ChevronsUpDown aria-hidden="true" /></Popover.Trigger>
         <Popover.Portal>
           <Popover.Positioner side="top" align="start" sideOffset={6} className="ui-select-positioner">
             <Popover.Popup className="popover profile-popover" aria-label="Account and workspace menu">
-              <div className="profile-popover-heading"><span className="avatar lg" aria-hidden="true">{initials(account?.display_name)}</span><span><b>{account?.display_name ?? "Account"}</b><small>{account?.email ?? "Local account"}</small></span></div>
+              <div className="profile-popover-heading"><Avatar name={account?.display_name} photoUrl={account?.photo_url} size="lg" /><span><b>{account?.display_name ?? "Account"}</b><small>{account?.email ?? "Local account"}</small></span></div>
               <div className="menu-separator" />
               <p className="menu-label">Workspaces</p>
-              {workspaces.map((option) => <button key={option.id} type="button" className={option.id === account?.organization_id ? "menu-item profile-workspace current" : "menu-item profile-workspace"} disabled={workspaceBusy || option.id === account?.organization_id} onClick={() => void changeWorkspace(option.id)}><Building2 /><span>{option.display_name}</span>{option.id === account?.organization_id ? <Check className="check" aria-label="Current" /> : <small>{option.role}</small>}</button>)}
+              {workspaces.map((option) => <button key={option.id} type="button" className={option.id === account?.organization_id ? "menu-item profile-workspace current" : "menu-item profile-workspace"} disabled={workspaceBusy || option.id === account?.organization_id} onClick={() => void changeWorkspace(option.id)}><Building2 /><span>{option.display_name}</span>{option.is_default ? <span className="tag profile-workspace-default">Default</span> : null}{option.id === account?.organization_id ? <Check className="check" aria-label="Current" /> : <small>{option.role}</small>}</button>)}
               {workspaceError ? <p role="alert" className="form-error">{workspaceError}</p> : null}
               <div className="menu-separator" />
               <button type="button" className="menu-item" onClick={() => navigate("workspace")}><Users /> Organization & people</button>

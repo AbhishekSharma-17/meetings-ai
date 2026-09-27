@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { Plus, Trash2 } from "lucide-react";
-import { initials } from "@/lib/meeting-status";
+import { Avatar, DEFAULT_ASSISTANT_NAME, isAssistantName } from "./ui/avatar";
 import type { ActionItem, TranscriptSegment } from "@/lib/types";
 import { EvidenceChips, lines, type EditableDraft } from "./minutes-support";
 
@@ -65,7 +65,7 @@ export function MinutesEditor({ draft, segments, onChange }: { draft: EditableDr
     <Section id="mom-attribution" title="Who said what" hint="Each claim links to evidence. If a speaker is wrong, correct the transcript and regenerate.">
       {draft.contributions.length ? <ul className="mom-claims">
         {draft.contributions.map((item, index) => <li className="mom-claim" key={`${item.speaker}-${index}`}>
-          <div className="mom-claim-head"><span className="avatar sm" aria-hidden="true">{initials(item.speaker)}</span><b>{item.speaker}</b>
+          <div className="mom-claim-head"><Avatar name={item.speaker} size="sm" kind={isAssistantName(item.speaker, DEFAULT_ASSISTANT_NAME) ? "assistant" : "person"} /><b>{item.speaker}</b>
             <button type="button" className="text-button neutral" onClick={() => onChange({ ...draft, contributions: draft.contributions.filter((_, position) => position !== index) })}>Remove claim</button></div>
           <textarea aria-label={`Contribution by ${item.speaker}`} rows={2} value={item.summary} onChange={(event) => onChange({ ...draft, contributions: draft.contributions.map((entry, position) => position === index ? { ...entry, summary: event.target.value } : entry) })} />
           <EvidenceChips ids={item.evidence_segment_ids} segments={segments} />
@@ -75,7 +75,7 @@ export function MinutesEditor({ draft, segments, onChange }: { draft: EditableDr
     <Section id="mom-asked" title="Questions asked">
       {draft.questionsAsked.length ? <ul className="mom-claims">
         {draft.questionsAsked.map((item, index) => <li className="mom-claim" key={`${item.speaker ?? "unknown"}-${index}`}>
-          <div className="mom-claim-head"><span className="avatar sm" aria-hidden="true">{item.speaker ? initials(item.speaker) : "?"}</span><b>{item.speaker ?? "Unidentified speaker"}</b>
+          <div className="mom-claim-head"><Avatar name={item.speaker} size="sm" fallback={item.speaker ? undefined : "?"} /><b>{item.speaker ?? "Unidentified speaker"}</b>
             <button type="button" className="text-button neutral" onClick={() => onChange({ ...draft, questionsAsked: draft.questionsAsked.filter((_, position) => position !== index) })}>Remove question</button></div>
           <textarea aria-label={`Question asked by ${item.speaker ?? "unidentified speaker"}`} rows={2} value={item.question} onChange={(event) => onChange({ ...draft, questionsAsked: draft.questionsAsked.map((entry, position) => position === index ? { ...entry, question: event.target.value } : entry) })} />
           <EvidenceChips ids={item.evidence_segment_ids} segments={segments} />
@@ -107,10 +107,10 @@ export function MinutesDocument({ draft, segments }: { draft: EditableDraft; seg
     </Section>
     <Section id="mom-questions-read" title="Open questions"><ReadList items={lines(draft.questions)} empty="None recorded." /></Section>
     {draft.contributions.length ? <Section id="mom-attribution-read" title="Who said what"><ul className="mom-claims">{draft.contributions.map((item, index) => <li className="mom-claim" key={index}>
-      <div className="mom-claim-head"><span className="avatar sm" aria-hidden="true">{initials(item.speaker)}</span><b>{item.speaker}</b></div><p className="mom-read-text">{item.summary}</p><EvidenceChips ids={item.evidence_segment_ids} segments={segments} />
+      <div className="mom-claim-head"><Avatar name={item.speaker} size="sm" kind={isAssistantName(item.speaker, DEFAULT_ASSISTANT_NAME) ? "assistant" : "person"} /><b>{item.speaker}</b></div><p className="mom-read-text">{item.summary}</p><EvidenceChips ids={item.evidence_segment_ids} segments={segments} />
     </li>)}</ul></Section> : null}
     {draft.questionsAsked.length ? <Section id="mom-asked-read" title="Questions asked"><ul className="mom-claims">{draft.questionsAsked.map((item, index) => <li className="mom-claim" key={index}>
-      <div className="mom-claim-head"><span className="avatar sm" aria-hidden="true">{item.speaker ? initials(item.speaker) : "?"}</span><b>{item.speaker ?? "Unidentified speaker"}</b></div><p className="mom-read-text">{item.question}</p><EvidenceChips ids={item.evidence_segment_ids} segments={segments} />
+      <div className="mom-claim-head"><Avatar name={item.speaker} size="sm" fallback={item.speaker ? undefined : "?"} /><b>{item.speaker ?? "Unidentified speaker"}</b></div><p className="mom-read-text">{item.question}</p><EvidenceChips ids={item.evidence_segment_ids} segments={segments} />
     </li>)}</ul></Section> : null}
   </div>;
 }

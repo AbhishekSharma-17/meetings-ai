@@ -49,6 +49,8 @@ export type WorkspaceOption = {
   slug: string;
   display_name: string;
   role: CurrentAccount["role"];
+  /** The workspace a new sign-in opens in; when none is set, the last active workspace is used. */
+  is_default?: boolean;
 };
 
 export type WorkspaceMember = {
@@ -57,6 +59,8 @@ export type WorkspaceMember = {
   email: string | null;
   role: "owner" | "admin" | "member" | "viewer";
   status: string;
+  /** Versioned, same-origin API path to the member's profile photo, or null. */
+  photo_url?: string | null;
 };
 
 export type AuditEvent = {
@@ -109,6 +113,7 @@ export type CurrentAccount = {
   display_name: string;
   role: "owner" | "admin" | "member" | "viewer";
   must_change_password: boolean;
+  photo_url?: string | null;
 };
 
 export type InviteResult = {
@@ -477,6 +482,8 @@ export type AiSettingsView = {
   vision_configured: boolean;
   research_configured: boolean;
   effective_chat: AiRouteView;
+  /** Owner only: what "Automatic" vision resolves to from the default LLM right now. */
+  automatic_vision?: AiRouteView | null;
 };
 
 /** Full replacement for PUT /v1/ai/settings: send every field; null clears it. */
@@ -574,4 +581,34 @@ export type StoragePurgeRequest = { category: StorageCategoryKey; ids?: string[]
 export type StoragePurgeResult = {
   category: StorageCategoryKey; deleted: Record<string, number>; skipped: Array<{ id: string; reason: string }>; remaining: number;
   reindex_queued: number; kept: Record<string, number>; bytes_before: number; bytes_after: number; bytes_freed_estimate: number;
+};
+
+/* ---------- Model catalog (GET /v1/model-catalog) ---------- */
+export type CatalogCapability = "text_generation" | "transcription" | "embeddings" | "vision";
+export type CatalogProviderType = "openai" | "openrouter" | "openai_compatible";
+export type CatalogModel = {
+  id: string;
+  name: string;
+  vendor: string | null;
+  input_per_million_usd: number | null;
+  output_per_million_usd: number | null;
+  usd_per_minute: number | null;
+  context_length: number | null;
+  accepts_images: boolean | null;
+};
+export type ModelCatalog = {
+  provider: CatalogProviderType;
+  capability: CatalogCapability;
+  live_catalog: boolean;
+  fetched_at: string;
+  note: string | null;
+  models: CatalogModel[];
+};
+/** Where to list models: a saved profile, a saved key, or a provider (+ endpoint for compatible servers). */
+export type ModelCatalogQuery = {
+  capability: CatalogCapability;
+  provider?: CatalogProviderType;
+  profileId?: string;
+  credentialId?: string;
+  baseUrl?: string;
 };

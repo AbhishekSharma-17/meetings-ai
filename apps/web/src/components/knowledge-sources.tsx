@@ -2,7 +2,7 @@
 
 import { ArrowUpRight, CircleCheck, FileText, GitBranch, ListChecks, Quote, ShieldCheck } from "lucide-react";
 import type { KnowledgeMap, KnowledgeSource, KnowledgeWikiOverview } from "@/lib/types";
-import { initials } from "@/lib/meeting-status";
+import { Avatar, DEFAULT_ASSISTANT_NAME, isAssistantName } from "./ui/avatar";
 import { EmptyState } from "./ui/feedback";
 
 export type OpenSource = (meetingId: string, segmentId: string) => void;
@@ -38,7 +38,7 @@ export function SourceCard({ source, onOpenSource, index, highlighted = false }:
     </header>
     <p className="knowledge-source-text">{source.text}</p>
     <footer className="knowledge-source-foot">
-      <span className="knowledge-source-speaker"><span className="avatar sm" aria-hidden="true">{initials(speaker)}</span><span>{source.kind === "transcript" ? "Speaker" : "Evidence speaker"}: {speaker}</span></span>
+      <span className="knowledge-source-speaker"><Avatar name={speaker} size="sm" kind={isAssistantName(speaker, DEFAULT_ASSISTANT_NAME) ? "assistant" : "person"} /><span>{source.kind === "transcript" ? "Speaker" : "Evidence speaker"}: {speaker}</span></span>
       <span className="knowledge-source-time">{formatOffset(source.start_seconds)} into transcript</span>
       {source.tags.length ? <span className="tag-list">{source.tags.map((tag) => <span className="tag" key={tag}>#{tag}</span>)}</span> : null}
       <button className="text-button knowledge-source-open" type="button" onClick={() => onOpenSource(source.meeting_id, source.segment_id)}>Open cited transcript <ArrowUpRight /></button>
@@ -71,7 +71,7 @@ export function EvidenceMap({ map, onOpenSource }: { map: KnowledgeMap; onOpenSo
     <p className="field-hint wiki-map-note"><ShieldCheck aria-hidden="true" /> Speaker labels are not verified identities unless an email was explicitly confirmed. {map.truncated_meeting_scope ? "This map covers the newest 200 eligible meetings." : ""}</p>
     <div className="wiki-map-columns">
       <div className="card"><div className="card-header"><div><h3>Topics</h3></div><span className="section-count">{map.topics.length}</span></div><div className="card-body tight">{map.topics.length ? map.topics.map((item) => <details key={item.key} className="knowledge-map-entry"><summary><span className="map-entry-mark" aria-hidden="true">#</span><span><b>{item.label}</b><small>{count(item.meeting_count, "meeting")} · {count(item.source_count, "source")}</small></span></summary><div className="knowledge-map-sources">{item.sources.map((source) => <SourceCard key={source.source_id} source={source} onOpenSource={onOpenSource} />)}</div></details>) : <p className="field-hint wiki-empty">No tags on eligible meetings yet.</p>}</div></div>
-      <div className="card"><div className="card-header"><div><h3>Speaker labels</h3></div><span className="section-count">{map.speaker_labels.length}</span></div><div className="card-body tight">{map.speaker_labels.length ? map.speaker_labels.map((item) => <details key={item.key} className="knowledge-map-entry"><summary><span className="avatar sm" aria-hidden="true">{initials(item.label)}</span><span><b>{item.label}</b><small>{item.verified_identity ? `Confirmed email · ${item.email}` : "Unverified label"} · {count(item.meeting_count, "meeting")}</small></span></summary><div className="knowledge-map-sources">{item.sources.map((source) => <SourceCard key={source.source_id} source={source} onOpenSource={onOpenSource} />)}</div></details>) : <p className="field-hint wiki-empty">No named speaker turns yet.</p>}</div></div>
+      <div className="card"><div className="card-header"><div><h3>Speaker labels</h3></div><span className="section-count">{map.speaker_labels.length}</span></div><div className="card-body tight">{map.speaker_labels.length ? map.speaker_labels.map((item) => <details key={item.key} className="knowledge-map-entry"><summary><Avatar name={item.label} size="sm" kind={isAssistantName(item.label, DEFAULT_ASSISTANT_NAME) ? "assistant" : "person"} /><span><b>{item.label}</b><small>{item.verified_identity ? `Confirmed email · ${item.email}` : "Unverified label"} · {count(item.meeting_count, "meeting")}</small></span></summary><div className="knowledge-map-sources">{item.sources.map((source) => <SourceCard key={source.source_id} source={source} onOpenSource={onOpenSource} />)}</div></details>) : <p className="field-hint wiki-empty">No named speaker turns yet.</p>}</div></div>
     </div>
   </section>;
 }

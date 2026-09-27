@@ -8,8 +8,11 @@ import { UiSelect } from "./ui-select";
 import { Badge, EmptyState, LoadingRow } from "./ui/feedback";
 import { activityCategories, activityCategoryOrder, dayLabel, describeAuditEvent, type ActivityCategory, type ActivityEntry } from "./audit-activity";
 import { FilterInput, matchesQuery, NoMatches, ScrollPanel } from "./scroll-panel";
+import { Avatar } from "./ui/avatar";
 
 type CategoryFilter = ActivityCategory | "all";
+/** Who to picture next to an entry: a teammate (photo or initials) or the assistant for automatic jobs. */
+type ActorFace = { name: string; photoUrl: string | null; kind: "person" | "assistant" };
 
 /** Workspace audit trail in plain language: who did what, to which meeting, person or knowledge base. */
 export function ActivityCard({ members, meetingTitles, baseNames }: { members: WorkspaceMember[]; meetingTitles: ReadonlyMap<string, string>; baseNames: ReadonlyMap<string, string> }) {
@@ -43,6 +46,17 @@ export function ActivityCard({ members, meetingTitles, baseNames }: { members: W
     return events.map((event) => describeAuditEvent(event, lookup));
   }, [events, members, meetingTitles, baseNames]);
 
+  const faces = useMemo(() => {
+    const byId = new Map(members.map((member) => [member.user_id, member]));
+    const map = new Map<string, ActorFace>();
+    for (const event of events) {
+      const member = event.actor_user_id ? byId.get(event.actor_user_id) : undefined;
+      if (member) map.set(event.id, { name: member.display_name, photoUrl: member.photo_url ?? null, kind: "person" });
+      else if (!event.actor_user_id && event.action.startsWith("retention.")) map.set(event.id, { name: "Meetings AI", photoUrl: null, kind: "assistant" });
+    }
+    return map;
+  }, [events, members]);
+
   const counts = useMemo(() => entries.reduce((map, entry) => map.set(entry.category, (map.get(entry.category) ?? 0) + 1), new Map<ActivityCategory, number>()), [entries]);
   const visible = entries.filter((entry) => (category === "all" || entry.category === category)
     && matchesQuery(query, [entry.sentence, activityCategories[entry.category].label, entry.failed ? "failed" : null]));
@@ -61,13 +75,13 @@ export function ActivityCard({ members, meetingTitles, baseNames }: { members: W
     </div> : null}
     {error ? <div className="card-body"><p className="form-error" role="alert">{error}</p></div> : null}
     {entries.length
-      ? visible.length ? <ScrollPanel label="Activity log"><ActivityFeed entries={visible} /></ScrollPanel> : <NoMatches query={query} noun="activity entries" onClear={clear} />
+      ? visible.length ? <ScrollPanel label="Activity log"><ActivityFeed entries={visible} faces={faces} /></ScrollPanel> : <NoMatches query={query} noun="activity entries" onClear={clear} />
       : loaded && !error ? <div className="card-body"><EmptyState plain icon={<History />} title="No activity yet">Sign-ins, meeting changes and recap deliveries will appear here.</EmptyState></div>
       : !error ? <LoadingRow>Loading recent activity…</LoadingRow> : null}
   </section>;
 }
 
-function ActivityFeed({ entries }: { entries: ActivityEntry[] }) {
+function ActivityFeed({ entries, faces }: { entries: ActivityEntry[]; faces: ReadonlyMap<string, ActorFace> }) {
   const now = new Date();
   const groups: Array<{ day: string; items: ActivityEntry[] }> = [];
   for (const entry of entries) {
@@ -79,12 +93,12 @@ function ActivityFeed({ entries }: { entries: ActivityEntry[] }) {
   return <div className="activity-feed">
     {groups.map((group) => <section key={group.day} className="activity-day" aria-label={group.day}>
       <h3 className="activity-day-label">{group.day}</h3>
-      <ol className="activity-list">{group.items.map((entry) => <ActivityRow key={entry.id} entry={entry} />)}</ol>
+      <ol className="activity-list">{group.items.map((entry) => <ActivityRow key={entry.id} entry={entry} face={faces.get(entry.id)} />)}</ol>
     </section>)}
   </div>;
 }
 
-function ActivityRow({ entry }: { entry: ActivityEntry }) {
+function ActivityRow({ entry, face }: { entry: ActivityEntry; face?: ActorFace }) {
   const Icon = entry.icon;
   const category = activityCategories[entry.category];
   const time = entry.at.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
@@ -92,6 +106,7 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
     <span className="activity-icon" aria-hidden="true"><Icon /></span>
     <div className="activity-copy">
       <p className="activity-sentence">
+        {face ? <Avatar name={face.name} photoUrl={face.photoUrl} kind={face.kind} size="sm" className="activity-avatar" /> : null}
         {entry.actor ? <b>{entry.actor}</b> : null}{entry.actor ? " " : null}{entry.text}
         {entry.target ? <> <span className="activity-target">{entry.target}</span></> : null}
         {entry.suffix ? ` ${entry.suffix}` : null}

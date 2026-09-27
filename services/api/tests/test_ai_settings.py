@@ -67,13 +67,16 @@ def test_settings_validation_and_owner_view(tmp_path) -> None:
             {"chat_profile_id": str(uuid4())},
             {"chat_profile_id": embed_id},
             {"chat_model": "openai/gpt-6-luna"},
-            {"chat_profile_id": chat_id, "chat_model": "not/in-catalog"},
             {"chat_profile_id": chat_id, "chat_model": "has space"},
             {"research_credential_id": router["id"]},
             {"research_credential_id": str(uuid4())},
             {"vision_profile_id": embed_id},
         ):
             assert client.put("/v1/ai/settings", json=invalid).status_code == 422, invalid
+
+        # Owners may type a custom or newly released model id the live catalog does not list.
+        custom = client.put("/v1/ai/settings", json={"chat_profile_id": chat_id, "chat_model": "vendor/custom-model"})
+        assert custom.status_code == 200 and custom.json()["chat_model"] == "vendor/custom-model"
 
         saved = client.put("/v1/ai/settings", json={
             "chat_profile_id": chat_id, "chat_model": "anthropic/claude-lite",

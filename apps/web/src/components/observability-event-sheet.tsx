@@ -6,6 +6,7 @@ import { X } from "lucide-react";
 import type { UsageEvent } from "@/lib/types";
 import { Badge } from "./ui/feedback";
 import { detailLabel, formatDuration, formatUsd, kindLabel, kindTone, providerLabel, purposeLabel, statusLabel, unitsLabel } from "./usage-labels";
+import { Avatar } from "./ui/avatar";
 
 function detailValue(value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";
@@ -57,7 +58,7 @@ export function UsageEventSheet({ event, onClose }: { event: UsageEvent | null; 
                 <Row label="Meeting">{event.meeting_title ?? (event.meeting_id ? "Deleted meeting" : "—")}</Row>
                 <Row label="Meeting prep">{event.prep_event_title ?? (event.prep_event_id ? "Removed calendar event" : "—")}</Row>
                 <Row label="Knowledge base">{event.knowledge_base_name ?? (event.knowledge_base_id ? "Deleted knowledge base" : "—")}</Row>
-                <Row label="Triggered by">{event.actor_display_name ?? (event.actor_user_id ? "Former member" : "Automatic")}</Row>
+                <Row label="Triggered by">{event.actor_display_name ?? (event.actor_user_id ? "Former member" : <span className="inline-actor"><Avatar name="Meetings AI" kind="assistant" size="sm" />Automatic</span>)}</Row>
               </dl>
             </section>
             <section aria-labelledby="obs-sheet-details">

@@ -16,7 +16,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .credential_vault import CredentialNotFoundError
 from .database import Database, OrganizationAiSettingsRow
-from .model_catalog import ModelCatalogError
 from .repository import ProfileNotFoundError
 from .tenant import tenant_scope
 
@@ -103,6 +102,8 @@ class AiSettingsPublic(BaseModel):
     vision_configured: bool = False
     research_configured: bool = False
     effective_chat: AiRoutePublic
+    # Owner only: what "Automatic" vision would use right now (from the default LLM).
+    automatic_vision: AiRoutePublic | None = None
 
 
 def _uuid(value: str | None) -> UUID | None:
@@ -129,6 +130,7 @@ class AiSettingsService:
         self.repository = repository
         self.vault = vault
         self.model_catalog = model_catalog
+        self.vision: object | None = None  # VisionService, set at wiring time
 
     def get(self, organization_id: UUID) -> AiSettings:
         with self.database.session_factory() as session:
@@ -193,14 +195,8 @@ class AiSettingsService:
             raise AiSettingsValidationError(f"the selected {prefix} provider was not found") from exc
         if not profile.supports(Capability.TEXT_GENERATION):
             raise AiSettingsValidationError(f"the selected {prefix} provider has no text-generation model")
-        if model is None or model == profile.models.get(Capability.TEXT_GENERATION) or self.model_catalog is None:
-            return
-        try:
-            catalog = await self.model_catalog.list_for(profile)
-        except ModelCatalogError as exc:
-            raise AiSettingsUnavailableError(str(exc)) from exc
-        if model not in {option.id for option in catalog.models}:
-            raise AiSettingsValidationError(f"choose a {prefix} model from the provider catalog")
+        # A model id the live catalog does not list is still accepted: owners may type a
+        # custom or newly released id. Its format was validated by AiSettingsUpdate.
 
     def effective_chat(self, organization_id: UUID, *, include_ids: bool) -> AiRoutePublic:
         settings = self.get(organization_id)
@@ -253,4 +249,25 @@ class AiSettingsService:
             research_profile_id=settings.research_profile_id, research_model=settings.research_model,
             updated_at=settings.updated_at, updated_by=settings.updated_by,
             effective_chat=effective, **flags,
+        )
+
+    async def public_view(self, organization_id: UUID, actor: object) -> AiSettingsPublic:
+        """``public`` plus, for the owner, the model that "Automatic" vision resolves to."""
+        view = self.public(organization_id, actor)
+        if not view.can_edit or self.vision is None:
+            return view
+        return view.model_copy(update={"automatic_vision": await self.automatic_vision(organization_id)})
+
+    async def automatic_vision(self, organization_id: UUID) -> AiRoutePublic:
+        with tenant_scope(organization_id):
+            route = await self.vision.automatic()
+            if route is None:
+                return AiRoutePublic(source="not_configured")
+            try:
+                profile = self.repository.get_profile(route.profile_id)
+            except ProfileNotFoundError:
+                return AiRoutePublic(source="not_configured")
+        return AiRoutePublic(
+            profile_id=profile.id, profile_name=profile.name, provider=provider_label(profile),
+            model=route.model, source="workspace_default",
         )

@@ -17,6 +17,10 @@ from .database import (
     Database, KnowledgeBaseAccessRow, KnowledgeBaseRow, LEGACY_ADMIN_USER_ID, LEGACY_ORGANIZATION_ID,
     OrganizationMembershipRow, OrganizationRow, UserCredentialRow, UserRow,
 )
+from .workspace_preferences import (
+    default_organization_id, forget_organization, preferred_organization_id, record_last_organization,
+    set_default_organization,
+)
 
 
 class AccountError(ValueError):
@@ -45,6 +49,7 @@ class AccountPublic(BaseModel):
     display_name: str
     role: str
     must_change_password: bool
+    photo_url: str | None = None
 
 
 class InviteRequest(BaseModel):
@@ -122,6 +127,13 @@ class OrganizationOption(BaseModel):
     slug: str
     display_name: str
     role: str
+    is_default: bool = False
+
+
+class DefaultWorkspaceRequest(BaseModel):
+    """Set the workspace a new sign-in opens in; null means "use the last active workspace"."""
+
+    organization_id: UUID | None = None
 
 
 def _hash_password(password: str) -> str:
@@ -166,7 +178,7 @@ class AccountService:
                 ))
 
     def login(self, email: str | None, password: str) -> Actor:
-        with self.database.session_factory() as session:
+        with self.database.session_factory.begin() as session:
             if email:
                 row = session.execute(select(UserRow).where(func.lower(UserRow.email) == email.strip().lower())).scalar_one_or_none()
             else:
@@ -178,7 +190,19 @@ class AccountService:
                 raise AccountError("invalid email or password")
             if not email and row.id != str(LEGACY_ADMIN_USER_ID):
                 raise AccountError("email is required")
-            return self._actor(session, row, credential)
+            actor = self._landing_actor(session, row, credential)
+            record_last_organization(session, row.id, str(actor.organization_id))
+            return actor
+
+    def _landing_actor(self, session, row: UserRow, credential: UserCredentialRow) -> Actor:
+        """Default workspace, else last active, else the oldest membership."""
+        preferred = preferred_organization_id(session, row.id)
+        if preferred is not None:
+            try:
+                return self._actor(session, row, credential, UUID(preferred))
+            except AccountError:
+                pass  # membership vanished since the check; fall back below
+        return self._actor(session, row, credential)
 
     def from_session(self, user_id: UUID, organization_id: UUID, version: int) -> Actor | None:
         with self.database.session_factory() as session:
@@ -197,17 +221,34 @@ class AccountService:
                 .join(OrganizationRow, OrganizationRow.id == OrganizationMembershipRow.organization_id)
                 .where(OrganizationMembershipRow.user_id == str(actor.user_id), OrganizationRow.status == "active")
                 .order_by(OrganizationRow.display_name)).all()
+            default_id = default_organization_id(session, str(actor.user_id))
             return [OrganizationOption(id=UUID(org.id), slug=org.slug,
-                                       display_name=org.display_name, role=membership.role)
+                                       display_name=org.display_name, role=membership.role,
+                                       is_default=org.id == default_id)
                     for membership, org in rows]
 
+    def set_default_organization(self, actor: Actor, organization_id: UUID | None) -> list[OrganizationOption]:
+        with self.database.session_factory.begin() as session:
+            if organization_id is not None:
+                membership = session.execute(select(OrganizationMembershipRow)
+                    .join(OrganizationRow, OrganizationRow.id == OrganizationMembershipRow.organization_id)
+                    .where(OrganizationMembershipRow.user_id == str(actor.user_id),
+                           OrganizationMembershipRow.organization_id == str(organization_id),
+                           OrganizationRow.status == "active")).scalar_one_or_none()
+                if membership is None:
+                    raise AccountError("workspace not found")
+            set_default_organization(session, str(actor.user_id), str(organization_id) if organization_id else None)
+        return self.list_organizations(actor)
+
     def select_organization(self, actor: Actor, organization_id: UUID) -> Actor:
-        with self.database.session_factory() as session:
+        with self.database.session_factory.begin() as session:
             user = session.get(UserRow, str(actor.user_id))
             credential = session.get(UserCredentialRow, str(actor.user_id))
             if user is None or credential is None:
                 raise AccountError("account not found")
-            return self._actor(session, user, credential, organization_id)
+            selected = self._actor(session, user, credential, organization_id)
+            record_last_organization(session, user.id, str(selected.organization_id))
+            return selected
 
     def create_organization(self, actor: Actor, data: OrganizationCreateRequest) -> Actor:
         now = datetime.now(UTC)
@@ -364,6 +405,7 @@ class AccountService:
                     select(KnowledgeBaseRow.id).where(KnowledgeBaseRow.organization_id == str(requester.organization_id))
                 ),
             ))
+            forget_organization(session, str(user_id), str(requester.organization_id))
             session.delete(membership)
 
     @staticmethod

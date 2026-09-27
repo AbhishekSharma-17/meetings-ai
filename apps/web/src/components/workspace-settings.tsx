@@ -2,12 +2,11 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { meetingsService } from "@/lib/meetings-service";
-import { initials } from "@/lib/meeting-status";
 import type { CurrentAccount, InviteResult, Workspace, WorkspaceMember, WorkspaceOption } from "@/lib/types";
 import { PageHeader } from "./ui/page-header";
-import { Badge } from "./ui/feedback";
 import { SettingsToast } from "./settings-toast";
-import { roleLabel, WorkspacePeople, type InviteRole } from "./workspace-people";
+import { WorkspacePeople, type InviteRole } from "./workspace-people";
+import { WorkspaceDirectory } from "./workspace-directory";
 import { WorkspaceBrief } from "./workspace-brief";
 import { OperationsCard, RetentionCard } from "./workspace-admin-cards";
 import { ActivityCard } from "./workspace-activity";
@@ -23,13 +22,14 @@ const sectionLinks: SectionLink[] = [
   { id: "settings-activity", label: "Recent activity", adminOnly: true },
 ];
 
-export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceChange, onSwitchWorkspace, onCreateWorkspace }: {
+export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceChange, onSwitchWorkspace, onCreateWorkspace, onWorkspacesChange }: {
   workspace: Workspace;
   workspaces: WorkspaceOption[];
   account: CurrentAccount | null;
   onWorkspaceChange(workspace: Workspace): void;
   onSwitchWorkspace(id: string): Promise<void>;
   onCreateWorkspace(name: string): Promise<void>;
+  onWorkspacesChange?(workspaces: WorkspaceOption[]): void;
 }) {
   const [name, setName] = useState(workspace.display_name);
   const [contactEmail, setContactEmail] = useState(workspace.contact_email ?? "");
@@ -37,9 +37,6 @@ export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceC
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [newWorkspaceName, setNewWorkspaceName] = useState("");
-  const [workspaceAction, setWorkspaceAction] = useState(false);
-  const [workspaceActionError, setWorkspaceActionError] = useState<string | null>(null);
   const [inviteResult, setInviteResult] = useState<InviteResult | null>(null);
   const [inviting, setInviting] = useState(false);
   const [memberBusy, setMemberBusy] = useState<string | null>(null);
@@ -78,24 +75,6 @@ export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceC
       setError(cause instanceof Error ? cause.message : "Could not save workspace profile.");
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function createWorkspace(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setWorkspaceAction(true); setWorkspaceActionError(null);
-    try { await onCreateWorkspace(newWorkspaceName.trim()); }
-    catch (cause) {
-      setWorkspaceActionError(cause instanceof Error ? cause.message : "Could not create workspace.");
-      setWorkspaceAction(false);
-    }
-  }
-
-  async function switchWorkspace(id: string) {
-    setWorkspaceAction(true); setWorkspaceActionError(null);
-    try { await onSwitchWorkspace(id); }
-    catch (cause) {
-      setWorkspaceActionError(cause instanceof Error ? cause.message : "Could not switch workspace.");
-      setWorkspaceAction(false);
     }
   }
 
@@ -159,23 +138,7 @@ export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceC
         <WorkspacePeople members={members} account={account} canManage={canManage} memberBusy={memberBusy} pendingRemovalId={pendingRemovalId} inviteResult={inviteResult} inviting={inviting}
           onChangeRole={(userId, role) => void changeRole(userId, role)} onReset={(userId) => void resetMember(userId)} onRequestRemoval={setPendingRemovalId} onCancelRemoval={() => setPendingRemovalId(null)}
           onRemove={(userId) => void removeMember(userId)} onInvite={invite} onCopyFailed={() => setError("Could not copy the password. Select it and copy it manually.")} />
-        <section className="card settings-section" id="settings-workspaces" aria-labelledby="workspace-directory-title">
-          <div className="card-header"><div><h2 id="workspace-directory-title">Your workspaces</h2><p>Each workspace keeps its own meetings, people, providers and knowledge.</p></div></div>
-          <ul className="workspace-directory">{workspaces.map((item) => {
-            const current = item.id === account?.organization_id;
-            return <li key={item.id} className="list-row">
-              <span className="avatar workspace-avatar" aria-hidden="true">{initials(item.display_name)}</span>
-              <span className="workspace-directory-copy"><b>{item.display_name}</b><small>{roleLabel[item.role] ?? item.role}</small></span>
-              {current ? <Badge tone="brand">Current workspace</Badge> : <button className="button secondary sm" type="button" disabled={workspaceAction} onClick={() => void switchWorkspace(item.id)}>Switch</button>}
-            </li>;
-          })}</ul>
-          {canManage ? <form className="card-footer workspace-create" onSubmit={(event) => void createWorkspace(event)}>
-            <label className="sr-only" htmlFor="new-workspace-name">New workspace name</label>
-            <input id="new-workspace-name" value={newWorkspaceName} onChange={(event) => setNewWorkspaceName(event.target.value)} minLength={2} maxLength={120} required placeholder="New workspace, e.g. Novaala" disabled={workspaceAction} />
-            <button className="button secondary" type="submit" disabled={workspaceAction}>{workspaceAction ? "Creating…" : "Create workspace"}</button>
-          </form> : null}
-          {workspaceActionError ? <div className="card-body"><p className="form-error" role="alert">{workspaceActionError}</p></div> : null}
-        </section>
+        <WorkspaceDirectory workspaces={workspaces} account={account} canManage={canManage} onSwitchWorkspace={onSwitchWorkspace} onCreateWorkspace={onCreateWorkspace} onWorkspacesChange={onWorkspacesChange} />
         <WorkspaceBrief workspaceId={workspace.id} canManage={canManage} />
         {canManage ? <RetentionCard onSaved={setMessage} /> : null}
         {canManage ? <OperationsCard meetingTitles={meetingTitles} /> : null}

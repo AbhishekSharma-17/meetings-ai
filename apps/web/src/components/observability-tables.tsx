@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { meetingStatusLabel, initials } from "@/lib/meeting-status";
+import { meetingStatusLabel } from "@/lib/meeting-status";
+import { Avatar } from "./ui/avatar";
 import type { Meeting, UsageSummary, WorkspaceCalendarConnection, WorkspaceMember } from "@/lib/types";
 import { Badge } from "./ui/feedback";
 import { FilterInput, matchesQuery, NoMatches, ScrollPanel } from "./scroll-panel";
@@ -61,7 +62,7 @@ export function PeopleTable({ people }: { people: WorkspaceMember[] }) {
     {people.length && !visible.length ? <NoMatches query={query} noun="people" onClear={() => setQuery("")} /> : <ScrollPanel label="People" className="obs-table"><table className="data-table">
       <thead><tr><th>Person</th><th>Role</th><th>Status</th></tr></thead>
       <tbody>{visible.length ? visible.map((person) => <tr key={person.user_id}>
-        <td><span className="obs-person"><span className="avatar sm" aria-hidden="true">{initials(person.display_name)}</span><span className="obs-cell"><span>{person.display_name}</span><small>{person.email || "No email"}</small></span></span></td>
+        <td><span className="obs-person"><Avatar name={person.display_name} photoUrl={person.photo_url} size="sm" /><span className="obs-cell"><span>{person.display_name}</span><small>{person.email || "No email"}</small></span></span></td>
         <td>{roleLabel[person.role] ?? capitalize(person.role)}</td>
         <td><Badge tone={person.status === "active" ? "success" : person.status === "invited" ? "info" : "neutral"} dot>{capitalize(person.status)}</Badge></td>
       </tr>) : <EmptyRow span={3}>No members available.</EmptyRow>}</tbody>

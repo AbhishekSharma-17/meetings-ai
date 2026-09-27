@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { initials } from "@/lib/meeting-status";
+import { Avatar, isAssistantName } from "./ui/avatar";
 import type { CalendarEvent, MeetingParticipants, SpeakerIdentity } from "@/lib/types";
 
 /** Participant evidence plus human-confirmed speaker contacts. Never auto-matches emails to voices. */
-export function MeetingPeopleCard({ participants, namedSpeakers, speakerIdentities, source, onSaveIdentity }: {
+export function MeetingPeopleCard({ participants, assistantName, namedSpeakers, speakerIdentities, source, onSaveIdentity }: {
   participants: MeetingParticipants | null;
+  /** The meeting's bot name; the assistant is shown with the Meetings AI logo. */
+  assistantName?: string;
   namedSpeakers: string[];
   speakerIdentities: SpeakerIdentity[];
   source: CalendarEvent | null;
@@ -28,7 +30,7 @@ export function MeetingPeopleCard({ participants, namedSpeakers, speakerIdentiti
     <div className="card-body stack">
       {people.length ? <ul className="record-people">
         {people.map((person, index) => <li key={`${person.source}-${person.name}-${index}`}>
-          <span className="avatar sm" aria-hidden="true">{initials(person.name)}</span>
+          <Avatar name={person.name} size="sm" kind={isAssistantName(person.name, assistantName) ? "assistant" : "person"} />
           <span className="record-person-copy"><b>{person.name}</b>{person.email ? <small>{person.email}</small> : null}</span>
           <span className="record-person-source">{person.source === "invite" ? "Invited" : "Heard speaking"}</span>
         </li>)}

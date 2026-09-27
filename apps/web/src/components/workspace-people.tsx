@@ -2,7 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { Check, Copy, UserPlus } from "lucide-react";
-import { initials } from "@/lib/meeting-status";
+import { Avatar } from "./ui/avatar";
 import type { CurrentAccount, InviteResult, WorkspaceMember } from "@/lib/types";
 import { UiSelect } from "./ui-select";
 import { Alert, Badge, type Tone } from "./ui/feedback";
@@ -75,7 +75,7 @@ export function WorkspacePeople({ members, account, canManage, memberBusy, pendi
         const ownerProtected = member.role === "owner" && ownerCount <= 1;
         const busy = memberBusy === member.user_id;
         return <li key={member.user_id} className="member-row">
-          <span className="avatar" aria-hidden="true">{initials(member.display_name)}</span>
+          <Avatar name={member.display_name} photoUrl={member.photo_url} />
           <span className="member-identity">
             <span className="member-name"><b>{member.display_name}</b>{isSelf ? <span className="tag">You</span> : null}</span>
             <small>{member.email ?? "Local password sign-in"}</small>

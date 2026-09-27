@@ -11,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     JSON,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -676,6 +677,33 @@ class MeetingPrepInputRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class UserWorkspacePreferenceRow(Base):
+    """Which workspace a sign-in lands in: the user's default, else the one active last time."""
+
+    __tablename__ = "user_workspace_preferences"
+
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), primary_key=True)
+    # Deliberately no FK to organizations: a stale id is ignored at sign-in and
+    # cleared when the membership is removed, so it never selects a workspace.
+    default_organization_id: Mapped[str | None] = mapped_column(String(36))
+    last_organization_id: Mapped[str | None] = mapped_column(String(36))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class UserProfilePhotoRow(Base):
+    """A re-encoded, metadata-free square profile photo (never the original upload)."""
+
+    __tablename__ = "user_profile_photos"
+
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), primary_key=True)
+    content_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    image: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    width: Mapped[int] = mapped_column(Integer, nullable=False)
+    height: Mapped[int] = mapped_column(Integer, nullable=False)
+    byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class SchemaVersionRow(Base):
     __tablename__ = "schema_version"
 
@@ -721,6 +749,7 @@ SCHEMA_TABLES_BY_VERSION: dict[int, tuple[str, ...]] = {
         "provider_credentials", "provider_profile_credentials", "organization_ai_settings",
         "usage_events", "knowledge_documents", "knowledge_chunks", "meeting_prep_inputs",
     ),
+    23: ("user_workspace_preferences", "user_profile_photos"),
 }
 
 SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
@@ -774,6 +803,8 @@ SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
     "knowledge_documents": ("id", "organization_id", "scope", "scope_id", "filename", "content_type", "source_url", "size_bytes", "page_count", "ocr_page_count", "extracted_text", "summary", "status", "error", "created_by", "created_at", "indexed_at"),
     "knowledge_chunks": ("id", "organization_id", "scope", "scope_id", "source_type", "source_id", "document_id", "meeting_id", "position", "title", "context", "content", "token_count", "details", "fingerprint", "profile_id", "model", "dimensions", "embedding", "created_at", "embedded_at"),
     "meeting_prep_inputs": ("calendar_event_id", "organization_id", "target_company", "company_website", "links", "notes", "updated_by", "updated_at"),
+    "user_workspace_preferences": ("user_id", "default_organization_id", "last_organization_id", "updated_at"),
+    "user_profile_photos": ("user_id", "content_type", "image", "width", "height", "byte_size", "updated_at"),
 }
 
 
@@ -856,7 +887,7 @@ def _migrate_to_v22(connection) -> None:
 class Database:
     """Upgrades known schemas and rejects unknown or incomplete ones."""
 
-    SCHEMA_VERSION = 22
+    SCHEMA_VERSION = 23
 
     def __init__(self, url: str) -> None:
         engine_options: dict[str, object] = {"pool_pre_ping": True}

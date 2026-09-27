@@ -74,6 +74,22 @@ function starterProfile(key: VaultCredential, makeDefault: boolean): ProviderPro
   };
 }
 
+/** "Same as default LLM — GPT-6 via OpenRouter · openai/gpt-6-sol" for the provider pickers. */
+function defaultLlmLabel(profiles: ProviderProfile[]): string {
+  const fallback = profiles.find((profile) => profile.kind === "mom" && profile.isDefault) ?? profiles.find((profile) => profile.isDefault);
+  return fallback ? `Same as default LLM — ${fallback.label} · ${fallback.model || "no model set"}` : "Default LLM (not set up yet)";
+}
+
+/** What "Automatic" vision resolves to right now, from the owner-only automatic_vision route. */
+function AutomaticVision({ view }: { view: AiSettingsView }) {
+  const route = view.automatic_vision;
+  const resolved = route && route.source !== "not_configured" && route.model;
+  return <div className="workspace-ai-resolved" role="status">
+    <b>{resolved ? `Automatic → ${route.model}${route.profile_name ? ` via ${route.profile_name}` : ""}` : route ? "Automatic finds no image-capable model yet" : "Automatic"}</b>
+    <small>{resolved || !route ? "Picks an image-capable model on the same key as your default LLM." : "Pick a provider above to choose a model that reads images."}</small>
+  </div>;
+}
+
 /** One-line description of the model that answers Ask AI, for everyone. */
 export function effectiveChatText(view: AiSettingsView): string {
   const route = view.effective_chat;
@@ -131,6 +147,7 @@ function OwnerForm({ view, profiles, exaKeys, keys, onProfileCreated, onSaved, o
   const recommended = recommendedDraft(draft, profiles);
   const starterKey = recommended ? undefined : keys.find((key) => key.provider_type === "openai") ?? keys.find((key) => key.provider_type === "openrouter");
   const [settingUp, setSettingUp] = useState(false);
+  const sameAsDefault = defaultLlmLabel(profiles);
 
   async function setUpRecommended() {
     if (!starterKey) return;
@@ -163,20 +180,21 @@ function OwnerForm({ view, profiles, exaKeys, keys, onProfileCreated, onSaved, o
     <div className="card-body workspace-ai-grid">
       <fieldset className="workspace-ai-section">
         <legend><MessageSquareText aria-hidden="true" /> Ask AI chat</legend>
-        <p className="field-hint">Answers every knowledge question. {effectiveChatText(view)}.</p>
-        <ModelRoutePicker id="ai-chat" name="Ask AI" profiles={profiles} value={draft.chat} onChange={(value) => set("chat", value)} noneLabel="Workspace default (MOM & actions)" />
+        <p className="field-hint">Everyone&rsquo;s Ask AI answers use this model.</p>
+        <ModelRoutePicker id="ai-chat" name="Ask AI" profiles={profiles} value={draft.chat} onChange={(value) => set("chat", value)} noneLabel={sameAsDefault} />
       </fieldset>
       <fieldset className="workspace-ai-section">
         <legend><ScanText aria-hidden="true" /> Vision & OCR</legend>
-        <p className="field-hint">Reads scanned pages and images. Automatic uses gpt-6-luna on your OpenAI or OpenRouter default.</p>
-        <ModelRoutePicker id="ai-vision" name="Vision" profiles={profiles} value={draft.vision} onChange={(value) => set("vision", value)} noneLabel="Automatic" />
+        <p className="field-hint">Reads scanned pages and images in uploaded documents.</p>
+        <ModelRoutePicker id="ai-vision" name="Vision" capability="vision" profiles={profiles} value={draft.vision} onChange={(value) => set("vision", value)} noneLabel="Automatic" />
+        {draft.vision.profileId ? null : <AutomaticVision view={view} />}
       </fieldset>
       <fieldset className="workspace-ai-section">
         <legend><Globe aria-hidden="true" /> Web research</legend>
-        <p className="field-hint">Meeting prep: Exa searches the web and a text model writes the brief.</p>
+        <p className="field-hint">Meeting prep: Exa searches the web, then this model writes the brief.</p>
         <UiSelect id="ai-research-key" label="Exa key" value={draft.researchKey || NONE} onChange={(value) => set("researchKey", value === NONE ? "" : value)}
           options={[{ value: NONE, label: exaKeys.length ? "Off" : "Off · add an Exa key first" }, ...exaKeys.map((key) => ({ value: key.id, label: `${key.label} · ${key.hint}` }))]} />
-        <ModelRoutePicker id="ai-research" name="Research writing" profiles={profiles} value={draft.research} onChange={(value) => set("research", value)} noneLabel="Workspace default (MOM & actions)" />
+        <ModelRoutePicker id="ai-research" name="Research writing" profiles={profiles} value={draft.research} onChange={(value) => set("research", value)} noneLabel={sameAsDefault} />
       </fieldset>
     </div>
     {error ? <div className="workspace-ai-error"><Alert tone="danger">{error}</Alert></div> : null}
@@ -184,7 +202,7 @@ function OwnerForm({ view, profiles, exaKeys, keys, onProfileCreated, onSaved, o
       <span className="cluster">
         {recommended ? <button type="button" className="button secondary sm" onClick={() => setDraft(recommended)} title="Ask AI and vision: gpt-6-luna · research writing: gpt-6-sol">Apply recommended models</button>
           : starterKey ? <button type="button" className="button secondary sm" disabled={settingUp} onClick={() => void setUpRecommended()} title={`Creates a GPT-6 minutes profile on ${starterKey.label}`}>{settingUp ? "Setting up…" : "Set up recommended models"}</button> : null}
-        <span className="field-hint">{profiles.length ? "Leave a model blank to use the profile's own model." : starterKey ? `No model profile yet. Set up uses your saved key “${starterKey.label}”.` : "Add an OpenAI or OpenRouter key above, or a MOM & actions profile below."}</span>
+        <span className="field-hint">{profiles.length ? "Leave a model blank to use the provider's own model." : starterKey ? `No LLM profile yet. Set up uses your saved key “${starterKey.label}”.` : "Add an OpenAI or OpenRouter key above, or an LLM profile below."}</span>
       </span>
       <button type="button" className={dirty ? "button primary" : "button secondary"} disabled={saving || !dirty} onClick={() => void save()}>{saving ? "Saving…" : "Save workspace AI"}</button>
     </div>

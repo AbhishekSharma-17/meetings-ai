@@ -70,7 +70,7 @@ test("owner saves an API key once and links it to a new profile", async ({ page 
   await expect(keyList.getByText("••••9f2a")).toBeVisible();
   await expect(page.getByText(secret)).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Add MOM & actions profile" }).click();
+  await page.getByRole("button", { name: "Add LLM profile" }).click();
   await page.getByLabel("Profile name").fill("Router minutes");
   await page.getByLabel("Provider type").click();
   await page.getByRole("option", { name: "OpenRouter" }).click();

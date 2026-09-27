@@ -11,8 +11,10 @@ from .database import (
     Database,
     OrganizationMembershipRow,
     OrganizationRow,
+    UserProfilePhotoRow,
     UserRow,
 )
+from .profile_photos import photo_url
 from .tenant import current_organization_id
 
 
@@ -60,6 +62,7 @@ class WorkspaceMemberPublic(BaseModel):
     email: str | None
     role: str
     status: str
+    photo_url: str | None = None
 
 
 class WorkspaceService:
@@ -93,15 +96,17 @@ class WorkspaceService:
     def list_members(self) -> list[WorkspaceMemberPublic]:
         with self.database.session_factory() as session:
             rows = session.execute(
-                select(OrganizationMembershipRow, UserRow)
+                select(OrganizationMembershipRow, UserRow, UserProfilePhotoRow.updated_at)
                 .join(UserRow, UserRow.id == OrganizationMembershipRow.user_id)
+                .outerjoin(UserProfilePhotoRow, UserProfilePhotoRow.user_id == UserRow.id)
                 .where(OrganizationMembershipRow.organization_id == str(current_organization_id()))
                 .order_by(UserRow.display_name)
             ).all()
             return [WorkspaceMemberPublic(
                 user_id=UUID(user.id), display_name=user.display_name,
                 email=user.email, role=membership.role, status=user.status,
-            ) for membership, user in rows]
+                photo_url=photo_url(user.id, photo_updated_at),
+            ) for membership, user, photo_updated_at in rows]
 
     @staticmethod
     def _public(row: OrganizationRow) -> WorkspacePublic:

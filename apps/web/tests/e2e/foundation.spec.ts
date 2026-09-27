@@ -363,13 +363,13 @@ test("foundation UI walkthrough", async ({ page }) => {
 
   const vexaProfile = page.getByRole("button", { name: /Vexa local Whisper/ });
   if (!(await vexaProfile.isVisible())) {
-    await page.getByRole("button", { name: "Add Transcription profile" }).click();
+    await page.getByRole("button", { name: "Add speech-to-text profile" }).click();
     await page.getByLabel("Profile name").fill("Vexa local Whisper");
     await page.getByLabel("Provider type").click();
     await page.getByRole("option", { name: "Vexa native / self-hosted" }).click();
     await page.getByLabel("Execution location").click();
     await page.getByRole("option", { name: "Local / self-hosted" }).click();
-    await page.getByLabel("Model").fill("Systran/faster-whisper-tiny.en");
+    await page.getByLabel("Model", { exact: true }).fill("Systran/faster-whisper-tiny.en");
     await page.getByLabel("Base endpoint").fill("http://vexa-lite-whisper:8000/v1");
     await page.getByRole("button", { name: "Save profile" }).click();
     await expect(page.getByText("Vexa local Whisper saved.")).toBeVisible();
@@ -383,16 +383,16 @@ test("foundation UI walkthrough", async ({ page }) => {
   await expect(page.getByText("Configuration valid", { exact: true })).toBeVisible();
   await capture(page, "06-vexa-configuration-valid.png");
 
-  await page.getByRole("button", { name: "Add MOM & actions profile" }).click();
+  await page.getByRole("button", { name: "Add LLM profile" }).click();
   await page.getByLabel("Profile name").fill(profileName);
   await page.getByLabel("Provider type").click();
   await page.getByRole("option", { name: "OpenAI-compatible" }).click();
   await page.getByLabel("Execution location").click();
   await page.getByRole("option", { name: "Local / self-hosted" }).click();
-  await page.getByLabel("Model").fill("foundation-test-model");
+  await page.getByLabel("Model", { exact: true }).fill("foundation-test-model");
   await page.getByLabel("Base endpoint").fill("http://localhost:4000/v1");
   await page.getByLabel("API key write-only").fill("foundation-dummy-credential");
-  await page.getByLabel(/Use as the default/).check();
+  await page.getByLabel(/Make this the default/).check();
   await page.getByRole("button", { name: "Save profile" }).click();
   await expect(page.getByText(`${profileName} saved.`)).toBeVisible();
   await capture(page, "07-provider-saved.png");
@@ -402,7 +402,7 @@ test("foundation UI walkthrough", async ({ page }) => {
   const persistedProfile = page.getByRole("button", { name: new RegExp(profileName) }).filter({ hasText: "Default" });
   await persistedProfile.click();
   await expect(persistedProfile.getByText("Default", { exact: true })).toBeVisible();
-  await expect(page.getByLabel(/Use as the default/)).toBeChecked();
+  await expect(page.getByLabel(/Make this the default/)).toBeChecked();
   await expect(page.getByLabel("Text generation")).toBeChecked();
   await expect(page.getByLabel("API key write-only")).toHaveAttribute(
     "placeholder",
@@ -411,12 +411,12 @@ test("foundation UI walkthrough", async ({ page }) => {
   await expect(page.getByLabel("API key write-only")).toHaveValue("");
   await capture(page, "08-write-only-after-reload.png");
 
-  await page.getByRole("button", { name: "Add MOM & actions profile" }).click();
+  await page.getByRole("button", { name: "Add LLM profile" }).click();
   await page.getByLabel("Profile name").fill("OpenRouter economy");
   await page.getByLabel("Provider type").click();
   await page.getByRole("option", { name: "OpenRouter" }).click();
   await expect(page.getByLabel("Base endpoint")).toHaveValue("https://openrouter.ai/api/v1");
-  await page.getByLabel("Model").fill("provider/model-id");
+  await page.getByLabel("Model", { exact: true }).fill("provider/model-id");
   await page.getByLabel("API key write-only").fill("test-openrouter-key");
   await page.getByRole("button", { name: "Save profile" }).click();
   await expect(page.getByRole("button", { name: /OpenRouter economy/ })).toBeVisible();

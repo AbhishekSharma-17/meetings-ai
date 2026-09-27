@@ -59,6 +59,7 @@ export function ProviderSettings({ identity, profiles, onProfilesChange }: { ide
     const saved = await meetingsService.saveProviderProfile(profile, apiKey, keyChoice);
     if (keyChoice) void refreshCredentials();
     onProfilesChange(profiles.map((candidate) => candidate.id === profile.id ? saved : candidate.kind === saved.kind && saved.isDefault ? { ...candidate, isDefault: false } : candidate));
+    if (saved.kind === "mom") void refreshAiSettings(); // the default LLM feeds "Same as default" and Automatic vision
     setSelectedId(saved.id);
     setNotice({ tone: "success", text: `${saved.label} saved. API keys are write-only.` });
     return saved;
@@ -75,7 +76,7 @@ export function ProviderSettings({ identity, profiles, onProfilesChange }: { ide
 
   function addProfile(kind: ProfileKind) {
     const number = profiles.filter((profile) => profile.kind === kind).length + 1;
-    const created: ProviderProfile = { id: `new-${kind}-${crypto.randomUUID()}`, kind, label: `New ${profileInfo[kind].title} profile ${number}`, provider: "OpenAI-compatible", executionLocation: "local", endpoint: "", model: "", capabilities: profileInfo[kind].capabilities.slice(0, 1), connectionState: "not_configured", isDefault: false, apiKeyConfigured: false, credentialHint: null };
+    const created: ProviderProfile = { id: `new-${kind}-${crypto.randomUUID()}`, kind, label: `New ${profileInfo[kind].noun} profile ${number}`, provider: "OpenAI-compatible", executionLocation: "local", endpoint: "", model: "", capabilities: profileInfo[kind].capabilities.slice(0, 1), connectionState: "not_configured", isDefault: false, apiKeyConfigured: false, credentialHint: null };
     onProfilesChange([...profiles, created]); setSelectedId(created.id); setNotice({ tone: "info", text: "New profile created. Add connection details and save it." });
     revealEditor();
   }
@@ -94,7 +95,7 @@ export function ProviderSettings({ identity, profiles, onProfilesChange }: { ide
     />
     <div className="provider-overview">
       <ApiKeysCard credentials={credentials} loading={keysLoading} error={keysError} canManage={isOwner} onRefresh={refreshCredentials} onNotice={setNotice} />
-      <WorkspaceAiCard view={aiSettings} error={aiError} profiles={textProfiles} exaKeys={credentials.filter((item) => item.provider_type === "exa")} keys={credentials} onProfileCreated={(created) => { onProfilesChange([...profiles.map((candidate) => created.isDefault && candidate.kind === created.kind ? { ...candidate, isDefault: false } : candidate), created]); void refreshCredentials(); }} onSaved={(view) => { setAiSettings(view); void refreshCredentials(); }} onNotice={setNotice} />
+      <WorkspaceAiCard view={aiSettings} error={aiError} profiles={textProfiles} exaKeys={credentials.filter((item) => item.provider_type === "exa")} keys={credentials} onProfileCreated={(created) => { onProfilesChange([...profiles.map((candidate) => created.isDefault && candidate.kind === created.kind ? { ...candidate, isDefault: false } : candidate), created]); void refreshCredentials(); void refreshAiSettings(); }} onSaved={(view) => { setAiSettings(view); void refreshCredentials(); }} onNotice={setNotice} />
     </div>
     <div className="provider-layout">
       <div className="provider-groups">
@@ -102,7 +103,7 @@ export function ProviderSettings({ identity, profiles, onProfilesChange }: { ide
       </div>
       {selected
         ? <ProviderEditor key={selected.id} identity={identity} profile={selected} credentials={credentials} canSaveKeys={isOwner} onSave={save} onDelete={remove} onChange={(profile) => onProfilesChange(profiles.map((candidate) => candidate.id === selected.id ? profile : candidate))} onNotice={setNotice} />
-        : <div className="provider-editor-empty"><EmptyState icon={<SlidersHorizontal />} title="Add your first configuration">Use an Add button to set up transcription, minutes or embeddings.</EmptyState></div>}
+        : <div className="provider-editor-empty"><EmptyState icon={<SlidersHorizontal />} title="Add your first configuration">Use an Add button to set up speech to text, an LLM or embeddings.</EmptyState></div>}
     </div>
     <SettingsToast notice={notice} onDismiss={() => setNotice(null)} />
   </section>;
@@ -121,7 +122,7 @@ function ProfileGroup({ kind, profiles, selectedId, onSelect, onAdd }: { kind: P
     <div className="card-header provider-group-header">
       <span className="settings-icon" aria-hidden="true"><Icon /></span>
       <div><h2 id={`${kind}-title`}>{info.title}</h2><p>{info.description}</p></div>
-      <button type="button" className="button secondary sm" onClick={onAdd} aria-label={`Add ${info.title} profile`}><Plus aria-hidden="true" /> Add</button>
+      <button type="button" className="button secondary sm" onClick={onAdd} aria-label={`Add ${info.noun} profile`}><Plus aria-hidden="true" /> Add</button>
     </div>
     {profiles.length === 0 ? <p className="provider-group-empty">No configurations yet.</p> : <ul className="provider-rows">
       {profiles.map((profile) => {

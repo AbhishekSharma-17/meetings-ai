@@ -51,7 +51,7 @@ export function KnowledgeEvidenceScreen({ meetingId, focusSegmentId, onBack }: {
       </div>
       <div className="card-body transcript-body">
         {segments.length ? <ol className="transcript-list">
-          {segments.map((turn) => <TranscriptTurn key={turn.id} id={`evidence-${encodeURIComponent(turn.segmentId)}`} segment={turn} focused={focusSegmentId === turn.segmentId}
+          {segments.map((turn) => <TranscriptTurn key={turn.id} id={`evidence-${encodeURIComponent(turn.segmentId)}`} segment={turn} focused={focusSegmentId === turn.segmentId} assistantName={meeting.botName}
             time={elapsedLabel(turn.startedAt)} timeTitle="Elapsed time into the meeting" />)}
         </ol> : <EmptyState plain icon={<MessageSquareText />} title="No finalized turns">This meeting has no finalized transcript to show.</EmptyState>}
       </div>

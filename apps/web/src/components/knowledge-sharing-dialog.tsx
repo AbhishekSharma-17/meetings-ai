@@ -3,7 +3,7 @@
 import { Dialog } from "@base-ui/react/dialog";
 import { Building2, Lock, Users, X } from "lucide-react";
 import type { WorkspaceMember } from "@/lib/types";
-import { initials } from "@/lib/meeting-status";
+import { Avatar } from "./ui/avatar";
 
 export type Visibility = "private" | "organization" | "specific";
 
@@ -40,7 +40,7 @@ export function KnowledgeSharingDialog({ open, onOpenChange, baseName, visibilit
           {choices.map((choice) => <label key={choice.value} className="choice-card"><input type="radio" name="sharing" checked={visibility === choice.value} onChange={() => onVisibility(choice.value)} /><choice.icon className="choice-icon" aria-hidden="true" /><span><b>{choice.label}</b><small>{choice.hint}</small></span></label>)}
         </fieldset>
         {visibility === "specific" ? <div className="share-members" role="group" aria-label="Teammates">
-          {teammates.length ? teammates.map((member) => <label key={member.user_id} className="share-member"><input type="checkbox" checked={userIds.includes(member.user_id)} onChange={(event) => onUserIds((current) => event.target.checked ? [...current, member.user_id] : current.filter((id) => id !== member.user_id))} /><span className="avatar sm" aria-hidden="true">{initials(member.display_name)}</span><span><b>{member.display_name}</b><small>{member.email}</small></span></label>) : <p className="field-hint">No other teammates yet. Invite people from Organization & people.</p>}
+          {teammates.length ? teammates.map((member) => <label key={member.user_id} className="share-member"><input type="checkbox" checked={userIds.includes(member.user_id)} onChange={(event) => onUserIds((current) => event.target.checked ? [...current, member.user_id] : current.filter((id) => id !== member.user_id))} /><Avatar name={member.display_name} photoUrl={member.photo_url} size="sm" /><span><b>{member.display_name}</b><small>{member.email}</small></span></label>) : <p className="field-hint">No other teammates yet. Invite people from Organization & people.</p>}
         </div> : null}
         {error ? <p className="form-error" role="alert">{error}</p> : null}
         <div className="dialog-footer"><button type="button" className="button secondary" onClick={() => onOpenChange(false)}>Cancel</button><button type="button" className="button primary" disabled={busy} onClick={onSave}>Save sharing</button></div>

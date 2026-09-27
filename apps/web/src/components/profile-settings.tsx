@@ -1,15 +1,17 @@
 "use client";
 
-import { FormEvent, useState } from "react";
-import { Building2, Mail } from "lucide-react";
+import { ChangeEvent, FormEvent, useRef, useState } from "react";
+import { Building2, ImageUp, Mail } from "lucide-react";
 import type { CurrentAccount, Workspace } from "@/lib/types";
 import { meetingsService } from "@/lib/meetings-service";
-import { initials } from "@/lib/meeting-status";
+import { Avatar } from "./ui/avatar";
 import { PageHeader } from "./ui/page-header";
 import { Badge } from "./ui/feedback";
 import { SettingsToast } from "./settings-toast";
 
 const roleLabel: Record<CurrentAccount["role"], string> = { owner: "Owner", admin: "Admin", member: "Member", viewer: "Viewer" };
+const PHOTO_TYPES = ["image/png", "image/jpeg", "image/webp"];
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 
 export function ProfileSettings({ account, workspace, onAccountChange }: { account: CurrentAccount; workspace: Workspace | null; onAccountChange(account: CurrentAccount): void }) {
   const [displayName, setDisplayName] = useState(account.display_name);
@@ -19,6 +21,35 @@ export function ProfileSettings({ account, workspace, onAccountChange }: { accou
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [photoBusy, setPhotoBusy] = useState<"upload" | "remove" | null>(null);
+  const photoInput = useRef<HTMLInputElement>(null);
+
+  async function uploadPhoto(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setError(null); setMessage(null);
+    // The server sniffs the bytes and re-encodes; this only saves a pointless round trip.
+    if (file.type && !PHOTO_TYPES.includes(file.type)) { setError("Choose a PNG, JPEG or WebP image."); return; }
+    if (file.size > MAX_PHOTO_BYTES) { setError("Profile photos must be 5 MB or smaller."); return; }
+    setPhotoBusy("upload");
+    try {
+      onAccountChange(await meetingsService.uploadProfilePhoto(file));
+      setMessage("Profile photo updated.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not upload your photo.");
+    } finally { setPhotoBusy(null); }
+  }
+
+  async function removePhoto() {
+    setError(null); setMessage(null); setPhotoBusy("remove");
+    try {
+      onAccountChange(await meetingsService.removeProfilePhoto());
+      setMessage("Profile photo removed.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not remove your photo.");
+    } finally { setPhotoBusy(null); }
+  }
 
   async function saveName(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(null); setMessage(null); setSaving(true);
@@ -51,7 +82,7 @@ export function ProfileSettings({ account, workspace, onAccountChange }: { accou
     <div className="stack-lg">
       <section className="card" aria-labelledby="profile-details-title">
         <div className="profile-identity">
-          <span className="avatar profile-avatar" aria-hidden="true">{initials(account.display_name)}</span>
+          <Avatar name={account.display_name} photoUrl={account.photo_url} className="profile-avatar" />
           <div className="profile-identity-copy">
             <h2 id="profile-details-title">{account.display_name}</h2>
             <div className="profile-facts">
@@ -59,6 +90,19 @@ export function ProfileSettings({ account, workspace, onAccountChange }: { accou
               <span><Building2 aria-hidden="true" />{workspace?.display_name ?? "Workspace"}</span>
               <Badge tone="brand">{roleLabel[account.role] ?? account.role}</Badge>
             </div>
+          </div>
+        </div>
+        <div className="card-body profile-photo-row">
+          <div className="profile-photo-copy">
+            <span className="field-label" id="profile-photo-label">Profile photo</span>
+            <p className="field-hint">PNG, JPEG or WebP up to 5 MB. Cropped to a square; photo metadata is removed.</p>
+          </div>
+          <div className="button-group">
+            <input ref={photoInput} id="profile-photo-input" className="sr-only" type="file" accept={PHOTO_TYPES.join(",")} tabIndex={-1} aria-labelledby="profile-photo-label" onChange={(event) => void uploadPhoto(event)} />
+            <button className="button secondary sm" type="button" disabled={photoBusy !== null} onClick={() => photoInput.current?.click()}>
+              <ImageUp aria-hidden="true" />{photoBusy === "upload" ? "Uploading…" : account.photo_url ? "Change photo" : "Upload photo"}
+            </button>
+            {account.photo_url ? <button className="button ghost sm" type="button" disabled={photoBusy !== null} onClick={() => void removePhoto()}>{photoBusy === "remove" ? "Removing…" : "Remove photo"}</button> : null}
           </div>
         </div>
         <form className="card-body profile-name-form" onSubmit={(event) => void saveName(event)}>
