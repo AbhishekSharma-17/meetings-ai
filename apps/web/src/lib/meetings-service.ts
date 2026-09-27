@@ -241,6 +241,8 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 /** Profile photo URLs are API paths; resolve them against the configured API origin. */
 function withPhoto<T extends { photo_url?: string | null }>(record: T): T {
   const path = record.photo_url;
+  // In-browser data (demo mode's sample photos and uploads) is already a usable image URL.
+  if (path && /^(data:image\/|blob:)/.test(path)) return record;
   return { ...record, photo_url: path && path.startsWith("/v1/") ? `${API_BASE_URL}${path}` : null };
 }
 

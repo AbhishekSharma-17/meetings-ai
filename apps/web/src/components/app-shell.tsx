@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useState, type ReactNode } from "rea
 import Image from "next/image";
 import { meetingsService } from "@/lib/meetings-service";
 import { readUiPreference } from "@/lib/ui-preferences";
+import { bootDemoMode, exitDemo, startDemo } from "@/lib/demo-mode";
 import type { CachedCalendarEvent, CurrentAccount, Meeting, ProviderProfile, Workspace, WorkspaceOption } from "@/lib/types";
 import { Dashboard } from "./dashboard";
 import { NewMeetingDialog } from "./new-meeting-dialog";
@@ -22,9 +23,10 @@ import { ProvidersIcon } from "./ui-icons";
 import { ThemeSwitcher } from "./theme-switcher";
 import { Dialog } from "@base-ui/react/dialog";
 import { Popover } from "@base-ui/react/popover";
-import { BrainCircuit, Building2, CalendarDays, ChartNoAxesCombined, Check, ChevronsUpDown, FileCheck2, House, LogOut, Menu, MessagesSquare, Mic, NotebookPen, UserRound, Users, Video, X } from "lucide-react";
+import { BrainCircuit, Building2, CalendarDays, ChartNoAxesCombined, Check, ChevronsUpDown, Compass, FileCheck2, House, LogOut, Menu, MessagesSquare, Mic, NotebookPen, UserRound, Users, Video, X } from "lucide-react";
 import { Avatar } from "./ui/avatar";
 import { EmptyState, LoadingRow } from "./ui/feedback";
+import { DemoBanner, DemoPill } from "./demo-banner";
 
 type View = "dashboard" | "meetings" | "calendar" | "prep" | "providers" | "meeting" | "workspace" | "knowledge" | "observability" | "profile";
 const views: View[] = ["dashboard", "meetings", "calendar", "prep", "providers", "meeting", "workspace", "knowledge", "observability", "profile"];
@@ -63,6 +65,7 @@ export function AppShell() {
   const [newPassword, setNewPassword] = useState("");
   const [loginError, setLoginError] = useState<string | null>(null);
   const [loggingIn, setLoggingIn] = useState(false);
+  const [demoMode, setDemoMode] = useState(false);
 
   const identity = account ? `${account.organization_id}:${account.user_id}` : null;
 
@@ -75,7 +78,8 @@ export function AppShell() {
       const connectedAccountId = callback.get("connected_account_id");
       queueMicrotask(() => setPreferredCalendarConnectionId(connectedAccountId));
     }
-    void meetingsService.getSession().then(async (active) => {
+    // Demo mode (sample data served in the browser) must be installed before the first API call.
+    void bootDemoMode().catch(() => false).then((demo) => { setDemoMode(demo); return meetingsService.getSession(); }).then(async (active) => {
       if (active) {
         const current = await meetingsService.getCurrentAccount();
         setAccount(current);
@@ -143,6 +147,17 @@ export function AppShell() {
     } finally { setLoggingIn(false); }
   }
 
+  async function exploreDemo() {
+    setLoggingIn(true); setLoginError(null);
+    try {
+      await startDemo();
+      const current = await meetingsService.getCurrentAccount();
+      setDemoMode(true); setAccount(current); setAuthenticated(true); setView("dashboard"); setNavigationRestored(true);
+    } catch {
+      setLoginError("The demo could not start. Refresh the page and try again.");
+    } finally { setLoggingIn(false); }
+  }
+
   async function changePassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setLoggingIn(true); setLoginError(null);
     try {
@@ -161,11 +176,11 @@ export function AppShell() {
   const updateMeeting = useCallback((meeting: Meeting) => {
     setMeetings((current) => current.some((candidate) => candidate.id === meeting.id) ? current.map((candidate) => candidate.id === meeting.id ? meeting : candidate) : [meeting, ...current]);
   }, []);
-  const signOut = useCallback(() => { void meetingsService.logout().finally(() => {
+  const signOut = useCallback(() => { if (demoMode) { exitDemo(); return; } void meetingsService.logout().finally(() => {
     setAuthenticated(false); setAccount(null); setNavigationRestored(false); setView("dashboard"); setMeetings([]); setProfiles([]);
     setWorkspace(null); setWorkspaces([]); setActiveMeetingId(null); setCalendarSelection(null);
     setPrepEvent(null); setPreferredCalendarConnectionId(null); setDialogOpen(false);
-  }); }, []);
+  }); }, [demoMode]);
   const switchWorkspace = useCallback(async (id: string) => {
     await meetingsService.switchWorkspace(id);
     window.location.reload();
@@ -187,6 +202,11 @@ export function AppShell() {
         <button className="button primary lg block" disabled={loggingIn}>{loggingIn ? "Signing in…" : "Sign in"}</button>
       </> : <div className="login-checking" role="status"><span className="spinner" aria-hidden="true" />Connecting to your workspace…</div>}
       {loginError ? <p className="form-error" role="alert">{loginError} <button type="button" onClick={() => void meetingsService.getSession().then(setAuthenticated).catch(() => setLoginError("Could not reach the API."))}>Retry</button></p> : null}
+      {authenticated === false || loginError ? <div className="login-demo">
+        <p className="login-divider" aria-hidden="true">or</p>
+        <button type="button" className="button secondary lg block" disabled={loggingIn} onClick={() => void exploreDemo()}><Compass aria-hidden="true" />Explore the demo</button>
+        <p className="login-demo-hint">Sample workspace · nothing is saved</p>
+      </div> : null}
       <p className="login-footnote">Invited by a teammate? Use the temporary password from your invitation; you will choose a new one next.</p>
     </form>
   </LoginLayout>;
@@ -207,10 +227,11 @@ export function AppShell() {
       <a className="skip-link" href="#main-content">Skip to content</a>
       <SidebarPanel view={view} onNavigate={setView} workspaces={workspaces} account={account} liveCount={liveCount} onSignOut={signOut} onSwitchWorkspace={switchWorkspace} className="desktop-sidebar" />
       <div className="workspace-main">
+        {demoMode ? <DemoBanner /> : null}
         <header className="topbar">
           <button className="icon-button mobile-nav-trigger" aria-label="Open navigation" onClick={() => setMobileNavOpen(true)}><Menu /></button>
           <nav className="topbar-context" aria-label="Breadcrumb"><span className="topbar-kicker">{workspace?.display_name ?? "Meetings AI"}</span><span className="topbar-sep" aria-hidden="true">/</span><span className="topbar-location" aria-current="page">{viewTitle[view]}</span></nav>
-          <div className="topbar-actions">{liveCount && view !== "meetings" ? <button type="button" className="status live" onClick={() => setView("meetings")}>{liveCount} live</button> : null}</div>
+          <div className="topbar-actions">{demoMode ? <DemoPill /> : null}{liveCount && view !== "meetings" ? <button type="button" className="status live" onClick={() => setView("meetings")}>{liveCount} live</button> : null}</div>
         </header>
         <main id="main-content">
           {view === "dashboard" ? <Dashboard meetings={meetings} account={account} onNewMeeting={() => { setCalendarSelection(null); setDialogOpen(true); }} onOpenCalendar={() => setView("calendar")} onOpenProviders={() => setView("providers")} onOpenKnowledge={() => setView("knowledge")} onOpenMeetings={() => setView("meetings")} onOpenMeeting={openMeeting} /> : null}
