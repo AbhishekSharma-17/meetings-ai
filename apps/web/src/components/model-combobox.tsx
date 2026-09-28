@@ -5,6 +5,7 @@ import { Autocomplete } from "@base-ui/react/autocomplete";
 import { Check, ChevronsUpDown, Image as ImageIcon, LoaderCircle, PenLine } from "lucide-react";
 import type { CatalogModel } from "@/lib/types";
 import type { CatalogState } from "./use-model-catalog";
+import { matchesQuery } from "@/lib/search";
 
 /** How many catalog rows the popup renders at once; typing narrows the rest. */
 const RESULT_LIMIT = 60;
@@ -28,16 +29,14 @@ export function modelPriceText(model: CatalogModel): string {
   return `${usd(input)} in · ${usd(output)} out per 1M`;
 }
 
-function matches(model: CatalogModel, terms: string[]): boolean {
-  const haystack = `${model.name} ${model.id} ${model.vendor ?? ""}`.toLowerCase();
-  return terms.every((term) => haystack.includes(term));
+function matches(model: CatalogModel, query: string): boolean {
+  return matchesQuery(query, model.name, model.id, model.vendor);
 }
 
 function buildGroups(models: CatalogModel[], query: string, value: string, recommendedIds: readonly string[]): { groups: RowGroup[]; total: number } {
   const trimmed = query.trim();
-  const terms = trimmed.toLowerCase().split(/\s+/).filter(Boolean);
-  const found = terms.length ? models.filter((model) => matches(model, terms)) : models;
-  const current = !terms.length ? found.find((model) => model.id === value) : undefined;
+  const found = trimmed ? models.filter((model) => matches(model, trimmed)) : models;
+  const current = !trimmed ? found.find((model) => model.id === value) : undefined;
   const recommended = recommendedIds.map((id) => found.find((model) => model.id === id)).filter((model): model is CatalogModel => Boolean(model) && model !== current);
   const shown = new Set([current?.id, ...recommended.map((model) => model.id)]);
   const rest = found.filter((model) => !shown.has(model.id));

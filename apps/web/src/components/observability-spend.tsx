@@ -4,7 +4,9 @@ import { useState } from "react";
 import type { UsageGroupTotal, UsageModelTotal } from "@/lib/types";
 import { Badge } from "./ui/feedback";
 import { FilterInput, matchesQuery, NoMatches, ScrollPanel } from "./scroll-panel";
+import { shouldOfferSearch } from "@/lib/search";
 import { formatCompact, formatUsd, kindLabel, kindTone, providerLabel, unitsLabel } from "./usage-labels";
+import { UsageProviderName } from "./provider-brand-icons";
 
 const CHART_COLORS = 8;
 
@@ -33,11 +35,11 @@ export function SpendByModel({ rows }: { rows: UsageModelTotal[] }) {
   return <section className="card obs-card" aria-labelledby="obs-model-title">
     <div className="card-header"><div><h2 id="obs-model-title">Cost by model</h2><p>Every provider and model used, with units for non-token calls.</p></div>
       {rows.length ? <span className="section-count">{rows.length}</span> : null}</div>
-    {rows.length > 6 ? <div className="card-toolbar"><FilterInput id="obs-model-search" label="Search models" value={query} onChange={setQuery} placeholder="Search by model or provider" /></div> : null}
+    {shouldOfferSearch(rows.length, query) ? <div className="card-toolbar"><FilterInput id="obs-model-search" label="Search models" value={query} onChange={setQuery} placeholder="Search by model or provider" /></div> : null}
     {rows.length && !visible.length ? <NoMatches query={query} noun="models" onClear={() => setQuery("")} /> : <ScrollPanel label="Cost by model" className="obs-table" size="sm"><table className="data-table">
       <thead><tr><th>Model</th><th className="num">Calls</th><th className="num">Volume</th><th className="num">Estimate</th></tr></thead>
       <tbody>{visible.length ? visible.map((row) => <tr key={`${row.kind}:${row.provider}:${row.model}`}>
-        <td><span className="obs-cell"><span className="obs-model">{row.model}</span><small><Badge tone={kindTone(row.kind)}>{kindLabel(row.kind)}</Badge> {providerLabel(row.provider)}</small></span></td>
+        <td><span className="obs-cell"><span className="obs-model">{row.model}</span><small><Badge tone={kindTone(row.kind)}>{kindLabel(row.kind)}</Badge> <UsageProviderName provider={row.provider} /></small></span></td>
         <td className="num"><span className="obs-cell"><span>{row.requests.toLocaleString()}</span>{row.failed_requests ? <small>{row.failed_requests} failed</small> : null}</span></td>
         <td className="num">{row.unit_type && row.unit_type !== "tokens" ? unitsLabel(row.units, row.unit_type) : `${formatCompact(row.input_tokens)} / ${formatCompact(row.output_tokens)}`}</td>
         <td className="num">{row.unpriced_requests === row.requests ? <Badge tone="warning">Unpriced</Badge> : formatUsd(row.estimated_usd)}</td>

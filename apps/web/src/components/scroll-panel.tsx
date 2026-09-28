@@ -3,6 +3,9 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Search, SearchX, X } from "lucide-react";
 import { EmptyState } from "./ui/feedback";
+import { matchRanges } from "@/lib/search";
+
+export { matchesQuery } from "@/lib/search";
 
 /**
  * Card body that scrolls on its own instead of growing the page. Edge shadows appear only when
@@ -34,8 +37,8 @@ export function ScrollPanel({ label, children, className = "", size = "md" }: { 
 }
 
 /** Compact search box for card headers. */
-export function FilterInput({ id, label, value, onChange, placeholder }: { id: string; label: string; value: string; onChange(value: string): void; placeholder: string }) {
-  return <div className="input-with-icon filter-input">
+export function FilterInput({ id, label, value, onChange, placeholder, className = "" }: { id: string; label: string; value: string; onChange(value: string): void; placeholder: string; className?: string }) {
+  return <div className={`input-with-icon filter-input ${className}`.trim()}>
     <Search aria-hidden="true" />
     <input id={id} type="search" aria-label={label} value={value} placeholder={placeholder} autoComplete="off" spellCheck={false}
       onChange={(event) => onChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape" && value) { event.preventDefault(); onChange(""); } }} />
@@ -51,10 +54,22 @@ export function NoMatches({ query, noun, onClear }: { query: string; noun: strin
   </EmptyState>;
 }
 
-/** Case-insensitive match of every word in the query against any of the given fields. */
-export function matchesQuery(query: string, fields: Array<string | null | undefined>): boolean {
-  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-  if (!words.length) return true;
-  const haystack = fields.filter(Boolean).join(" ").toLowerCase();
-  return words.every((word) => haystack.includes(word));
+/** Search box in its own toolbar strip under a card header (full width on phones). */
+export function SearchToolbar(props: { id: string; label: string; value: string; onChange(value: string): void; placeholder: string }) {
+  return <div className="card-toolbar"><FilterInput {...props} /></div>;
+}
+
+/** Renders text with the parts that match the search query marked. */
+export function Highlight({ text, query }: { text: string; query: string }) {
+  const ranges = matchRanges(text, query);
+  if (!ranges.length) return <>{text}</>;
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  for (const [start, end] of ranges) {
+    if (start > cursor) parts.push(text.slice(cursor, start));
+    parts.push(<mark key={start} className="search-hit">{text.slice(start, end)}</mark>);
+    cursor = end;
+  }
+  if (cursor < text.length) parts.push(text.slice(cursor));
+  return <>{parts}</>;
 }

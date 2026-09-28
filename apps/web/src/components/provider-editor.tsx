@@ -6,6 +6,8 @@ import { meetingsService } from "@/lib/meetings-service";
 import { readUiPreference } from "@/lib/ui-preferences";
 import type { Capability, ModelCatalogQuery, ProfileKeyChoice, ProviderProfile, VaultCredential } from "@/lib/types";
 import { UiSelect } from "./ui-select";
+import { providerOptionIcon } from "./provider-brand-icons";
+import { providerBrand } from "./provider-brand";
 import { Alert, Badge } from "./ui/feedback";
 import type { SettingsNotice } from "./settings-toast";
 import { capabilityLabel, catalogProviderFor, compatibleCredentials, isUnsavedProfile, keyTag, normalizeBaseUrl, profileInfo, providerOptions, recommendedModelIds } from "./provider-profile-info";
@@ -172,7 +174,7 @@ export function ProviderEditor({ identity, profile, credentials, canSaveKeys, on
           <input id="profile-label" value={draft.label} onChange={(event) => update("label", event.target.value)} required />
         </div>
         <div className="field-row">
-          <UiSelect id="provider" label="Provider type" value={draft.provider} onChange={setProvider} options={providerOptions.map((option) => ({ value: option, label: option }))} />
+          <UiSelect id="provider" label="Provider type" value={draft.provider} onChange={setProvider} options={providerOptions.map((option) => ({ value: option, label: option, icon: providerOptionIcon(providerBrand(option)) }))} />
           <UiSelect id="location" label="Execution location" value={draft.executionLocation} onChange={(value) => update("executionLocation", value as ProviderProfile["executionLocation"])} disabled={draft.provider === "OpenAI" || draft.provider === "OpenRouter"} options={[{ value: "local", label: "Local / self-hosted" }, { value: "cloud", label: "Cloud" }]} />
         </div>
         <div className="field">

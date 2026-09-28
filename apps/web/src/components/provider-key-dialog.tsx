@@ -8,7 +8,8 @@ import type { CredentialTestResult, VaultCredential, VaultProviderType } from "@
 import { UiSelect } from "./ui-select";
 import { Alert } from "./ui/feedback";
 import { vaultProviderLabel, vaultProviderOptions } from "./provider-profile-info";
-import { ProviderBrandIcon } from "./provider-brand-icons";
+import { ProviderBrandIcon, providerOptionIcon } from "./provider-brand-icons";
+import { credentialBrand, providerBrand } from "./provider-brand";
 
 export type KeyDialogMode = { kind: "create" } | { kind: "rename"; credential: VaultCredential } | { kind: "rotate"; credential: VaultCredential };
 
@@ -78,7 +79,7 @@ function KeyDialogBody({ mode, onClose, onSaved }: { mode: KeyDialogMode; onClos
     <Dialog.Title>Key saved</Dialog.Title>
     <div className="dialog-body provider-key-saved">
       <div className="provider-key-summary">
-        <ProviderBrandIcon provider={created.provider_type} />
+        <ProviderBrandIcon brand={credentialBrand(created)} />
         <span><b>{created.label}</b><small>{vaultProviderLabel[created.provider_type]} · {created.hint}</small></span>
       </div>
       {test ? <Alert tone={testTone[test.status]} title={test.status === "valid" ? "Key works" : test.status === "invalid" ? "Key rejected" : "Not verified"}>{test.message}</Alert>
@@ -99,7 +100,7 @@ function KeyDialogBody({ mode, onClose, onSaved }: { mode: KeyDialogMode; onClos
           : `Profiles linked to ${mode.credential.label} switch to the new key as soon as you save.`}
     </Dialog.Description>
     <div className="dialog-body form-stack">
-      {mode.kind === "create" ? <UiSelect id="key-provider" label="Provider" value={providerType} onChange={(value) => setProviderType(value as VaultProviderType)} options={vaultProviderOptions} /> : null}
+      {mode.kind === "create" ? <UiSelect id="key-provider" label="Provider" value={providerType} onChange={(value) => setProviderType(value as VaultProviderType)} options={vaultProviderOptions.map((option) => ({ ...option, icon: providerOptionIcon(providerBrand(option.value)) }))} /> : null}
       {mode.kind !== "rotate" ? <div className="field">
         <label htmlFor="key-label">Key name</label>
         <input id="key-label" value={label} onChange={(event) => setLabel(event.target.value)} placeholder="e.g. OpenRouter team" maxLength={100} required autoComplete="off" />

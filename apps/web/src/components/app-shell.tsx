@@ -33,6 +33,7 @@ import { ForgotPasswordForm } from "./forgot-password-form";
 import { rememberSelection, type NotificationTarget } from "./notification-feed";
 import { useTimePreferences, useTimePreferencesSync } from "@/lib/time-preferences";
 import { TimeZoneIndicator } from "./time-preferences-control";
+import { WorkspaceMenuList } from "./workspace-menu-list";
 
 type View = "dashboard" | "meetings" | "calendar" | "prep" | "providers" | "meeting" | "workspace" | "knowledge" | "observability" | "profile";
 const views: View[] = ["dashboard", "meetings", "calendar", "prep", "providers", "meeting", "workspace", "knowledge", "observability", "profile"];
@@ -403,7 +404,7 @@ function SidebarPanel({ view, onNavigate, workspaces, account, liveCount, onSign
               <div className="profile-popover-heading"><Avatar name={account?.display_name} photoUrl={account?.photo_url} size="lg" /><span><b>{account?.display_name ?? "Account"}</b><small>{account?.email ?? "Local account"}</small></span></div>
               <div className="menu-separator" />
               <p className="menu-label">Workspaces</p>
-              {workspaces.map((option) => <button key={option.id} type="button" className={option.id === account?.organization_id ? "menu-item profile-workspace current" : "menu-item profile-workspace"} disabled={workspaceBusy || option.id === account?.organization_id} onClick={() => void changeWorkspace(option.id)}><Building2 /><span>{option.display_name}</span>{option.is_default ? <span className="tag profile-workspace-default">Default</span> : null}{option.id === account?.organization_id ? <Check className="check" aria-label="Current" /> : <small>{option.role}</small>}</button>)}
+              <WorkspaceMenuList workspaces={workspaces} currentId={account?.organization_id} busy={workspaceBusy} onChoose={(id) => void changeWorkspace(id)} />
               {workspaceError ? <p role="alert" className="form-error">{workspaceError}</p> : null}
               <div className="menu-separator" />
               <button type="button" className="menu-item" onClick={() => navigate("workspace")}><Users /> Organization & people</button>

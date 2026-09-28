@@ -151,7 +151,22 @@ export function useNotificationFeed(identity: string, open: boolean, onArrived: 
     void notificationService.remove(item.id).catch(() => undefined);
   }, []);
 
-  return { unread, items, hasMore: Boolean(cursor), loading, error, loadMore, markRead, markAllRead, dismiss, reload: load };
+  /** Clears everything (or only read items) on the server, then shows what is left. Resolves false on failure. */
+  const clear = useCallback(async (readOnly: boolean): Promise<boolean> => {
+    try {
+      const result = await notificationService.clear({ readOnly });
+      setUnread(result.unread_count); lastUnread.current = result.unread_count; setError(null);
+      if (!readOnly) { setItems([]); setCursor(null); return true; }
+      setItems((current) => current.filter((item) => !item.read_at));
+      await load();
+      return true;
+    } catch {
+      setError(readOnly ? "Read notifications could not be cleared. Try again." : "Notifications could not be cleared. Try again.");
+      return false;
+    }
+  }, [load]);
+
+  return { unread, items, hasMore: Boolean(cursor), loading, error, loadMore, markRead, markAllRead, dismiss, clear, reload: load };
 }
 
 /** Pre-selects a record on the destination screen (it reads this saved selection when it mounts). */

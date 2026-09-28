@@ -15,6 +15,8 @@ import { PrepWhosWho, sidesFromReport } from "./prep-whos-who";
 import { Alert, EmptyState, Skeleton } from "./ui/feedback";
 import { SwitchField } from "./ui/switch";
 import { UiSelect } from "./ui-select";
+import { ProviderName, providerOptionIcon } from "./provider-brand-icons";
+import { providerBrand } from "./provider-brand";
 import { useBackgroundJob } from "./use-background-job";
 
 type Tab = "briefing" | "inputs" | "history";
@@ -213,8 +215,8 @@ export function MeetingPrepPanel({ event, canEdit = true, onOpenProviders, onOpe
           <PrepLinkChips id="prep-links" value={links} onChange={setLinks} disabled={!canEdit} />
           <PrepDocuments eventId={event.id} canEdit={canEdit} />
           <div className="inset-panel prep-research-options">
-            <SwitchField id="prep-research" label="Research the public web" description="Uses the workspace Exa key. Searches send the company, your links and attendee names only — never emails, titles, agendas or documents." checked={researchEnabled} onChange={setResearchEnabled} />
-            {textProfiles.length ? <UiSelect id="prep-model" label="Analysis provider" size="sm" value={textProfileId} onChange={setTextProfileId} options={[{ value: "", label: "Workspace default" }, ...textProfiles.map((item) => ({ value: item.id, label: item.name }))]} /> : null}
+            <SwitchField id="prep-research" label="Research the public web" description={<>Uses the workspace <ProviderName brand="exa" label="Exa" /> key. Searches send the company, your links and attendee names only — never emails, titles, agendas or documents.</>} checked={researchEnabled} onChange={setResearchEnabled} />
+            {textProfiles.length ? <UiSelect id="prep-model" label="Analysis provider" size="sm" value={textProfileId} onChange={setTextProfileId} options={[{ value: "", label: "Workspace default" }, ...textProfiles.map((item) => ({ value: item.id, label: item.name, icon: providerOptionIcon(providerBrand(item.provider_type, item.base_url)) }))]} /> : null}
           </div>
           {failure ? needsSetup
             ? <Alert tone="warning" title="Setup needed" actions={onOpenProviders ? <button type="button" className="button secondary sm" onClick={onOpenProviders}><KeyRound aria-hidden="true" /> Open AI providers</button> : null}>{failure.message}{onOpenProviders ? "" : " Ask a workspace owner or admin."}</Alert>

@@ -4,6 +4,8 @@ import { useState } from "react";
 import { formatFullDateTime } from "@/lib/time-preferences";
 import { Trash2 } from "lucide-react";
 import type { CalendarEvent, MeetingDetail, TranscriptionRoute } from "@/lib/types";
+import { ProviderBrandIcon } from "./provider-brand-icons";
+import { providerBrand } from "./provider-brand";
 
 const DELETE_CONFIRMATION = "DELETE";
 const calendarNames: Record<CalendarEvent["provider"], string> = { googlecalendar: "Google Calendar", outlook: "Outlook Calendar", calendly: "Calendly", zoom: "Zoom" };
@@ -27,6 +29,11 @@ function routeLabel(route: TranscriptionRoute): string {
   return route.mode === "vexa_deployment" ? "Vexa deployment default" : "Chosen when the assistant joins";
 }
 
+function RouteMark({ route }: { route: TranscriptionRoute }) {
+  const brand = providerBrand(route.provider_type, route.endpoint_host);
+  return brand ? <ProviderBrandIcon brand={brand} size="xs" /> : null;
+}
+
 export function MeetingDetailsCard({ meeting, route }: { meeting: MeetingDetail; route: TranscriptionRoute | null }) {
   return <section className="card" aria-labelledby="meeting-details-title">
     <div className="card-header"><div><h2 id="meeting-details-title">Meeting details</h2></div></div>
@@ -41,7 +48,7 @@ export function MeetingDetailsCard({ meeting, route }: { meeting: MeetingDetail;
       </dl>
       {route ? <section className="record-runtime" aria-label="Transcription runtime route">
         <h3>Transcription runtime</h3>
-        <p>{routeLabel(route)}</p>
+        <p className="provider-route">{route.mode === "profile" ? <RouteMark route={route} /> : null}<span>{routeLabel(route)}</span></p>
         <p className="field-hint">Fixed for this bot run. New provider defaults apply to the next join.</p>
       </section> : null}
     </div>

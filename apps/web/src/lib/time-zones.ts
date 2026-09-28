@@ -1,4 +1,5 @@
 import { canonicalZone, formatterFor, isValidZone, offsetLabel, offsetMinutes, zoneAbbreviation, zoneCity } from "./time-format";
+import { matchesQuery } from "./search";
 
 /** One choosable time zone, described at a given moment (offsets and names follow DST). */
 export type TimeZoneOption = {
@@ -56,6 +57,5 @@ export function timeZoneOptions(extra: string[] = [], now: Date = new Date()): T
 
 /** Options matching every word typed (city, region, abbreviation, long name or offset). */
 export function filterTimeZones(options: TimeZoneOption[], query: string): TimeZoneOption[] {
-  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  return terms.length ? options.filter((option) => terms.every((term) => option.search.includes(term))) : options;
+  return query.trim() ? options.filter((option) => matchesQuery(query, option.search)) : options;
 }

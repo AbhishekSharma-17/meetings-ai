@@ -449,7 +449,7 @@ test("meeting prep search filters by title, invitee or company and offers a way 
   await expect(list.getByRole("button", { name: /Northwind pricing call/ })).toBeVisible();
   await expect(list.getByRole("button", { name: /Acme weekly check-in/ })).toHaveCount(0);
   await search.fill("globex");
-  await expect(page.getByText("No matching meetings")).toBeVisible();
+  await expect(page.getByText("No upcoming meetings match “globex”")).toBeVisible();
   await page.getByRole("button", { name: "Clear search" }).click();
   await expect(list.getByRole("button", { name: /Acme weekly check-in/ })).toBeVisible();
 });

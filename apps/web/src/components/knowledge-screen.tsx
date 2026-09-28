@@ -12,6 +12,8 @@ import { BasePicker, ChatModelInfo, ChatTurn, ChatWelcome, Composer, PendingTurn
 import { EvidenceMap, SourceCard, WikiOverview } from "./knowledge-sources";
 import { KnowledgeSharingDialog, type Visibility } from "./knowledge-sharing-dialog";
 import { Alert, EmptyState, LoadingRow } from "./ui/feedback";
+import { FilterInput, NoMatches } from "./scroll-panel";
+import { useListSearch } from "./use-list-search";
 
 type Mode = "search" | "ask" | "wiki";
 const ALL_MEETINGS = "__all__";
@@ -366,6 +368,8 @@ export function KnowledgeScreen({ identity, onOpenSource, onOpenProviders, accou
     } : null}
   />;
   const hasMenu = Boolean(selectedBase && (conversationId || canManageBase));
+  const baseSearch = useListSearch(bases, (base) => [base.name, plural(base.meeting_count, "meeting"), visibilitySummary(base)]);
+  const chatSearch = useListSearch(conversations, (conversation) => [conversation.title, relativeDay(conversation.updated_at)]);
 
   return <>
     <section className="knowledge-page" aria-labelledby="knowledge-title">
@@ -381,9 +385,11 @@ export function KnowledgeScreen({ identity, onOpenSource, onOpenProviders, accou
             <input id="knowledge-base-new" value={newBaseName} onChange={(event) => setNewBaseName(event.target.value)} minLength={2} maxLength={120} required placeholder="e.g. Acme client" autoFocus />
             <button type="submit" className="button primary sm" disabled={creatingBase} aria-label="Create knowledge base">{creatingBase ? "Creating…" : "Create"}</button>
           </form> : null}
+          {baseSearch.offered ? <div className="kl-search"><FilterInput id="knowledge-base-search" label="Search knowledge bases" value={baseSearch.query} onChange={baseSearch.setQuery} placeholder="Search knowledge bases" /></div> : null}
           <div className="kl-list">
-            {isAdmin ? <button type="button" className={storedBaseId === ALL_MEETINGS ? "knowledge-base-option selected" : "knowledge-base-option"} onClick={() => chooseBase("")}><span className="kl-icon"><BookOpenText aria-hidden="true" /></span><span className="kl-copy"><b>All opted-in meetings</b><small>Search only</small></span></button> : null}
-            {bases.map((base) => <button type="button" key={base.id} className={selectedBaseId === base.id ? "knowledge-base-option selected" : "knowledge-base-option"} onClick={() => chooseBase(base.id)}>
+            {isAdmin && !baseSearch.query.trim() ? <button type="button" className={storedBaseId === ALL_MEETINGS ? "knowledge-base-option selected" : "knowledge-base-option"} onClick={() => chooseBase("")}><span className="kl-icon"><BookOpenText aria-hidden="true" /></span><span className="kl-copy"><b>All opted-in meetings</b><small>Search only</small></span></button> : null}
+            {baseSearch.noMatches ? <NoMatches query={baseSearch.query} noun="knowledge bases" onClear={baseSearch.clear} /> : null}
+            {baseSearch.visible.map((base) => <button type="button" key={base.id} className={selectedBaseId === base.id ? "knowledge-base-option selected" : "knowledge-base-option"} onClick={() => chooseBase(base.id)}>
               <span className="kl-icon"><Library aria-hidden="true" /></span>
               <span className="kl-copy"><b>{base.name}</b><small>{plural(base.meeting_count, "meeting")}</small></span>
               <span className="kl-visibility" title={visibilitySummary(base)}><VisibilityIcon visibility={base.visibility} /></span>
@@ -393,8 +399,10 @@ export function KnowledgeScreen({ identity, onOpenSource, onOpenProviders, accou
         </div>
         {selectedBase ? <div className="kl-section kl-chats">
           <div className="kl-label"><span>Chats</span><span className="section-count">{conversations.length || ""}</span></div>
+          {chatSearch.offered ? <div className="kl-search"><FilterInput id="knowledge-chat-search" label="Search chats" value={chatSearch.query} onChange={chatSearch.setQuery} placeholder="Search chats" /></div> : null}
           <div className="kl-list">
-            {conversations.length ? conversations.map((conversation) => <button type="button" key={conversation.id} onClick={() => void chooseConversation(conversation.id)} className={conversationId === conversation.id ? "knowledge-chat-option selected" : "knowledge-chat-option"}><MessageSquare aria-hidden="true" /><span>{conversation.title}</span><small>{relativeDay(conversation.updated_at)}</small></button>)
+            {chatSearch.noMatches ? <NoMatches query={chatSearch.query} noun="chats" onClear={chatSearch.clear} />
+              : conversations.length ? chatSearch.visible.map((conversation) => <button type="button" key={conversation.id} onClick={() => void chooseConversation(conversation.id)} className={conversationId === conversation.id ? "knowledge-chat-option selected" : "knowledge-chat-option"}><MessageSquare aria-hidden="true" /><span>{conversation.title}</span><small>{relativeDay(conversation.updated_at)}</small></button>)
               : <p className="field-hint kl-empty">Saved chats for {selectedBase.name} appear here.</p>}
           </div>
         </div> : null}

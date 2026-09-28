@@ -6,6 +6,8 @@ import { meetingsService } from "@/lib/meetings-service";
 import type { CalendarEvent, SpeakerIdentity, SpeakerSuggestion } from "@/lib/types";
 import { Avatar, isAssistantName } from "./ui/avatar";
 import { Badge, type Tone } from "./ui/feedback";
+import { FilterInput, NoMatches } from "./scroll-panel";
+import { useListSearch } from "./use-list-search";
 
 const confidenceLabel: Record<NonNullable<SpeakerSuggestion["confidence"]>, { text: string; tone: Tone }> = {
   high: { text: "High match", tone: "success" },
@@ -86,6 +88,7 @@ export function SpeakerContacts({ meetingId, assistantName, namedSpeakers: heard
     } finally { setPending([]); }
   }
 
+  const speakerSearch = useListSearch(namedSpeakers, (speaker) => [speaker, confirmed.get(speaker), visible.find((item) => item.speaker === speaker)?.email]);
   const toApprovals = (items: typeof approvable): Approval[] => items.map((item) => ({ speaker: item.speaker, email: item.email }));
 
   return <div className="record-identities speaker-contacts">
@@ -105,8 +108,10 @@ export function SpeakerContacts({ meetingId, assistantName, namedSpeakers: heard
     </div>
     {error ? <p className="form-error" role="alert">{error}</p> : null}
     {notice ? <p className="form-success speaker-contacts-notice" role="status">{notice}</p> : null}
+    {speakerSearch.offered ? <div className="list-search-inline"><FilterInput id="speaker-contact-search" label="Search speakers" value={speakerSearch.query} onChange={speakerSearch.setQuery} placeholder="Search speaker or email" /></div> : null}
+    {speakerSearch.noMatches ? <NoMatches query={speakerSearch.query} noun="speakers" onClear={speakerSearch.clear} /> : null}
     <ul className="record-identity-list">
-      {namedSpeakers.map((speaker) => {
+      {speakerSearch.visible.map((speaker) => {
         const email = confirmed.get(speaker);
         const suggestion = email ? undefined : visible.find((item) => item.speaker === speaker);
         const saving = pending.includes(speaker);

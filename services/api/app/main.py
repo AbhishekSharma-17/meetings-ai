@@ -339,7 +339,7 @@ def create_app(
                         or (method == "POST" and re.fullmatch(r"/v1/background-jobs/[0-9a-f-]{36}/cancel", path))
                         or (method == "GET" and path in {"/v1/notifications", "/v1/notifications/unread-count"})
                         or (method == "POST" and re.fullmatch(r"/v1/notifications/(?:read-all|[0-9a-f-]{36}/read)", path))
-                        or (method == "DELETE" and re.fullmatch(r"/v1/notifications/[0-9a-f-]{36}", path))
+                        or (method == "DELETE" and re.fullmatch(r"/v1/notifications(?:/[0-9a-f-]{36})?", path))
                         or (method == "GET" and path in {"/v1/workspace/brief", "/v1/workspace/brief/documents"})
                         or (method in {"GET", "POST", "DELETE"} and re.fullmatch(r"/v1/documents(?:/url|/[0-9a-f-]{36}(?:/reindex)?)?", path))
                         or (method == "GET" and re.fullmatch(r"/v1/meetings/[0-9a-f-]+(?:/transcript)?", path))

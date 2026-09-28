@@ -1214,6 +1214,10 @@ export const notificationService = {
   remove(id: string): Promise<void> {
     return api<void>(`/v1/notifications/${id}`, { method: "DELETE" });
   },
+  /** Clears the signed-in person's notifications in this workspace; `readOnly` keeps unread ones. */
+  clear(options: { readOnly?: boolean } = {}): Promise<{ cleared: number; unread_count: number }> {
+    return api<{ cleared: number; unread_count: number }>(`/v1/notifications${options.readOnly ? "?read_only=true" : ""}`, { method: "DELETE" });
+  },
 };
 
 export const jobService = {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import { formatFullDateTime } from "@/lib/time-preferences";
 import type { ReactNode } from "react";
 import { Dialog } from "@base-ui/react/dialog";
@@ -8,6 +8,8 @@ import { Download, Maximize2, MessageSquareText, X } from "lucide-react";
 import { Avatar, DEFAULT_ASSISTANT_NAME, isAssistantName } from "./ui/avatar";
 import type { TranscriptSegment } from "@/lib/types";
 import { EmptyState } from "./ui/feedback";
+import { FilterInput, Highlight, NoMatches, SearchToolbar } from "./scroll-panel";
+import { matchesQuery, shouldOfferSearch } from "@/lib/search";
 
 export const UNIDENTIFIED_SPEAKER = "Unidentified speaker";
 
@@ -26,13 +28,20 @@ export function relativeTime(value: number): string {
   return `${minutes.toString().padStart(2, "0")}:${(seconds % 60).toString().padStart(2, "0")}`;
 }
 
+/** A turn matches by speaker, capture label or what was said. */
+export function turnMatches(segment: TranscriptSegment, query: string): boolean {
+  return matchesQuery(query, segment.speaker, segment.rawSpeaker, segment.text);
+}
+
 export function namedSpeakersOf(segments: TranscriptSegment[]): string[] {
   return [...new Set(segments.filter((segment) => segment.isFinal && segment.speaker !== UNIDENTIFIED_SPEAKER).map((segment) => segment.speaker))];
 }
 
 /** One transcript turn: avatar, speaker, timestamp and text. Shared by the meeting record and the evidence view. */
-export function TranscriptTurn({ id, segment, time, timeTitle, focused, flags, actions, children, assistantName = DEFAULT_ASSISTANT_NAME }: {
+export function TranscriptTurn({ id, segment, time, timeTitle, focused, flags, actions, children, highlight = "", assistantName = DEFAULT_ASSISTANT_NAME }: {
   id: string;
+  /** Active transcript search; matching words are marked in the speaker and text. */
+  highlight?: string;
   segment: TranscriptSegment;
   time: string;
   timeTitle?: string;
@@ -49,12 +58,12 @@ export function TranscriptTurn({ id, segment, time, timeTitle, focused, flags, a
     <Avatar name={segment.speaker} kind={assistant ? "assistant" : "person"} fallback={unidentified ? "?" : undefined} className={unidentified ? "turn-avatar unknown" : "turn-avatar"} />
     <div className="turn-body">
       <div className="turn-head">
-        <b className="turn-speaker">{segment.speaker}</b>
+        <b className="turn-speaker"><Highlight text={segment.speaker} query={highlight} /></b>
         <span className="turn-time tabular" title={timeTitle}>{time}</span>
         {flags}
         {actions ? <span className="turn-actions">{actions}</span> : null}
       </div>
-      <p className="turn-text">{segment.text}</p>
+      <p className="turn-text"><Highlight text={segment.text} query={highlight} /></p>
       {children}
     </div>
   </li>;
@@ -75,15 +84,28 @@ export function MeetingTranscript({ meetingTitle, assistantName, segments, focus
   const [speakerName, setSpeakerName] = useState("");
   const [applyToSameLabel, setApplyToSameLabel] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [query, setQuery] = useState("");
 
   const finalized = segments.filter((segment) => segment.isFinal);
   const namedSpeakers = namedSpeakersOf(segments);
   const unattributedCount = finalized.filter((segment) => segment.speaker === UNIDENTIFIED_SPEAKER).length;
   const reviewedCount = finalized.filter((segment) => segment.speakerReviewed).length;
   const namedCoverage = finalized.length ? Math.round((finalized.length - unattributedCount) * 100 / finalized.length) : 0;
-  const newestFirst = [...segments].sort((left, right) => transcriptSeconds(right.startedAt) - transcriptSeconds(left.startedAt));
+  const newestFirst = useMemo(
+    () => [...segments].sort((left, right) => transcriptSeconds(right.startedAt) - transcriptSeconds(left.startedAt)),
+    [segments],
+  );
+  // Long meetings have thousands of turns: filter on a deferred copy so typing stays responsive.
+  const searchQuery = useDeferredValue(query);
   const oldest = newestFirst[newestFirst.length - 1];
   const firstSegmentAt = oldest ? transcriptSeconds(oldest.startedAt) : 0;
+  const searchable = shouldOfferSearch(segments.length, query);
+  const shown = useMemo(
+    () => searchQuery.trim() ? newestFirst.filter((segment) => turnMatches(segment, searchQuery)) : newestFirst,
+    [newestFirst, searchQuery],
+  );
+  const matchCount = searchQuery.trim() ? `${shown.length} of ${segments.length} turns match` : null;
+  const noMatches = <NoMatches query={searchQuery} noun="turns" onClear={() => setQuery("")} />;
 
   async function save(segment: TranscriptSegment) {
     if (await onSaveSpeaker(segment, speakerName, applyToSameLabel)) setEditingSpeakerId(null);
@@ -98,7 +120,7 @@ export function MeetingTranscript({ meetingTitle, assistantName, segments, focus
     </>;
     const review = <button className="text-button neutral" type="button" onClick={() => { setEditingSpeakerId(segment.segmentId); setSpeakerName(segment.speaker === UNIDENTIFIED_SPEAKER ? "" : segment.speaker); setApplyToSameLabel(false); }}>Review speaker</button>;
     return <TranscriptTurn key={segment.id} id={`transcript-${encodeURIComponent(segment.segmentId)}`} segment={segment} focused={focusSegmentId === segment.segmentId} assistantName={assistantName}
-      time={relativeTime(at - firstSegmentAt)} timeTitle={at > 1_000_000_000 ? formatFullDateTime(at * 1000) : "Elapsed from first captured turn"} flags={flags} actions={review}>
+      time={relativeTime(at - firstSegmentAt)} timeTitle={at > 1_000_000_000 ? formatFullDateTime(at * 1000) : "Elapsed from first captured turn"} flags={flags} actions={review} highlight={searchQuery}>
       {editingSpeakerId === segment.segmentId ? <div className="turn-review-form">
         {segment.rawSpeaker ? <p className="field-hint">Capture label: {segment.rawSpeaker}</p> : null}
         <label className="field">Correct speaker name<input value={speakerName} onChange={(event) => setSpeakerName(event.target.value)} placeholder="Leave blank to mark unidentified" autoFocus /></label>
@@ -122,13 +144,15 @@ export function MeetingTranscript({ meetingTitle, assistantName, segments, focus
         <button className="button secondary sm" type="button" onClick={() => setExpanded(true)}><Maximize2 aria-hidden="true" /> Open full transcript</button>
       </div> : null}
     </div>
+    {searchable ? <SearchToolbar id="transcript-search" label="Search transcript" value={query} onChange={setQuery} placeholder="Search what was said or who said it" /> : null}
     <div className="card-body transcript-body">
       {segments.length ? <>
         <div className="transcript-summary">
           <p><b>Speakers heard:</b> {namedSpeakers.length ? namedSpeakers.join(", ") : "none identified"}{unattributedCount ? ` · ${unattributedCount} unidentified turn${unattributedCount === 1 ? "" : "s"}` : ""} · {namedCoverage}% of finalized turns named · {reviewedCount} reviewed</p>
           <p className="field-hint">Coverage is not identity accuracy, and speakers are not an attendance roster.</p>
         </div>
-        {!expanded ? <ol className="transcript-list transcript-list-compact" aria-label="Recent transcript turns, newest first">{newestFirst.map(renderSegment)}</ol> : null}
+        {matchCount ? <p className="field-hint" role="status">{matchCount}</p> : null}
+        {expanded ? null : shown.length ? <ol className="transcript-list transcript-list-compact" aria-label="Recent transcript turns, newest first">{shown.map(renderSegment)}</ol> : noMatches}
       </> : <EmptyState plain icon={<MessageSquareText />} title="No transcript yet">{isLive ? "The assistant is live. The first finalized turn appears here shortly." : "Turns appear here once the assistant captures them."}</EmptyState>}
     </div>
     <Dialog.Root open={expanded} onOpenChange={setExpanded}>
@@ -138,7 +162,8 @@ export function MeetingTranscript({ meetingTitle, assistantName, segments, focus
           <Dialog.Close className="close-button" aria-label="Close transcript"><X /></Dialog.Close>
           <Dialog.Title className="dialog-title">Full transcript</Dialog.Title>
           <Dialog.Description className="dialog-intro">{meetingTitle} · {segments.length} turns · newest first</Dialog.Description>
-          <ol className="transcript-list transcript-list-full">{newestFirst.map(renderSegment)}</ol>
+          {searchable ? <div className="list-search-inline"><FilterInput id="transcript-search-full" label="Search full transcript" value={query} onChange={setQuery} placeholder="Search what was said or who said it" />{matchCount ? <span className="list-search-count" role="status">{matchCount}</span> : null}</div> : null}
+          {shown.length ? <ol className="transcript-list transcript-list-full">{shown.map(renderSegment)}</ol> : noMatches}
         </Dialog.Popup>
       </Dialog.Portal>
     </Dialog.Root>

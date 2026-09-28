@@ -11,7 +11,11 @@ import { SettingsToast, type SettingsNotice } from "./settings-toast";
 import { ProviderEditor } from "./provider-editor";
 import { ApiKeysCard } from "./provider-keys";
 import { WorkspaceAiCard } from "./ai-settings-card";
+import { ProviderName } from "./provider-brand-icons";
+import { profileBrand } from "./provider-brand";
 import { connectionText, connectionTone, isUnsavedProfile, profileInfo, profileKinds } from "./provider-profile-info";
+import { FilterInput } from "./scroll-panel";
+import { matchesQuery, shouldOfferSearch } from "@/lib/search";
 
 const STACKED_LAYOUT_QUERY = "(max-width: 1100px)";
 
@@ -24,6 +28,7 @@ function revealEditor() {
 export function ProviderSettings({ identity, profiles, onProfilesChange }: { identity: string; profiles: ProviderProfile[]; onProfilesChange(profiles: ProviderProfile[]): void }) {
   const [selectedId, setSelectedId] = useUiPreference(`meetings-ai:provider-selection:${identity}`, "", (value): value is string => typeof value === "string");
   const [notice, setNotice] = useState<SettingsNotice | null>(null);
+  const [profileQuery, setProfileQuery] = useState("");
   const activeId = profiles.some((profile) => profile.id === selectedId) ? selectedId : (profiles[0]?.id ?? "");
   const selected = profiles.find((profile) => profile.id === activeId);
   const [credentials, setCredentials] = useState<VaultCredential[]>([]);
@@ -99,7 +104,8 @@ export function ProviderSettings({ identity, profiles, onProfilesChange }: { ide
     </div>
     <div className="provider-layout">
       <div className="provider-groups">
-        {profileKinds.map((kind) => <ProfileGroup key={kind} kind={kind} profiles={profiles.filter((profile) => profile.kind === kind)} selectedId={activeId} onSelect={select} onAdd={() => addProfile(kind)} />)}
+        {shouldOfferSearch(profiles.length, profileQuery) ? <div className="list-search-inline provider-search"><FilterInput id="provider-profile-search" label="Search AI profiles" value={profileQuery} onChange={setProfileQuery} placeholder="Search name, provider, model or key" /></div> : null}
+        {profileKinds.map((kind) => <ProfileGroup key={kind} kind={kind} query={profileQuery} profiles={profiles.filter((profile) => profile.kind === kind)} selectedId={activeId} onSelect={select} onAdd={() => { setProfileQuery(""); addProfile(kind); }} />)}
       </div>
       {selected
         ? <ProviderEditor key={selected.id} identity={identity} profile={selected} credentials={credentials} canSaveKeys={isOwner} onSave={save} onDelete={remove} onChange={(profile) => onProfilesChange(profiles.map((candidate) => candidate.id === selected.id ? profile : candidate))} onNotice={setNotice} />
@@ -115,8 +121,14 @@ function credentialText(profile: ProviderProfile): string {
   return profile.executionLocation === "local" ? "Key optional" : "No key";
 }
 
-function ProfileGroup({ kind, profiles, selectedId, onSelect, onAdd }: { kind: ProfileKind; profiles: ProviderProfile[]; selectedId: string; onSelect(id: string): void; onAdd(): void }) {
+function profileMatches(profile: ProviderProfile, query: string): boolean {
+  return matchesQuery(query, profile.label, profile.provider, profile.model, profile.executionLocation === "local" ? "Local" : "Cloud",
+    credentialText(profile), profile.isDefault ? "Default" : null, connectionText[profile.connectionState]);
+}
+
+function ProfileGroup({ kind, query, profiles, selectedId, onSelect, onAdd }: { kind: ProfileKind; query: string; profiles: ProviderProfile[]; selectedId: string; onSelect(id: string): void; onAdd(): void }) {
   const info = profileInfo[kind];
+  const shown = profiles.filter((profile) => profileMatches(profile, query));
   const Icon = info.icon;
   return <section className="card provider-group" aria-labelledby={`${kind}-title`}>
     <div className="card-header provider-group-header">
@@ -124,14 +136,16 @@ function ProfileGroup({ kind, profiles, selectedId, onSelect, onAdd }: { kind: P
       <div><h2 id={`${kind}-title`}>{info.title}</h2><p>{info.description}</p></div>
       <button type="button" className="button secondary sm" onClick={onAdd} aria-label={`Add ${info.noun} profile`}><Plus aria-hidden="true" /> Add</button>
     </div>
-    {profiles.length === 0 ? <p className="provider-group-empty">No configurations yet.</p> : <ul className="provider-rows">
-      {profiles.map((profile) => {
+    {profiles.length === 0 ? <p className="provider-group-empty">No configurations yet.</p>
+      : shown.length === 0 ? <p className="provider-group-empty" role="status">No {info.noun} profiles match “{query.trim()}”.</p>
+      : <ul className="provider-rows">
+      {shown.map((profile) => {
         const unsaved = isUnsavedProfile(profile.id);
         return <li key={profile.id}>
           <button type="button" className="provider-row" aria-current={selectedId === profile.id ? "true" : undefined} onClick={() => onSelect(profile.id)}>
             <span className="provider-row-main">
               <span className="provider-row-title"><b>{profile.label}</b>{profile.isDefault ? <Badge tone="brand">Default</Badge> : null}</span>
-              <small>{profile.provider} · {profile.model || "No model set"}</small>
+              <small className="provider-row-route"><ProviderName brand={profileBrand(profile)} label={profile.provider} /><span aria-hidden="true">·</span><span className="provider-row-model">{profile.model || "No model set"}</span></small>
             </span>
             <span className="provider-row-meta">
               <span className="tag">{profile.executionLocation === "local" ? "Local" : "Cloud"}</span>

@@ -6,12 +6,15 @@ import { FileText, Upload } from "lucide-react";
 import { identityService, meetingsService, serviceErrorStatus } from "@/lib/meetings-service";
 import type { BriefDocument, OrganizationBrief, OrganizationIdentity } from "@/lib/types";
 import { Skeleton } from "./ui/feedback";
+import { FilterInput, NoMatches } from "./scroll-panel";
+import { useListSearch } from "./use-list-search";
 import { domainProblem, identityInput, WorkspaceIdentityFields } from "./workspace-identity-fields";
 
 /** Company context the meeting-prep assistant reads. Members can read it; admins can edit it. */
 export function WorkspaceBrief({ workspaceId, canManage }: { workspaceId: string; canManage: boolean }) {
   const [brief, setBrief] = useState<OrganizationBrief | null>(null);
   const [briefDocuments, setBriefDocuments] = useState<BriefDocument[]>([]);
+  const documentSearch = useListSearch(briefDocuments, (item) => [item.filename, formatDate(item.uploaded_at)]);
   const [briefBusy, setBriefBusy] = useState(false);
   const [briefError, setBriefError] = useState<string | null>(null);
   const [briefMessage, setBriefMessage] = useState<string | null>(null);
@@ -90,7 +93,9 @@ export function WorkspaceBrief({ workspaceId, canManage }: { workspaceId: string
           <div><h3>Reference documents</h3><p>PDF, DOCX, Markdown or text up to 8 MB. Scanned PDFs need OCR first.</p></div>
           {canManage ? <label className="button secondary sm brief-upload"><Upload aria-hidden="true" />Add document<input className="sr-only" type="file" accept=".pdf,.docx,.md,.txt" disabled={briefBusy} onChange={(event) => { void uploadBrief(event.target.files?.[0]); event.target.value = ""; }} /></label> : null}
         </div>
-        {briefDocuments.length ? <ul className="list-card brief-document-list">{briefDocuments.map((item) => <li key={item.id} className="list-row">
+        {documentSearch.offered ? <div className="list-search-inline"><FilterInput id="brief-document-search" label="Search reference documents" value={documentSearch.query} onChange={documentSearch.setQuery} placeholder="Search file name or date" /></div> : null}
+        {documentSearch.noMatches ? <NoMatches query={documentSearch.query} noun="documents" onClear={documentSearch.clear} />
+          : briefDocuments.length ? <ul className="list-card brief-document-list">{documentSearch.visible.map((item) => <li key={item.id} className="list-row">
           <span className="settings-icon" aria-hidden="true"><FileText /></span>
           <span className="brief-document-copy"><b>{item.filename}</b><small>{item.character_count.toLocaleString()} readable characters · {formatDate(item.uploaded_at)}</small></span>
           {canManage ? <button type="button" className="text-button destructive" disabled={briefBusy} aria-label={`Remove ${item.filename}`} onClick={() => void deleteBriefDocument(item.id)}>Remove</button> : null}

@@ -1,5 +1,6 @@
 import type { CachedCalendarEvent, CalendarConnection } from "@/lib/types";
 import { calendarProviderNames } from "./calendar-providers";
+import { matchesQuery, type SearchField } from "@/lib/search";
 
 /** Video platforms we can draw a mark for. `null` means no recognised join link. */
 export type MeetingPlatform = "google_meet" | "teams" | "zoom" | "jitsi";
@@ -83,6 +84,11 @@ export function viaCalendly(entry: CalendarEntry): boolean {
 }
 
 /** Lower-case text used by meeting search: title, organizer, invitees and their email domains. */
+/** True when a merged meeting matches the query by title, organizer, invitee name, email or company (any source). */
+export function entryMatches(entry: CalendarEntry, query: string, ...extra: SearchField[]): boolean {
+  return matchesQuery(query, entry.sources.map(eventSearchText), extra);
+}
+
 export function eventSearchText(event: CachedCalendarEvent): string {
   const people = (event.invitees ?? []).flatMap((person) => {
     const domain = person.email?.split("@")[1] ?? "";

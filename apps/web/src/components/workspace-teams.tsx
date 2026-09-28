@@ -7,6 +7,8 @@ import type { Team, TeamInput, WorkspaceMember } from "@/lib/types";
 import { Avatar } from "./ui/avatar";
 import { Alert, EmptyState, LoadingRow } from "./ui/feedback";
 import { TeamDialog } from "./workspace-team-dialog";
+import { NoMatches, SearchToolbar } from "./scroll-panel";
+import { useListSearch } from "./use-list-search";
 
 const STACK_SIZE = 4;
 
@@ -79,6 +81,7 @@ export function WorkspaceTeams({ members, canManage, onTeamsChange, onMessage }:
   }
 
   const count = teams?.length ?? 0;
+  const search = useListSearch(teams ?? [], (team) => [team.name, team.description, team.members.map((member) => [member.display_name, member.email])]);
   return <section className="card settings-section" id="settings-teams" aria-labelledby="workspace-teams-title">
     <div className="card-header">
       <div><h2 id="workspace-teams-title">Teams</h2><p>{canManage ? "Groups you can send meeting recaps to in one step." : "Groups your admins set up for meeting recaps."}</p></div>
@@ -91,12 +94,15 @@ export function WorkspaceTeams({ members, canManage, onTeamsChange, onMessage }:
         action={canManage ? <button type="button" className="button secondary sm" onClick={() => open(null)}><Plus aria-hidden="true" />Create a team</button> : undefined}>
         {canManage ? "Create one to send a recap to a whole group, like Leadership or an account team." : "An admin can create teams for meeting recaps."}
       </EmptyState>
-      : <ul className="team-list">
-        {teams.map((team) => <TeamRow key={team.id} team={team} canManage={canManage} confirming={pendingDeleteId === team.id} deleting={deletingId === team.id}
+      : <>
+        {search.offered ? <SearchToolbar id="team-search" label="Search teams" value={search.query} onChange={search.setQuery} placeholder="Search by team, member name or email" /> : null}
+        {search.noMatches ? <NoMatches query={search.query} noun="teams" onClear={search.clear} /> : <ul className="team-list">
+        {search.visible.map((team) => <TeamRow key={team.id} team={team} canManage={canManage} confirming={pendingDeleteId === team.id} deleting={deletingId === team.id}
           error={pendingDeleteId === team.id ? deleteError : null}
           onOpen={() => open(team, !canManage)} onRequestDelete={() => { setDeleteError(null); setPendingDeleteId(team.id); }}
           onCancelDelete={() => setPendingDeleteId(null)} onDelete={() => void remove(team)} />)}
       </ul>}
+      </>}
     {editing ? <TeamDialog key={editing.team?.id ?? "new"} open team={editing.team} members={members} readOnly={editing.readOnly}
       busy={saving} error={saveError} onClose={() => setEditing(null)} onSave={(input) => void save(input)} /> : null}
   </section>;

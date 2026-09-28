@@ -3,6 +3,8 @@
 import { KeyRound } from "lucide-react";
 import type { ProfileKeyChoice, ProviderProfile, VaultCredential } from "@/lib/types";
 import { UiSelect } from "./ui-select";
+import { providerOptionIcon } from "./provider-brand-icons";
+import { credentialBrand } from "./provider-brand";
 import { canSaveToVault, compatibleCredentials } from "./provider-profile-info";
 
 export type KeyChoiceState = { mode: "saved" | "paste"; credentialId: string; apiKey: string; saveToVault: boolean; vaultLabel: string };
@@ -60,7 +62,7 @@ export function ProviderKeyField({ draft, credentials, canSaveKeys, value, onCha
     </div> : null}
     {value.mode === "saved" ? compatible.length ? <div className="field">
       <UiSelect id="profile-credential" label="Saved API key" value={value.credentialId} placeholder="Choose a saved key" onChange={(id) => set({ credentialId: id })}
-        options={compatible.map((item) => ({ value: item.id, label: `${item.label} · ${item.hint}` }))} />
+        options={compatible.map((item) => ({ value: item.id, label: `${item.label} · ${item.hint}`, icon: providerOptionIcon(credentialBrand(item)) }))} />
       <p className="field-hint">{linked ? `Uses ${linked.label}. Replacing that key updates this profile too.` : "Choose which saved key this profile uses."}</p>
     </div> : <p className="field-hint provider-key-none" role="status">No saved key matches this provider{draft.provider === "OpenAI-compatible" ? " and endpoint" : ""}. Paste a key instead, or add one under API keys.</p>
       : <>

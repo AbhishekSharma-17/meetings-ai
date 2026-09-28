@@ -5,7 +5,9 @@ import { formatDateTime } from "@/lib/time-preferences";
 import { Link2, RefreshCw } from "lucide-react";
 import type { CalendarConnection, CalendarSyncState } from "@/lib/types";
 import { AccountRow, CalendarAliasDialog, ProviderGrid, connectionStatusLabel } from "./calendar-connections";
-import type { CalendarProvider } from "./calendar-providers";
+import { calendarProviderNames, type CalendarProvider } from "./calendar-providers";
+import { NoMatches, SearchToolbar } from "./scroll-panel";
+import { useListSearch } from "./use-list-search";
 import { Badge, EmptyState } from "./ui/feedback";
 
 const syncFormat: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" };
@@ -31,6 +33,7 @@ export function CalendarIntegrations({ connections, syncs, busy, connecting = fa
   const [editAlias, setEditAlias] = useState("");
   const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null);
   const active = connections.filter((item) => item.status === "ACTIVE");
+  const search = useListSearch(connections, (item) => [item.label, item.identity, calendarProviderNames[item.provider], connectionStatusLabel(item.status)]);
 
   function startRename(item: CalendarConnection) {
     setDisconnectTarget(null);
@@ -50,8 +53,9 @@ export function CalendarIntegrations({ connections, syncs, busy, connecting = fa
         <div><h3 id="calendar-accounts-title">Accounts</h3><p>Sync, rename or disconnect each account on its own.</p></div>
         <span className="section-count">{connections.length} total</span>
       </div>
-      {connections.length ? <ul className="calendar-account-list">
-        {connections.map((item) => {
+      {search.offered ? <SearchToolbar id="calendar-account-search" label="Search accounts" value={search.query} onChange={search.setQuery} placeholder="Search name, email or source" /> : null}
+      {search.noMatches ? <NoMatches query={search.query} noun="accounts" onClear={search.clear} /> : connections.length ? <ul className="calendar-account-list">
+        {search.visible.map((item) => {
           const sync = syncs.find((state) => state.connection_id === item.id);
           const editing = editTarget === item.id;
           const confirming = disconnectTarget === item.id;

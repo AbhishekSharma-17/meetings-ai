@@ -1,7 +1,11 @@
-import type { ReactNode } from "react";
+"use client";
+
+import { useState, type ReactNode } from "react";
 import { Building2, Handshake, UsersRound } from "lucide-react";
 import type { PartyCompany, PartyPerson, PartySide, PartyWarning, WhosWho } from "@/lib/types";
 import { Alert, Badge } from "./ui/feedback";
+import { FilterInput } from "./scroll-panel";
+import { matchesQuery, shouldOfferSearch } from "@/lib/search";
 
 /** Correction callback: a side to pin, or null to go back to the automatic classification. */
 export type SideChange = (key: string, side: "ours" | "theirs" | null) => void;
@@ -19,16 +23,22 @@ export function WhosWhoView({ value, onSide, disabled = false, onOpenOrganizatio
   disabled?: boolean;
   onOpenOrganization?(): void;
 }) {
-  const ours = value.attendees.filter((person) => person.side === "ours");
-  const theirs = value.attendees.filter((person) => person.side === "theirs");
-  const others = value.attendees.filter((person) => person.side === "other_external" || person.side === "unknown");
+  const [query, setQuery] = useState("");
+  const searching = Boolean(query.trim());
+  const shown = value.attendees.filter((person) => matchesQuery(query, person.name, person.email, person.email?.split("@")[1], person.reason));
+  const ours = shown.filter((person) => person.side === "ours");
+  const theirs = shown.filter((person) => person.side === "theirs");
+  const others = shown.filter((person) => person.side === "other_external" || person.side === "unknown");
+  const noMatch = "No one on this side matches the search.";
   return <div className="prep-whos-who-body">
     <WhosWhoWarnings warnings={value.warnings} onOpenOrganization={onOpenOrganization} />
+    {shouldOfferSearch(value.attendees.length, query) ? <div className="list-search-inline"><FilterInput id="whos-who-search" label="Search attendees" value={query} onChange={setQuery} placeholder="Search name, email or company" />
+      {searching ? <span className="list-search-count" role="status">{shown.length} of {value.attendees.length}</span> : null}</div> : null}
     <div className="prep-sides">
       <SideColumn tone="ours" icon={<Building2 />} heading="Your side" company={value.our_company}
-        fallbackName="Your company" people={ours} onSide={onSide} disabled={disabled} empty="None of your colleagues are on this invite." />
+        fallbackName="Your company" people={ours} onSide={onSide} disabled={disabled} empty={searching ? noMatch : "None of your colleagues are on this invite."} />
       <SideColumn tone="theirs" icon={<Handshake />} heading="Client" company={value.target}
-        fallbackName="Not identified yet" people={theirs} onSide={onSide} disabled={disabled} empty="No one from the client is identified yet." />
+        fallbackName="Not identified yet" people={theirs} onSide={onSide} disabled={disabled} empty={searching ? noMatch : "No one from the client is identified yet."} />
     </div>
     {others.length ? <section className="prep-side-others" aria-label="Others in the invite">
       <h4 className="prep-side-subhead"><UsersRound aria-hidden="true" />Others in the invite <span className="section-count">{others.length}</span></h4>

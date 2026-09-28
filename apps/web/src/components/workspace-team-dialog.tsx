@@ -7,11 +7,11 @@ import type { Team, TeamInput, WorkspaceMember } from "@/lib/types";
 import { Avatar } from "./ui/avatar";
 import { EmailChips, isValidEmail } from "./ui/email-chips";
 import { FilterInput, matchesQuery } from "./scroll-panel";
+import { shouldOfferSearch } from "@/lib/search";
 
 const NAME_MAX = 80;
 const DESCRIPTION_MAX = 500;
 /** Above this many people the picker gets a search box. */
-const SEARCH_THRESHOLD = 6;
 
 /** Create, edit or (read-only) view one team. Members are workspace people and/or outside addresses. */
 export function TeamDialog({ open, team, members, readOnly, busy, error, onClose, onSave }: {
@@ -35,7 +35,8 @@ export function TeamDialog({ open, team, members, readOnly, busy, error, onClose
   const [localError, setLocalError] = useState<string | null>(null);
   const departed = (team?.members ?? []).filter((member) => member.user_id && !current.has(member.user_id));
   const withEmail = members.filter((member) => member.email);
-  const visible = withEmail.length > SEARCH_THRESHOLD ? withEmail.filter((member) => matchesQuery(query, [member.display_name, member.email])) : withEmail;
+  const searchable = shouldOfferSearch(withEmail.length, query);
+  const visible = searchable ? withEmail.filter((member) => matchesQuery(query, [member.display_name, member.email])) : withEmail;
   const total = userIds.length + emails.length;
 
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -73,7 +74,7 @@ export function TeamDialog({ open, team, members, readOnly, busy, error, onClose
           </div>
           <fieldset className="field team-picker">
             <legend className="field-label">Workspace members <span className="optional">{userIds.length} selected</span></legend>
-            {withEmail.length > SEARCH_THRESHOLD ? <FilterInput id="team-member-search" label="Search workspace members" value={query} onChange={setQuery} placeholder="Search by name or email" /> : null}
+            {searchable ? <FilterInput id="team-member-search" label="Search workspace members" value={query} onChange={setQuery} placeholder="Search by name or email" /> : null}
             <div className="share-members team-member-options" role="group" aria-label="Workspace members">
               {visible.length ? visible.map((member) => <label key={member.user_id} className="share-member">
                 <input type="checkbox" disabled={busy} checked={userIds.includes(member.user_id)}

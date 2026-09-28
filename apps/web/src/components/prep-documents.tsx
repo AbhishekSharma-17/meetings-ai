@@ -5,6 +5,8 @@ import { FileText, Trash2, Upload } from "lucide-react";
 import { prepService, serviceErrorStatus } from "@/lib/meetings-service";
 import type { PrepDocument } from "@/lib/types";
 import { Badge, LoadingRow } from "./ui/feedback";
+import { FilterInput, NoMatches } from "./scroll-panel";
+import { useListSearch } from "./use-list-search";
 
 const POLL_MS = 4000;
 const ACCEPT = ".pdf,.docx,.pptx,.xlsx,.md,.markdown,.txt,.csv,.html,.htm,.png,.jpg,.jpeg";
@@ -28,6 +30,7 @@ export function PrepDocuments({ eventId, canEdit }: { eventId: string; canEdit: 
   const [uploading, setUploading] = useState(false);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const search = useListSearch(documents, (item) => [item.filename, (statusCopy[item.status] ?? { label: item.status }).label]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(() => prepService.listDocuments(eventId).then((items) => {
@@ -89,8 +92,9 @@ export function PrepDocuments({ eventId, canEdit }: { eventId: string; canEdit: 
     </div>
     {state === "loading" ? <LoadingRow>Loading documents…</LoadingRow>
       : state === "unavailable" ? <p className="prep-documents-empty">Document uploads are not available in this workspace yet.</p>
-        : documents.length ? <ul className="prep-document-list">
-          {documents.map((item) => {
+        : documents.length ? <>{search.offered ? <PrepDocumentSearch query={search.query} onChange={search.setQuery} /> : null}
+          {search.noMatches ? <NoMatches query={search.query} noun="documents" onClear={search.clear} /> : <ul className="prep-document-list">
+          {search.visible.map((item) => {
             const status = statusCopy[item.status] ?? { label: item.status, tone: "neutral" as const };
             const pages = item.page_count ? `${item.page_count} ${item.page_count === 1 ? "page" : "pages"}${item.ocr_page_count ? ` · ${item.ocr_page_count} read with OCR` : ""}` : null;
             return <li key={item.id} className="prep-document">
@@ -109,7 +113,11 @@ export function PrepDocuments({ eventId, canEdit }: { eventId: string; canEdit: 
                 : null}
             </li>;
           })}
-        </ul> : <p className="prep-documents-empty">No documents yet.</p>}
+        </ul>}</> : <p className="prep-documents-empty">No documents yet.</p>}
     {error ? <p className="form-error" role="alert">{error}</p> : null}
   </div>;
+}
+
+function PrepDocumentSearch({ query, onChange }: { query: string; onChange(value: string): void }) {
+  return <div className="list-search-inline"><FilterInput id="prep-document-search" label="Search documents" value={query} onChange={onChange} placeholder="Search file name or status" /></div>;
 }

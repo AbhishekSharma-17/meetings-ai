@@ -1,10 +1,14 @@
 "use client";
 
+import { useState } from "react";
 import { ArrowUpRight, CircleCheck, FileText, GitBranch, ListChecks, Quote, ShieldCheck } from "lucide-react";
 import { formatDate } from "@/lib/time-preferences";
 import type { KnowledgeMap, KnowledgeSource, KnowledgeWikiOverview } from "@/lib/types";
 import { Avatar, DEFAULT_ASSISTANT_NAME, isAssistantName } from "./ui/avatar";
 import { EmptyState } from "./ui/feedback";
+import { FilterInput, NoMatches } from "./scroll-panel";
+import { useListSearch } from "./use-list-search";
+import { matchesQuery, shouldOfferSearch } from "@/lib/search";
 
 export type OpenSource = (meetingId: string, segmentId: string) => void;
 
@@ -48,9 +52,12 @@ export function SourceCard({ source, onOpenSource, index, highlighted = false }:
 }
 
 export function WikiOverview({ overview, onOpenMeeting }: { overview: KnowledgeWikiOverview; onOpenMeeting(id: string): void }) {
+  const search = useListSearch(overview.meetings, (meeting) => [meeting.title, formatDate(meeting.created_at), meeting.tags, meeting.summary, meeting.decisions, meeting.action_items]);
   return <section className="wiki-section" aria-labelledby="wiki-meetings-title">
     <div className="section-heading"><div><h2 id="wiki-meetings-title"><GitBranch aria-hidden="true" /> Connected meetings</h2><p>{overview.meetings.length} completed meeting{overview.meetings.length === 1 ? "" : "s"}. Summaries come from approved minutes.</p></div></div>
-    {overview.meetings.length ? <div className="wiki-meeting-grid">{overview.meetings.map((meeting) => <article className="card wiki-meeting" key={meeting.id}>
+    {search.offered ? <div className="list-search-inline"><FilterInput id="wiki-meeting-search" label="Search connected meetings" value={search.query} onChange={search.setQuery} placeholder="Search titles, tags, decisions or actions" /></div> : null}
+    {search.noMatches ? <NoMatches query={search.query} noun="meetings" onClear={search.clear} />
+      : overview.meetings.length ? <div className="wiki-meeting-grid">{search.visible.map((meeting) => <article className="card wiki-meeting" key={meeting.id}>
       <div className="wiki-meeting-body">
         <time className="wiki-meeting-date">{formatDate(meeting.created_at)}</time>
         <h3>{meeting.title}</h3>
@@ -67,12 +74,19 @@ export function WikiOverview({ overview, onOpenMeeting }: { overview: KnowledgeW
 
 export function EvidenceMap({ map, onOpenSource }: { map: KnowledgeMap; onOpenSource: OpenSource }) {
   const count = (value: number, noun: string) => `${value} ${noun}${value === 1 ? "" : "s"}`;
+  const [query, setQuery] = useState("");
+  const entryFields = (item: KnowledgeMap["topics"][number]) => [item.label, item.email];
+  const topics = map.topics.filter((item) => matchesQuery(query, entryFields(item)));
+  const speakers = map.speaker_labels.filter((item) => matchesQuery(query, entryFields(item)));
+  const total = map.topics.length + map.speaker_labels.length;
+  const nothing = query.trim() && total > 0 && !topics.length && !speakers.length;
   return <section className="wiki-section" aria-labelledby="wiki-map-title">
     <div className="section-heading"><div><h2 id="wiki-map-title">People & topics</h2><p>Tags and speaker labels linked to timestamped source turns.</p></div></div>
     <p className="field-hint wiki-map-note"><ShieldCheck aria-hidden="true" /> Speaker labels are not verified identities unless an email was explicitly confirmed. {map.truncated_meeting_scope ? "This map covers the newest 200 eligible meetings." : ""}</p>
-    <div className="wiki-map-columns">
-      <div className="card"><div className="card-header"><div><h3>Topics</h3></div><span className="section-count">{map.topics.length}</span></div><div className="card-body tight">{map.topics.length ? map.topics.map((item) => <details key={item.key} className="knowledge-map-entry"><summary><span className="map-entry-mark" aria-hidden="true">#</span><span><b>{item.label}</b><small>{count(item.meeting_count, "meeting")} · {count(item.source_count, "source")}</small></span></summary><div className="knowledge-map-sources">{item.sources.map((source) => <SourceCard key={source.source_id} source={source} onOpenSource={onOpenSource} />)}</div></details>) : <p className="field-hint wiki-empty">No tags on eligible meetings yet.</p>}</div></div>
-      <div className="card"><div className="card-header"><div><h3>Speaker labels</h3></div><span className="section-count">{map.speaker_labels.length}</span></div><div className="card-body tight">{map.speaker_labels.length ? map.speaker_labels.map((item) => <details key={item.key} className="knowledge-map-entry"><summary><Avatar name={item.label} size="sm" kind={isAssistantName(item.label, DEFAULT_ASSISTANT_NAME) ? "assistant" : "person"} /><span><b>{item.label}</b><small>{item.verified_identity ? `Confirmed email · ${item.email}` : "Unverified label"} · {count(item.meeting_count, "meeting")}</small></span></summary><div className="knowledge-map-sources">{item.sources.map((source) => <SourceCard key={source.source_id} source={source} onOpenSource={onOpenSource} />)}</div></details>) : <p className="field-hint wiki-empty">No named speaker turns yet.</p>}</div></div>
-    </div>
+    {shouldOfferSearch(total, query) ? <div className="list-search-inline"><FilterInput id="wiki-map-search" label="Search people and topics" value={query} onChange={setQuery} placeholder="Search topics or speaker labels" /></div> : null}
+    {nothing ? <NoMatches query={query} noun="topics or speakers" onClear={() => setQuery("")} /> : <div className="wiki-map-columns">
+      <div className="card"><div className="card-header"><div><h3>Topics</h3></div><span className="section-count">{map.topics.length}</span></div><div className="card-body tight">{topics.length ? topics.map((item) => <details key={item.key} className="knowledge-map-entry"><summary><span className="map-entry-mark" aria-hidden="true">#</span><span><b>{item.label}</b><small>{count(item.meeting_count, "meeting")} · {count(item.source_count, "source")}</small></span></summary><div className="knowledge-map-sources">{item.sources.map((source) => <SourceCard key={source.source_id} source={source} onOpenSource={onOpenSource} />)}</div></details>) : <p className="field-hint wiki-empty">{query.trim() ? "No topics match." : "No tags on eligible meetings yet."}</p>}</div></div>
+      <div className="card"><div className="card-header"><div><h3>Speaker labels</h3></div><span className="section-count">{map.speaker_labels.length}</span></div><div className="card-body tight">{speakers.length ? speakers.map((item) => <details key={item.key} className="knowledge-map-entry"><summary><Avatar name={item.label} size="sm" kind={isAssistantName(item.label, DEFAULT_ASSISTANT_NAME) ? "assistant" : "person"} /><span><b>{item.label}</b><small>{item.verified_identity ? `Confirmed email · ${item.email}` : "Unverified label"} · {count(item.meeting_count, "meeting")}</small></span></summary><div className="knowledge-map-sources">{item.sources.map((source) => <SourceCard key={source.source_id} source={source} onOpenSource={onOpenSource} />)}</div></details>) : <p className="field-hint wiki-empty">{query.trim() ? "No speaker labels match." : "No named speaker turns yet."}</p>}</div></div>
+    </div>}
   </section>;
 }

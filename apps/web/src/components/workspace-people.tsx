@@ -6,6 +6,7 @@ import { meetingsService } from "@/lib/meetings-service";
 import type { CurrentAccount, InviteResult, WorkspaceMember } from "@/lib/types";
 import { Alert, LoadingRow } from "./ui/feedback";
 import { FilterInput, matchesQuery, NoMatches, ScrollPanel } from "./scroll-panel";
+import { shouldOfferSearch } from "@/lib/search";
 import { AddPeopleDialog } from "./add-people-dialog";
 import { AccessResultDialog, ConfirmMemberDialog, MemberRoleDialog } from "./member-dialogs";
 import { MemberRow, type MemberAction } from "./member-row";
@@ -14,7 +15,6 @@ import { memberPermissions, memberState, roleLabel, roleOptions, type InviteRole
 export { roleLabel, type InviteRole } from "./member-access";
 
 /** Above this many people the list gets a search box; it always scrolls inside the card. */
-const SEARCH_THRESHOLD = 6;
 /** Pending/expired invite chips are recomputed on this cadence. */
 const CLOCK_TICK_MS = 30_000;
 
@@ -108,7 +108,7 @@ export function WorkspacePeople({ members, loading, loadError, account, canManag
     else open({ kind: action, member });
   }
 
-  const searchable = members.length > SEARCH_THRESHOLD;
+  const searchable = shouldOfferSearch(members.length, query);
   const visible = searchable ? members.filter((member) => matchesQuery(query, [member.display_name, member.email, roleLabel[member.role], memberState(member, now).label])) : members;
   const pending = members.filter((member) => member.status === "invited").length;
 

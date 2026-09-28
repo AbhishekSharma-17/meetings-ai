@@ -8,6 +8,8 @@ import { Badge, EmptyState, LoadingRow } from "./ui/feedback";
 import { FilterInput, NoMatches, ScrollPanel } from "./scroll-panel";
 import { UiSelect } from "./ui-select";
 import { UsageEventSheet } from "./observability-event-sheet";
+import { providerOptionIcon, UsageProviderName } from "./provider-brand-icons";
+import { providerBrand, usageEndpointHost } from "./provider-brand";
 import { formatCompact, formatDuration, formatUsd, formatWhen, kindLabel, kindTone, providerLabel, purposeLabel, statusLabel, unitsLabel } from "./usage-labels";
 
 const ALL = "all";
@@ -85,7 +87,7 @@ export function UsageLedger({ range, usage, refreshKey }: { range: UsageRange; u
     return [{ value: ALL, label: "All kinds" }, ...names.map((name) => ({ value: name, label: kindLabel(name) }))];
   }, [usage]);
   const providerOptions = useMemo(() => [{ value: ALL, label: "All providers" },
-    ...(usage?.by_provider ?? []).map((row) => ({ value: row.name, label: providerLabel(row.name) }))], [usage]);
+    ...(usage?.by_provider ?? []).map((row) => ({ value: row.name, label: providerLabel(row.name), icon: providerOptionIcon(providerBrand(row.name)) }))], [usage]);
   const modelOptions = useMemo(() => {
     const names = Array.from(new Set((usage?.by_model ?? [])
       .filter((row) => (kind === ALL || row.kind === kind) && (provider === ALL || row.provider === provider)).map((row) => row.model)));
@@ -119,7 +121,7 @@ export function UsageLedger({ range, usage, refreshKey }: { range: UsageRange; u
           <td><span className="obs-cell">
             <button type="button" className="obs-row-button" onClick={(clickEvent) => { clickEvent.stopPropagation(); setSelected(event); }} aria-label={`Details for ${purposeLabel(event.purpose)} at ${formatWhen(event.created_at)}`}>{purposeLabel(event.purpose)}</button>
             <small>{eventContext(event)}</small></span></td>
-          <td><span className="obs-cell"><span>{providerLabel(event.provider)}</span><small className="obs-model">{event.model}</small></span></td>
+          <td><span className="obs-cell"><UsageProviderName provider={event.provider} endpointHost={usageEndpointHost(event.details)} /><small className="obs-model">{event.model}</small></span></td>
           <td className="num"><EventVolume event={event} /></td>
           <td className="num"><EventCost event={event} /></td>
           <td className="num">{formatDuration(event.duration_ms)}</td>

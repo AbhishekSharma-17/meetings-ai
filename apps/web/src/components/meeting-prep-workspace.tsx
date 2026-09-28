@@ -1,17 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Building2, CalendarDays, Clock, NotebookPen, Search, SearchX, Users } from "lucide-react";
+import { Building2, CalendarDays, Clock, NotebookPen, Users } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
 import { useUiPreference } from "@/lib/ui-preferences";
 import type { CachedCalendarEvent, CalendarSnapshot } from "@/lib/types";
 import { CalendarBrandIcon } from "./brand-icons";
 import { CalendlyPill, PlatformMark, PlatformPill, SourceStack } from "./calendar-event-marks";
-import { eventSearchText, findEntry, mergeCalendarEvents, viaCalendly, type CalendarEntry } from "./calendar-events";
+import { entryMatches, findEntry, mergeCalendarEvents, viaCalendly, type CalendarEntry } from "./calendar-events";
 import { calendarProviderNames } from "./calendar-providers";
 import { MeetingPrepPanel } from "./prep-panel";
 import { PageHeader } from "./ui/page-header";
 import { EmptyState, LoadingRow, Skeleton } from "./ui/feedback";
+import { FilterInput, NoMatches } from "./scroll-panel";
 import { currentTimeSettings, formatDateTime, todayKey } from "@/lib/time-preferences";
 import { addDaysToKey } from "@/lib/time-format";
 
@@ -58,12 +59,10 @@ export function MeetingPrepWorkspace({ identity, initialEvent, onOpenCalendar, o
   const selectedEvent = events.find((event) => event.id === selectedId) ?? null;
   // The same meeting synced from two accounts is listed once, with both sources.
   const entries = useMemo(() => mergeCalendarEvents(events), [events]);
-  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const visibleEntries = terms.length
-    ? entries.filter((entry) => entry.sources.some((source) => { const text = eventSearchText(source); return terms.every((term) => text.includes(term)); }))
-    : entries;
+  const searching = Boolean(query.trim());
+  const visibleEntries = searching ? entries.filter((entry) => entryMatches(entry, query, formatDateTime(entry.event.starts_at, listDate))) : entries;
   const selectedEntry = findEntry(entries, selectedId);
-  const countLabel = loading ? "Next 90 days" : terms.length ? `${visibleEntries.length} of ${entries.length} · next 90 days` : `${entries.length} saved · next 90 days`;
+  const countLabel = loading ? "Next 90 days" : searching ? `${visibleEntries.length} of ${entries.length} · next 90 days` : `${entries.length} saved · next 90 days`;
 
   return <section className="page wide meeting-prep-workspace" aria-labelledby="meeting-prep-title">
     <PageHeader
@@ -82,19 +81,13 @@ export function MeetingPrepWorkspace({ identity, initialEvent, onOpenCalendar, o
           <div><h2>Upcoming meetings</h2><p>{countLabel}</p></div>
         </div>
         <div className="prep-search">
-          <div className="input-with-icon">
-            <Search aria-hidden="true" />
-            <label className="sr-only" htmlFor="prep-search">Search upcoming meetings</label>
-            <input id="prep-search" type="search" value={query} autoComplete="off" placeholder="Title, person, email or company" disabled={loading} onChange={(change) => setQuery(change.target.value)} onKeyDown={(key) => { if (key.key === "Escape") setQuery(""); }} />
-          </div>
+          <FilterInput id="prep-search" label="Search upcoming meetings" value={query} onChange={setQuery} placeholder="Search title, person, email or company" />
         </div>
         {loading ? <LoadingRow>Loading saved meetings…</LoadingRow> : visibleEntries.length ? <ul className="prep-event-list">
           {visibleEntries.map((entry) => <li key={entry.id}>
             <PrepEventRow entry={entry} selected={entry.sources.some((source) => source.id === selectedId)} onSelect={() => { if (!entry.sources.some((source) => source.id === selectedId)) setSelectedId(entry.event.id); }} />
           </li>)}
-        </ul> : <div className="prep-no-matches">
-          <EmptyState plain icon={<SearchX />} title="No matching meetings" action={<button type="button" className="button secondary sm" onClick={() => setQuery("")}>Clear search</button>}>Nothing in the next 90 days matches “{query.trim()}”.</EmptyState>
-        </div>}
+        </ul> : <NoMatches query={query} noun="upcoming meetings" onClear={() => setQuery("")} />}
       </aside>
       <div className="prep-main">
         {selectedEvent ? <>

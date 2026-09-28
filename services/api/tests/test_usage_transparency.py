@@ -364,3 +364,11 @@ def test_openrouter_transcription_rows_are_backfilled_from_list_prices(tmp_path)
     assert priced["openai/whisper-1"].estimated_usd == pytest.approx(2 * 0.006)
     assert priced["openai/whisper-1"].price_source == "openai_stt_list_price_x_span"
     assert priced["unknown/asr-model"].estimated_usd is None  # never invent a price
+
+
+def test_summary_names_openrouter_traffic_as_openrouter(tmp_path) -> None:
+    app = _openrouter_embedding_app(tmp_path, "openai/text-embedding-3-small")
+    summary = app.state.profile_service.usage.summary(LEGACY_ORGANIZATION_ID)
+    assert [group.name for group in summary.by_provider] == ["openrouter"]
+    assert [(row.provider, row.model) for row in summary.by_model] == [("openrouter", "openai/text-embedding-3-small")]
+    assert [row.provider for row in summary.recent] == ["openrouter"]

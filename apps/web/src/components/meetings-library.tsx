@@ -2,13 +2,15 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { formatFullDateTime } from "@/lib/time-preferences";
-import { ArrowRight, CalendarClock, Mic, Plus, Search, SearchX } from "lucide-react";
+import { ArrowRight, CalendarClock, Mic, Plus } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
 import { useUiPreference } from "@/lib/ui-preferences";
 import { attentionStatuses, inProgressStatuses, meetingStatusLabel, platformMonogram } from "@/lib/meeting-status";
 import type { CalendarSchedule, Meeting } from "@/lib/types";
 import { PageHeader } from "./ui/page-header";
 import { EmptyState } from "./ui/feedback";
+import { FilterInput, NoMatches } from "./scroll-panel";
+import { matchesQuery } from "@/lib/search";
 
 type Filter = "all" | "scheduled" | "live" | "review" | "attention" | "completed";
 
@@ -52,10 +54,7 @@ export function MeetingsLibrary({ identity, meetings, onOpen, onNew, onCalendar 
   useEffect(() => { void meetingsService.listCalendarSchedules().then(setSchedules).catch(() => setSchedules([])); }, [meetings]);
   const byId = useMemo(() => new Map(schedules.map((item) => [item.meeting_id, item])), [schedules]);
   const counts = countFilters(meetings, byId);
-  const visible = meetings.filter((meeting) => {
-    const match = !query || `${meeting.title} ${meeting.platform} ${meeting.status}`.toLowerCase().includes(query.toLowerCase());
-    return match && matchesFilter(filter, meeting, byId.get(meeting.id));
-  });
+  const visible = meetings.filter((meeting) => matchesFilter(filter, meeting, byId.get(meeting.id)) && matchesQuery(query, meetingSearchFields(meeting, byId.get(meeting.id))));
   const clearFilters = () => { setFilter("all"); setQuery(""); };
 
   return <section className="page meetings-library" aria-labelledby="meetings-title">
@@ -69,17 +68,19 @@ export function MeetingsLibrary({ identity, meetings, onOpen, onNew, onCalendar 
       <div className="segmented library-filters" role="group" aria-label="Filter meetings">
         {filterLabels.map((item) => <button key={item.key} type="button" aria-pressed={filter === item.key} className={filter === item.key ? "selected" : ""} onClick={() => setFilter(item.key)}>{item.label}<span className="count">{counts[item.key]}</span></button>)}
       </div>
-      <label className="input-with-icon library-search">
-        <Search aria-hidden="true" />
-        <span className="sr-only">Search meetings</span>
-        <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search meetings" />
-      </label>
+      <FilterInput id="meeting-search" className="library-search page-search" label="Search meetings" value={query} onChange={setQuery} placeholder="Search meetings" />
     </div>
     {visible.length ? <ul className="list-card library-list" aria-label={`${visible.length} meeting${visible.length === 1 ? "" : "s"}`}>
       {visible.map((meeting) => <LibraryRow key={meeting.id} meeting={meeting} schedule={byId.get(meeting.id)} onOpen={() => onOpen(meeting.id)} />)}
-    </ul> : meetings.length ? <EmptyState icon={<SearchX />} title="No meetings match this view" action={<button type="button" className="button secondary" onClick={clearFilters}>Clear filters</button>}>Try another status or search term.</EmptyState>
+    </ul> : meetings.length ? <NoMatches query={query} noun="meetings" onClear={clearFilters} />
       : <EmptyState icon={<Mic />} title="No meetings yet">Send the assistant to a Google Meet, Zoom, Teams or Jitsi call, or schedule one from your calendar.</EmptyState>}
   </section>;
+}
+
+/** What a person would search a meeting by: title, platform, status, source and the date as shown. */
+function meetingSearchFields(meeting: Meeting, schedule: CalendarSchedule | undefined) {
+  return [meeting.title, meeting.platform, meeting.status, meetingStatusLabel[meeting.status], schedule?.status === "pending" ? "Scheduled" : null,
+    schedule ? [sourceNames[schedule.provider ?? ""] ?? schedule.provider, formatWhen(schedule.starts_at)] : meeting.startsAt];
 }
 
 function LibraryRow({ meeting, schedule, onOpen }: { meeting: Meeting; schedule: CalendarSchedule | undefined; onOpen(): void }) {

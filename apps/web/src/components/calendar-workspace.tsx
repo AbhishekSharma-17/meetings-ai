@@ -11,7 +11,8 @@ import { CalendarIntegrations } from "./calendar-integrations";
 import { CalendarConnectWaiting } from "./calendar-connect-waiting";
 import { SettingsToast, type SettingsNotice } from "./settings-toast";
 import { useCalendarConnect } from "./use-calendar-connect";
-import { findEntry, mergeCalendarEvents, type CalendarEntry } from "./calendar-events";
+import { entryMatches, findEntry, mergeCalendarEvents, type CalendarEntry } from "./calendar-events";
+import { FilterInput } from "./scroll-panel";
 import { DayAgenda, EventDetail, MonthGrid, dayKey, eventDay } from "./calendar-month";
 import { calendarProviderNames } from "./calendar-providers";
 import { formatDateTime, formatDayHeading, todayKey, useTimePreferences } from "@/lib/time-preferences";
@@ -98,6 +99,7 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
   const [syncingIds, setSyncingIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<SettingsNotice | null>(null);
+  const [query, setQuery] = useState("");
   const autoRefreshKey = useRef<string | null>(null);
   const rangeDays = (Date.parse(`${endDate}T00:00:00Z`) - Date.parse(`${startDate}T00:00:00Z`)) / 86_400_000 + 1;
   const rangeValid = Number.isFinite(rangeDays) && rangeDays >= 1 && rangeDays <= 90;
@@ -164,7 +166,8 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
   const active = connections.filter((item) => item.status === "ACTIVE");
   const visibleEvents = useMemo(() => snapshot.events.filter((item) => accountFilter === "all" || item.connection_id === accountFilter), [snapshot.events, accountFilter]);
   // Copies of one meeting from several accounts collapse into one entry per day.
-  const visibleEntries = useMemo(() => mergeCalendarEvents(visibleEvents), [visibleEvents]);
+  const rangeEntries = useMemo(() => mergeCalendarEvents(visibleEvents), [visibleEvents]);
+  const visibleEntries = useMemo(() => query.trim() ? rangeEntries.filter((entry) => entryMatches(entry, query)) : rangeEntries, [rangeEntries, query]);
   const entriesByDay = useMemo(() => {
     const groups = new Map<string, CalendarEntry[]>();
     for (const entry of visibleEntries) {
@@ -301,6 +304,7 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
           </div>
           <div className="calendar-toolbar-end">
             {lastSynced ? <span className="calendar-sync-status">{accountFilter === "all" && active.length > 1 ? `${active.length} accounts · ` : ""}Synced {formatDateTime(lastSynced)}</span> : null}
+            <FilterInput id="calendar-search" className="calendar-search" label="Search meetings in range" value={query} onChange={setQuery} placeholder="Search title, person or company" />
             <RangePicker startDate={startDate} endDate={endDate} timezone={timezone} onStartChange={(value) => { setStartDate(value); setSelectedEvent(null); }} onEndChange={(value) => { setEndDate(value); setSelectedEvent(null); }} />
             <UiSelect id="calendar-account-filter" label="Account" hideLabel size="sm" className="calendar-account-select" value={accountFilter} onChange={setAccountFilter} options={accountOptions} disabled={!active.length} />
           </div>
@@ -310,7 +314,7 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
         <div className="calendar-layout">
           <MonthGrid month={month} days={monthDays} selectedDay={selectedDay} entriesByDay={entriesByDay} connections={connections} onSelectDay={(key) => { setSelectedDay(key); setSelectedEvent(null); }} />
           <div className="calendar-side">
-            <DayAgenda selectedDay={selectedDay} dayEntries={dayEntries} rangeEntries={visibleEntries} selectedEventId={selectedEvent?.id ?? null} hasAccounts={active.length > 0} connections={connections} onSelectEntry={(entry) => setSelectedEvent(entry.event)} onJumpToEntry={(entry) => { setSelectedDay(eventDay(entry.event.starts_at, timezone)); setSelectedEvent(entry.event); }} />
+            <DayAgenda selectedDay={selectedDay} dayEntries={dayEntries} rangeEntries={visibleEntries} selectedEventId={selectedEvent?.id ?? null} hasAccounts={active.length > 0} connections={connections} query={query} searchedCount={rangeEntries.length} onClearQuery={() => setQuery("")} onSelectEntry={(entry) => setSelectedEvent(entry.event)} onJumpToEntry={(entry) => { setSelectedDay(eventDay(entry.event.starts_at, timezone)); setSelectedEvent(entry.event); }} />
             <EventDetail entry={selectedEntry} connections={connections} canSchedule={canSchedule} alreadyScheduled={selectedScheduled} onSchedule={() => { if (selectedEvent) scheduleSelected(selectedEvent); }} onPrepare={() => { if (selectedEvent) onPrepare(selectedEvent); }} />
           </div>
         </div>

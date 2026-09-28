@@ -7,6 +7,7 @@ import { briefingTime, Citations, formatTokens, formatUsd, ListSection, safeHref
 import { PrepAttendees, personaLabels } from "./prep-attendees";
 import { PrepSources } from "./prep-sources";
 import { WhosWhoView } from "./prep-whos-who-view";
+import { ProviderName, UsageProviderName } from "./provider-brand-icons";
 
 const developmentLabels: Record<PrepDevelopmentType, string> = {
   deal: "Deal", mou: "MOU", partnership: "Partnership", funding: "Funding", product: "Product", hiring: "Hiring", news: "News",
@@ -27,8 +28,8 @@ export function PrepReportV2View({ report }: { report: PrepReportV2 }) {
       <div>
         <div className="prep-report-meta">
           <Badge tone="success" dot>Saved briefing</Badge>
-          <small>{formatDateTime(report.generated_at, briefingTime)} · {report.provider} / {report.model}</small>
-          <small className="prep-report-usage">{formatTokens(usage.input_tokens, usage.output_tokens)} · {usage.exa_calls} searches · est. {formatUsd(usage.estimated_usd)}{usage.unpriced_calls ? " + unpriced" : ""}</small>
+          <small className="provider-route">{formatDateTime(report.generated_at, briefingTime)} · <UsageProviderName provider={report.provider} /> / {report.model}</small>
+          <small className="prep-report-usage">{formatTokens(usage.input_tokens, usage.output_tokens)} · {usage.exa_calls ? <ProviderName brand="exa" label={`${usage.exa_calls} Exa ${usage.exa_calls === 1 ? "search" : "searches"}`} /> : "0 searches"} · est. {formatUsd(usage.estimated_usd)}{usage.unpriced_calls ? " + unpriced" : ""}</small>
         </div>
         <h2 id="prep-report-title">{title ? `Briefing: ${title}` : "Meeting briefing"}</h2>
       </div>

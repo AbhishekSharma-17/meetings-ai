@@ -5,6 +5,7 @@ import { BrainCircuit, Globe, Lock, MessageSquareText, ScanText } from "lucide-r
 import { meetingsService } from "@/lib/meetings-service";
 import type { AiSettingsInput, AiSettingsView, ProviderProfile, VaultCredential } from "@/lib/types";
 import { UiSelect } from "./ui-select";
+import { providerOptionIcon } from "./provider-brand-icons";
 import { Alert, Badge } from "./ui/feedback";
 import type { SettingsNotice } from "./settings-toast";
 import { ModelRoutePicker, NONE, type ModelRoute } from "./ai-settings-model-picker";
@@ -193,7 +194,7 @@ function OwnerForm({ view, profiles, exaKeys, keys, onProfileCreated, onSaved, o
         <legend><Globe aria-hidden="true" /> Web research</legend>
         <p className="field-hint">Meeting prep: Exa searches the web, then this model writes the brief.</p>
         <UiSelect id="ai-research-key" label="Exa key" value={draft.researchKey || NONE} onChange={(value) => set("researchKey", value === NONE ? "" : value)}
-          options={[{ value: NONE, label: exaKeys.length ? "Off" : "Off · add an Exa key first" }, ...exaKeys.map((key) => ({ value: key.id, label: `${key.label} · ${key.hint}` }))]} />
+          options={[{ value: NONE, label: exaKeys.length ? "Off" : "Off · add an Exa key first" }, ...exaKeys.map((key) => ({ value: key.id, label: `${key.label} · ${key.hint}`, icon: providerOptionIcon("exa") }))]} />
         <ModelRoutePicker id="ai-research" name="Research writing" profiles={profiles} value={draft.research} onChange={(value) => set("research", value)} noneLabel={sameAsDefault} />
       </fieldset>
     </div>

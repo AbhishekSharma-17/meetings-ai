@@ -1,0 +1,28 @@
+/* AI provider marks (OpenAI, OpenRouter, Exa): monochrome logo in currentColor on a neutral tile. Tokens only. */
+
+.provider-brand { display:inline-grid; place-items:center; flex:none; width:32px; height:32px; border:1px solid var(--border); border-radius:var(--radius); background:var(--muted); color:var(--foreground); }
+.provider-brand .provider-mark, .provider-brand .lucide { width:17px; height:17px; }
+.provider-brand[data-provider-brand=generic] { color:var(--text-secondary); }
+.provider-brand.sm { width:22px; height:22px; border-radius:var(--radius-sm); }
+.provider-brand.sm .provider-mark, .provider-brand.sm .lucide { width:13px; height:13px; }
+/* Inline with text: the bare mark, no tile. */
+.provider-brand.xs { width:14px; height:14px; border:0; border-radius:0; background:none; color:inherit; }
+.provider-brand.xs .provider-mark, .provider-brand.xs .lucide { width:13px; height:13px; }
+
+.provider-name { display:inline-flex; align-items:center; gap:6px; min-width:0; max-width:100%; vertical-align:bottom; }
+.provider-name > span:last-child { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* Pickers: mark before the option text, in the trigger and in the list. */
+.ui-select-value { display:inline-flex; align-items:center; gap:8px; min-width:0; }
+.ui-select-value > span:last-child { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ui-select-item-label { display:inline-flex; align-items:center; gap:8px; min-width:0; }
+.ui-select-trigger .provider-brand .provider-mark, .ui-select-trigger .provider-brand .lucide { color:inherit; }
+
+/* Profile rows on AI providers: "[logo] OpenAI · gpt-6-luna" on one truncating line. */
+.provider-row-main > small.provider-row-route { display:flex; align-items:center; gap:6px; min-width:0; }
+.provider-row-route > .provider-name { flex:none; max-width:60%; }
+.provider-row-model { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* Model/route meta lines elsewhere (chat answers, briefings, transcription route). */
+.provider-route { display:inline-flex; align-items:center; flex-wrap:wrap; gap:4px 6px; min-width:0; }
+.knowledge-model-trigger .provider-brand.xs { color:var(--text-secondary); }

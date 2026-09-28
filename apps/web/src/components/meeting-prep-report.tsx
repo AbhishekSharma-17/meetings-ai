@@ -4,6 +4,7 @@ import type { AnyPrepReport, PrepReport, PrepReportV2 } from "@/lib/types";
 import { Alert, Badge } from "./ui/feedback";
 import { briefingTime, Citations, hostname, ListSection, safeHref, SectionHeading } from "./prep-shared";
 import { PrepReportV2View } from "./prep-report-v2";
+import { UsageProviderName } from "./provider-brand-icons";
 
 export function isReportV2(report: AnyPrepReport): report is PrepReportV2 {
   return "report_version" in report && report.report_version === 2;
@@ -20,7 +21,7 @@ function LegacyPrepReport({ report }: { report: PrepReport }) {
   return <article className="card prep-report" aria-labelledby="prep-report-title">
     <div className="card-header">
       <div>
-        <div className="prep-report-meta"><Badge tone="success" dot>Saved briefing</Badge><small>{formatDateTime(report.generated_at, briefingTime)} · {report.provider} / {report.model}</small></div>
+        <div className="prep-report-meta"><Badge tone="success" dot>Saved briefing</Badge><small className="provider-route">{formatDateTime(report.generated_at, briefingTime)} · <UsageProviderName provider={report.provider} /> / {report.model}</small></div>
         <h2 id="prep-report-title">{report.target_company ? `Briefing: ${report.target_company}` : "Meeting briefing"}</h2>
       </div>
     </div>

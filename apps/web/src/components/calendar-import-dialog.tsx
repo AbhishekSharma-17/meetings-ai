@@ -14,6 +14,8 @@ import { WEEKDAY_DATE_TIME } from "@/lib/time-format";
 import { PageHeader } from "./ui/page-header";
 import { Alert, Badge, EmptyState } from "./ui/feedback";
 import { UiSelect } from "./ui-select";
+import { FilterInput, NoMatches, SearchToolbar } from "./scroll-panel";
+import { matchesQuery, shouldOfferSearch } from "@/lib/search";
 
 export { CalendarBrandIcon } from "./brand-icons";
 
@@ -33,6 +35,8 @@ export function CalendarImportDialog({ open, preferredConnectionId, onClose, onC
   const [period, setPeriod] = useState<CalendarPeriod>("today");
   const { timeZone: timezone } = useTimePreferences();
   const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [eventQuery, setEventQuery] = useState("");
+  const [accountQuery, setAccountQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [scanned, setScanned] = useState(false);
@@ -76,7 +80,7 @@ export function CalendarImportDialog({ open, preferredConnectionId, onClose, onC
   async function scan() {
     if (!connectionId) return;
     setBusy(true); setError(null); setScanned(false);
-    try { setEvents(await meetingsService.scanCalendar(connectionId, period, timezone)); setScanned(true); }
+    try { setEvents(await meetingsService.scanCalendar(connectionId, period, timezone)); setEventQuery(""); setScanned(true); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Could not scan this calendar."); }
     finally { setBusy(false); }
   }
@@ -87,6 +91,9 @@ export function CalendarImportDialog({ open, preferredConnectionId, onClose, onC
     ? activeConnections.map((item) => ({ value: item.id, label: `${calendarProviderNames[item.provider]} · ${item.label}` }))
     : [{ value: "", label: loadingConnections ? "Loading sources…" : "Connect a source first" }];
   const intro = "Connect one or more accounts, then pick an upcoming meeting to set up the assistant.";
+  const shownAccounts = activeConnections.filter((item) => matchesQuery(accountQuery, item.label, item.identity, calendarProviderNames[item.provider]));
+  const shownEvents = events.filter((event) => matchesQuery(eventQuery, event.title, event.agenda, platformLabel(event.platform), formatDateTime(event.starts_at, WEEKDAY_DATE_TIME),
+    (event.invitees ?? []).map((person) => [person.name, person.email])));
 
   const body = <div className="calendar-import">
     <ProviderGrid activeConnections={activeConnections} disabled={busy || loadingConnections || connectFlow.wait !== null} onConnect={setConnectProvider} />
@@ -96,7 +103,9 @@ export function CalendarImportDialog({ open, preferredConnectionId, onClose, onC
     {connections.length > 0 && !activeConnections.length ? <Alert tone="warning">A connection is pending or expired. Finish the provider’s consent screen or connect again.</Alert> : null}
     {activeConnections.length ? <section className="card calendar-accounts" aria-labelledby={`${titleId}-accounts`}>
       <div className="card-header"><div><h3 id={`${titleId}-accounts`}>Connected accounts</h3></div><span className="section-count">{activeConnections.length}</span></div>
-      <ul className="calendar-account-list">{activeConnections.map((item) => <AccountRow key={item.id} connection={item} meta={<Badge tone="success" dot>Connected</Badge>} />)}</ul>
+      {shouldOfferSearch(activeConnections.length, accountQuery) ? <SearchToolbar id="calendar-import-account-search" label="Search connected accounts" value={accountQuery} onChange={setAccountQuery} placeholder="Search name, email or source" /> : null}
+      {!shownAccounts.length ? <NoMatches query={accountQuery} noun="accounts" onClear={() => setAccountQuery("")} /> : null}
+      <ul className="calendar-account-list">{shownAccounts.map((item) => <AccountRow key={item.id} connection={item} meta={<Badge tone="success" dot>Connected</Badge>} />)}</ul>
     </section> : null}
 
     <section className="calendar-import-find" aria-labelledby={`${titleId}-find`}>
@@ -111,7 +120,9 @@ export function CalendarImportDialog({ open, preferredConnectionId, onClose, onC
     {error ? <p className="form-error" role="alert">{error}</p> : null}
     {scanned ? <section className="calendar-import-results" aria-live="polite" aria-labelledby={`${titleId}-results`}>
       <h3 id={`${titleId}-results`}>{events.length ? `${events.length} upcoming meeting${events.length === 1 ? "" : "s"}` : "No upcoming meetings"}</h3>
-      {events.length ? <ul className="list-card">{events.map((event) => {
+      {shouldOfferSearch(events.length, eventQuery) ? <div className="list-search-inline"><FilterInput id="calendar-import-event-search" label="Search found meetings" value={eventQuery} onChange={setEventQuery} placeholder="Search title, invitee or date" /></div> : null}
+      {events.length && !shownEvents.length ? <NoMatches query={eventQuery} noun="meetings" onClear={() => setEventQuery("")} />
+        : events.length ? <ul className="list-card">{shownEvents.map((event) => {
         const scheduled = schedules.find((item) => item.connection_id === event.connection_id && item.event_id === event.event_id && new Date(item.starts_at).getTime() === new Date(event.starts_at).getTime());
         return <li className="list-row calendar-import-event" key={`${event.connection_id}:${event.event_id}:${event.starts_at}`}>
           <div className="calendar-import-event-copy">

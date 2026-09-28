@@ -7,6 +7,7 @@ from uuid import UUID
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 
 from .notifications import (
+    ClearedNotifications,
     NotificationNotFoundError,
     NotificationPage,
     NotificationPublic,
@@ -29,6 +30,12 @@ def register_notification_routes(app: FastAPI, *, notifications: NotificationSer
     def read_all_notifications(request: Request) -> UnreadCount:
         notifications.mark_all_read(request.state.actor)
         return UnreadCount(unread_count=notifications.unread_count(request.state.actor))
+
+    @app.delete("/v1/notifications", response_model=ClearedNotifications)
+    def clear_notifications(request: Request, read_only: bool = False) -> ClearedNotifications:
+        """Clear the signed-in person's notifications in this workspace (only read ones with read_only)."""
+        cleared = notifications.clear(request.state.actor, read_only=read_only)
+        return ClearedNotifications(cleared=cleared, unread_count=notifications.unread_count(request.state.actor))
 
     @app.post("/v1/notifications/{notification_id}/read", response_model=NotificationPublic)
     def read_notification(notification_id: UUID, request: Request) -> NotificationPublic:

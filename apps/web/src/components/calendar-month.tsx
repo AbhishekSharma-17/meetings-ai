@@ -1,7 +1,7 @@
 "use client";
 
 import { CalendarDays, ChevronRight, Clock, NotebookPen } from "lucide-react";
-import type { CalendarConnection } from "@/lib/types";
+import type { CalendarConnection, CalendarInvitee } from "@/lib/types";
 import { dayKeyIn } from "@/lib/time-format";
 import { Avatar } from "./ui/avatar";
 import { CalendarBrandIcon } from "./brand-icons";
@@ -9,6 +9,8 @@ import { CalendlyPill, PlatformMark, PlatformPill, SourceStack, entryOrigin, uni
 import { meetingPlatform, viaCalendly, type CalendarEntry } from "./calendar-events";
 import { calendarProviderNames, platformLabel } from "./calendar-providers";
 import { Badge, EmptyState } from "./ui/feedback";
+import { FilterInput, NoMatches } from "./scroll-panel";
+import { useListSearch } from "./use-list-search";
 import { formatDate, formatDateTime, formatDayHeading, formatTime, todayKey } from "@/lib/time-preferences";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -71,8 +73,13 @@ export function MonthGrid({ month, days, selectedDay, entriesByDay, connections,
 }
 
 /** Meetings on the selected day, with a jump list when the day itself is empty. */
-export function DayAgenda({ selectedDay, dayEntries, rangeEntries, selectedEventId, hasAccounts, connections, onSelectEntry, onJumpToEntry }: {
+export function DayAgenda({ selectedDay, dayEntries, rangeEntries, selectedEventId, hasAccounts, connections, query = "", searchedCount = 0, onClearQuery, onSelectEntry, onJumpToEntry }: {
   selectedDay: string;
+  /** Active calendar search; entries arrive already filtered by it. */
+  query?: string;
+  /** How many meetings the search ran over; "no matches" only makes sense when there were some. */
+  searchedCount?: number;
+  onClearQuery?(): void;
   dayEntries: CalendarEntry[];
   rangeEntries: CalendarEntry[];
   selectedEventId: string | null;
@@ -83,6 +90,7 @@ export function DayAgenda({ selectedDay, dayEntries, rangeEntries, selectedEvent
 }) {
   const title = formatDayHeading(selectedDay);
   const isSelected = (entry: CalendarEntry) => entry.sources.some((source) => source.id === selectedEventId);
+  const searching = Boolean(query.trim()) && searchedCount > 0;
   return <section className="card calendar-agenda" aria-labelledby="calendar-agenda-title">
     <div className="card-header">
       <div><h2 id="calendar-agenda-title">{title}</h2><p>{dayEntries.length} meeting{dayEntries.length === 1 ? "" : "s"} · {rangeEntries.length} in range</p></div>
@@ -107,11 +115,11 @@ export function DayAgenda({ selectedDay, dayEntries, rangeEntries, selectedEvent
           </button>
         </li>;
       })}
-    </ul> : <div className="card-body">
-      <EmptyState plain icon={<CalendarDays />} title="No meetings on this day">{hasAccounts ? "Sync your accounts or choose another day." : "Connect an account in Integrations, then sync."}</EmptyState>
+    </ul> : searching && !rangeEntries.length && onClearQuery ? <NoMatches query={query} noun="meetings in this range" onClear={onClearQuery} /> : <div className="card-body">
+      <EmptyState plain icon={<CalendarDays />} title={searching ? "No matching meetings on this day" : "No meetings on this day"}>{searching ? "Choose one of the matches below, or another day." : hasAccounts ? "Sync your accounts or choose another day." : "Connect an account in Integrations, then sync."}</EmptyState>
     </div>}
     {rangeEntries.length && !dayEntries.length ? <div className="calendar-other-events">
-      <h3>Other meetings in range</h3>
+      <h3>{searching ? "Matching meetings in range" : "Other meetings in range"}</h3>
       <ul>{rangeEntries.slice(0, 10).map((entry) => <li key={entry.id}>
         <button type="button" onClick={() => onJumpToEntry(entry)}>
           <span className="calendar-other-date">{formatDate(entry.event.starts_at, { month: "short", day: "numeric" })}</span>
@@ -162,12 +170,7 @@ export function EventDetail({ entry, connections, canSchedule, alreadyScheduled,
     <div className="calendar-detail-block">
       <h3>Invited <span className="section-count">{invitees.length}</span></h3>
       <p className="field-hint">Invitees are not verified attendees or speakers.</p>
-      {invitees.length ? <ul className="calendar-invitees">
-        {invitees.map((person, index) => <li key={`${person.email ?? person.name}-${index}`}>
-          <Avatar name={person.name || person.email} size="sm" />
-          <span><b>{person.name}</b>{person.email ? <small>{person.email}</small> : null}</span>
-        </li>)}
-      </ul> : null}
+      <InviteeList key={event.id} invitees={invitees} />
     </div>
     <div className="calendar-detail-actions">
       {canSchedule ? alreadyScheduled
@@ -177,4 +180,19 @@ export function EventDetail({ entry, connections, canSchedule, alreadyScheduled,
     </div>
     <small className="calendar-sync-meta">Last synced {formatDateTime(lastSynced)}</small>
   </aside>;
+}
+
+/** Invitees of one meeting; searchable when the invite is large. */
+function InviteeList({ invitees }: { invitees: CalendarInvitee[] }) {
+  const search = useListSearch(invitees, (person) => [person.name, person.email, person.email?.split("@")[1]]);
+  if (!invitees.length) return null;
+  return <>
+    {search.offered ? <div className="list-search-inline calendar-invitee-search"><FilterInput id="calendar-invitee-search" label="Search invitees" value={search.query} onChange={search.setQuery} placeholder="Search name, email or company" /></div> : null}
+    {search.noMatches ? <NoMatches query={search.query} noun="invitees" onClear={search.clear} /> : <ul className="calendar-invitees">
+      {search.visible.map((person, index) => <li key={`${person.email ?? person.name}-${index}`}>
+        <Avatar name={person.name || person.email} size="sm" />
+        <span><b>{person.name}</b>{person.email ? <small>{person.email}</small> : null}</span>
+      </li>)}
+    </ul>}
+  </>;
 }

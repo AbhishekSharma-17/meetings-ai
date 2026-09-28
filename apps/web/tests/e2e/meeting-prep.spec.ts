@@ -140,7 +140,7 @@ test("prep inputs persist and a streamed v2 briefing renders as a document", asy
 
   await page.getByRole("tab", { name: /History/ }).click();
   await expect(page.getByRole("heading", { name: "Briefing history" })).toBeVisible();
-  await expect(page.getByRole("cell", { name: "openai / gpt-test" })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "OpenAI / gpt-test" })).toBeVisible();
   await expect(page.getByRole("cell", { name: "$0.12" })).toBeVisible();
 });
 

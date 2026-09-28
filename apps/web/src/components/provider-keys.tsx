@@ -9,7 +9,10 @@ import { Alert, Badge, EmptyState, LoadingRow } from "./ui/feedback";
 import type { SettingsNotice } from "./settings-toast";
 import { KeyDialog, testTone, type KeyDialogMode } from "./provider-key-dialog";
 import { ProviderBrandIcon } from "./provider-brand-icons";
+import { credentialBrand } from "./provider-brand";
 import { lastUsedText, usageText, vaultProviderLabel } from "./provider-profile-info";
+import { NoMatches, SearchToolbar } from "./scroll-panel";
+import { useListSearch } from "./use-list-search";
 
 const TEST_BADGE = { valid: "Key works", invalid: "Rejected", unverified: "Not verified" } as const;
 
@@ -23,6 +26,7 @@ export function ApiKeysCard({ credentials, loading, error, canManage, onRefresh,
   onNotice(notice: SettingsNotice): void;
 }) {
   const [dialog, setDialog] = useState<KeyDialogMode | null>(null);
+  const search = useListSearch(credentials, (credential) => [credential.label, vaultProviderLabel[credential.provider_type], credential.base_url, credential.hint]);
   const addButton = canManage ? <button type="button" className="button secondary sm" onClick={() => setDialog({ kind: "create" })}><Plus aria-hidden="true" /> Add key</button> : null;
 
   return <section className="card provider-keys" aria-labelledby="api-keys-title">
@@ -34,7 +38,8 @@ export function ApiKeysCard({ credentials, loading, error, canManage, onRefresh,
     {loading ? <div className="provider-keys-state"><LoadingRow>Loading saved keys…</LoadingRow></div>
       : error ? <div className="provider-keys-state"><Alert tone="warning" title="Saved keys are unavailable" actions={<button type="button" className="button secondary sm" onClick={() => void onRefresh()}>Retry</button>}>{error}</Alert></div>
         : credentials.length === 0 ? <EmptyState plain className="provider-keys-empty" icon={<ShieldCheck />} title="No saved keys yet">{canManage ? "Add an OpenAI, OpenRouter or Exa key to reuse it everywhere." : "The workspace owner can add reusable keys here."}</EmptyState>
-          : <ul className="provider-key-list">{credentials.map((credential) => <KeyRow key={credential.id} credential={credential} canManage={canManage} onEdit={setDialog} onRefresh={onRefresh} onNotice={onNotice} />)}</ul>}
+          : <>{search.offered ? <SearchToolbar id="api-key-search" label="Search API keys" value={search.query} onChange={search.setQuery} placeholder="Search name, provider or host" /> : null}
+            {search.noMatches ? <NoMatches query={search.query} noun="keys" onClear={search.clear} /> : <ul className="provider-key-list">{search.visible.map((credential) => <KeyRow key={credential.id} credential={credential} canManage={canManage} onEdit={setDialog} onRefresh={onRefresh} onNotice={onNotice} />)}</ul>}</>}
     {!canManage && !loading && !error ? <p className="provider-keys-note field-hint">Only the workspace owner can add, replace or delete keys.</p> : null}
     <KeyDialog mode={dialog} onClose={() => setDialog(null)} onSaved={(_saved, message) => { void onRefresh(); onNotice({ tone: "success", text: message }); }} />
   </section>;
@@ -83,7 +88,7 @@ function KeyRow({ credential, canManage, onEdit, onRefresh, onNotice }: {
 
   return <li className="provider-key">
     <div className="provider-key-row">
-      <ProviderBrandIcon provider={credential.provider_type} />
+      <ProviderBrandIcon brand={credentialBrand(credential)} />
       <span className="provider-key-main">
         <b>{credential.label}</b>
         <small>{vaultProviderLabel[credential.provider_type]}{host ? ` · ${host}` : ""}</small>

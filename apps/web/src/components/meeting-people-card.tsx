@@ -2,6 +2,8 @@
 
 import { Avatar, isAssistantName } from "./ui/avatar";
 import { SpeakerContacts } from "./speaker-contacts";
+import { FilterInput, NoMatches } from "./scroll-panel";
+import { useListSearch } from "./use-list-search";
 import type { CalendarEvent, MeetingParticipants, SpeakerIdentity } from "@/lib/types";
 
 /** Participant evidence plus human-confirmed speaker contacts. Never auto-matches emails to voices. */
@@ -18,14 +20,16 @@ export function MeetingPeopleCard({ meetingId, participants, assistantName, name
   onIdentitiesSaved(identities: SpeakerIdentity[]): void;
 }) {
   const people = participants?.participants ?? [];
+  const search = useListSearch(people, (person) => [person.name, person.email, person.source === "invite" ? "Invited" : "Heard speaking"]);
 
   return <section className="card" aria-labelledby="capture-title">
     <div className="card-header">
       <div><h2 id="capture-title">People & capture</h2><p>Invitees and voices heard. Not a verified attendance roster.</p></div>
     </div>
     <div className="card-body stack">
-      {people.length ? <ul className="record-people">
-        {people.map((person, index) => <li key={`${person.source}-${person.name}-${index}`}>
+      {search.offered ? <FilterInput id="meeting-people-search" label="Search people" value={search.query} onChange={search.setQuery} placeholder="Search by name or email" /> : null}
+      {search.noMatches ? <NoMatches query={search.query} noun="people" onClear={search.clear} /> : people.length ? <ul className="record-people">
+        {search.visible.map((person, index) => <li key={`${person.source}-${person.name}-${index}`}>
           <Avatar name={person.name} size="sm" kind={isAssistantName(person.name, assistantName) ? "assistant" : "person"} />
           <span className="record-person-copy"><b>{person.name}</b>{person.email ? <small>{person.email}</small> : null}</span>
           <span className="record-person-source">{person.source === "invite" ? "Invited" : "Heard speaking"}</span>

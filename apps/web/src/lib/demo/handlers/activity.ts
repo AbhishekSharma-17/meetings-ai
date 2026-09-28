@@ -200,6 +200,14 @@ export function registerActivity(router: DemoRouter): void {
       state.notifications = state.notifications.map((item) => item.id === read.id ? read : item);
       return json(read);
     })
+    .on("DELETE", "/v1/notifications", ({ store, query }) => {
+      const state = stateOf(store);
+      const readOnly = query.get("read_only") === "true";
+      const kept = state.notifications.filter((item) => readOnly && !item.read_at);
+      const cleared = state.notifications.length - kept.length;
+      state.notifications = kept;
+      return json({ cleared, unread_count: kept.filter((item) => !item.read_at).length });
+    })
     .on("DELETE", "/v1/notifications/:id", ({ store, params }) => {
       const state = stateOf(store);
       if (!state.notifications.some((item) => item.id === params.id)) return problem(404, "notification not found");

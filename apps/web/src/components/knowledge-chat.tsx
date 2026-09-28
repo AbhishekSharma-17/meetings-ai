@@ -6,6 +6,10 @@ import { Popover } from "@base-ui/react/popover";
 import { ArrowUp, Check, ChevronDown, Copy, Cpu, Library, MessagesSquare, Quote, Tag, X } from "lucide-react";
 import type { AiSettingsView, KnowledgeChatResponse, KnowledgeSource } from "@/lib/types";
 import { SourceCard, type OpenSource } from "./knowledge-sources";
+import { ProviderBrandIcon, UsageProviderName } from "./provider-brand-icons";
+import { providerBrand } from "./provider-brand";
+import { FilterInput } from "./scroll-panel";
+import { useListSearch } from "./use-list-search";
 
 export type Exchange = { question: string; response: KnowledgeChatResponse };
 export type PendingAnswer = { question: string; raw: string; answer: string };
@@ -70,7 +74,7 @@ export function ChatTurn({ exchange, onOpenSource }: { exchange: Exchange; onOpe
         <div className="chat-answer-meta">
           {count ? <button type="button" className={sourcesOpen ? "source-toggle open" : "source-toggle"} aria-expanded={sourcesOpen} onClick={() => setSourcesOpen((value) => !value)}><Quote aria-hidden="true" />{count} source{count === 1 ? "" : "s"}<ChevronDown aria-hidden="true" /></button> : <span className="field-hint">No matching sources</span>}
           <button type="button" className="icon-button sm" aria-label={copied ? "Copied" : "Copy answer"} onClick={copy}>{copied ? <Check /> : <Copy />}</button>
-          {response.model ? <span className="chat-model-label">{response.provider} · {response.model}</span> : null}
+          {response.model ? <span className="chat-model-label provider-route">{response.provider ? <><UsageProviderName provider={response.provider} /><span aria-hidden="true">·</span></> : null}<span>{response.model}</span></span> : null}
         </div>
         {sourcesOpen && count ? <div className="chat-sources">{response.citations.map((source, index) => <SourceCard key={source.source_id} source={source} index={index + 1} highlighted={highlight === index + 1} onOpenSource={onOpenSource} />)}</div> : null}
       </div>
@@ -111,11 +115,12 @@ export function ChatModelInfo({ settings, onOpenProviders, baseDefault }: {
 }) {
   const [open, setOpen] = useState(false);
   const route = settings?.effective_chat;
+  const brand = route?.model ? providerBrand(route.provider) : null;
   const label = route?.model ?? (settings ? "No model configured" : settings === null ? "Workspace model" : "Loading…");
   const summary = settings === null ? "Answers use the model chosen by the workspace owner." : !route || route.source === "not_configured" || !route.model ? "Ask AI has no model yet. The workspace owner chooses it in AI providers."
     : `${route.model}${route.profile_name ? ` via ${route.profile_name}` : ""}${route.source === "workspace_default" ? " (workspace default)" : ""}.`;
   return <Popover.Root open={open} onOpenChange={setOpen}>
-    <Popover.Trigger className="composer-chip knowledge-model-trigger" aria-label={`Ask AI model: ${label}`}><Cpu aria-hidden="true" /><span>{label}</span><ChevronDown aria-hidden="true" /></Popover.Trigger>
+    <Popover.Trigger className="composer-chip knowledge-model-trigger" aria-label={`Ask AI model: ${label}`}>{brand ? <ProviderBrandIcon brand={brand} size="xs" /> : <Cpu aria-hidden="true" />}<span>{label}</span><ChevronDown aria-hidden="true" /></Popover.Trigger>
     <Popover.Portal>
       <Popover.Positioner side="top" align="start" sideOffset={8} className="ui-select-positioner">
         <Popover.Popup className="popover model-popover">
@@ -139,13 +144,16 @@ export function ChatModelInfo({ settings, onOpenProviders, baseDefault }: {
 export function BasePicker({ bases, selectedId, onSelect }: { bases: { id: string; name: string; meetings: number }[]; selectedId: string; onSelect(id: string): void }) {
   const [open, setOpen] = useState(false);
   const selected = bases.find((base) => base.id === selectedId);
+  const search = useListSearch(bases, (base) => [base.name]);
   return <Popover.Root open={open} onOpenChange={setOpen}>
     <Popover.Trigger className="composer-chip knowledge-base-trigger" aria-label="Switch knowledge base" title={selected ? `Chatting with ${selected.name}` : undefined} disabled={!bases.length}><Library aria-hidden="true" /><span>{selected?.name ?? "Choose a knowledge base"}</span><ChevronDown aria-hidden="true" /></Popover.Trigger>
     <Popover.Portal>
       <Popover.Positioner side="top" align="start" sideOffset={8} className="ui-select-positioner">
         <Popover.Popup className="popover model-popover">
           <p className="menu-label">Chat with</p>
-          <div role="radiogroup" aria-label="Knowledge base for this chat">{bases.map((base) => <button key={base.id} type="button" role="radio" aria-checked={base.id === selectedId} className="menu-item" onClick={() => { onSelect(base.id); setOpen(false); }}><Library /><span className="model-provider-name">{base.name}</span><small>{base.meetings} meeting{base.meetings === 1 ? "" : "s"}</small>{base.id === selectedId ? <Check className="model-check" aria-hidden="true" /> : null}</button>)}</div>
+          {search.offered ? <div className="popover-search"><FilterInput id="knowledge-base-picker-search" label="Search knowledge bases" value={search.query} onChange={search.setQuery} placeholder="Search knowledge bases" /></div> : null}
+          {search.noMatches ? <p className="popover-empty" role="status">No knowledge bases match “{search.query.trim()}”.</p> : null}
+          <div role="radiogroup" aria-label="Knowledge base for this chat">{search.visible.map((base) => <button key={base.id} type="button" role="radio" aria-checked={base.id === selectedId} className="menu-item" onClick={() => { onSelect(base.id); setOpen(false); search.clear(); }}><Library /><span className="model-provider-name">{base.name}</span><small>{base.meetings} meeting{base.meetings === 1 ? "" : "s"}</small>{base.id === selectedId ? <Check className="model-check" aria-hidden="true" /> : null}</button>)}</div>
         </Popover.Popup>
       </Popover.Positioner>
     </Popover.Portal>

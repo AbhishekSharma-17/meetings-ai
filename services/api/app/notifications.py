@@ -69,6 +69,11 @@ class UnreadCount(BaseModel):
     unread_count: int
 
 
+class ClearedNotifications(BaseModel):
+    cleared: int
+    unread_count: int
+
+
 class NotificationNotFoundError(LookupError):
     pass
 
@@ -258,6 +263,15 @@ class NotificationService:
             if row is None or row.organization_id != str(actor.organization_id) or row.user_id != str(actor.user_id):
                 raise NotificationNotFoundError("notification not found")
             session.delete(row)
+
+    def clear(self, actor: Actor, *, read_only: bool = False) -> int:
+        """Delete this person's notifications in the actor's workspace; ``read_only`` keeps unread ones."""
+        conditions = list(self._mine(actor))
+        if read_only:
+            conditions.append(NotificationRow.read_at.is_not(None))
+        with self.database.session_factory.begin() as session:
+            result = session.execute(delete(NotificationRow).where(*conditions))
+            return int(result.rowcount or 0)
 
     def prune(self, *, older_than_days: int = RETENTION_DAYS) -> int:
         """Drop read notifications older than the retention window (unread ones stay)."""

@@ -7,8 +7,10 @@ import { meetingsService } from "@/lib/meetings-service";
 import type { RetentionPolicy, UsageSummary, WorkspaceOperations } from "@/lib/types";
 import { UiSelect } from "./ui-select";
 import { Badge, LoadingRow } from "./ui/feedback";
-import { ScrollPanel } from "./scroll-panel";
+import { FilterInput, NoMatches, ScrollPanel } from "./scroll-panel";
+import { matchesQuery, shouldOfferSearch } from "@/lib/search";
 import { providerLabel, purposeLabel } from "./usage-labels";
+import { UsageProviderName } from "./provider-brand-icons";
 
 const retentionOptions = [
   { value: "forever", label: "Keep until manually deleted" },
@@ -72,6 +74,8 @@ export function OperationsCard({ meetingTitles }: { meetingTitles: ReadonlyMap<s
   const [operations, setOperations] = useState<WorkspaceOperations | null>(null);
   const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [operationsError, setOperationsError] = useState<string | null>(null);
+  const [meetingQuery, setMeetingQuery] = useState("");
+  const [callQuery, setCallQuery] = useState("");
 
   useEffect(() => {
     void meetingsService.getWorkspaceOperations().then(setOperations).catch(() => {
@@ -88,6 +92,11 @@ export function OperationsCard({ meetingTitles }: { meetingTitles: ReadonlyMap<s
 
   const workload = operations ? [["People", operations.people], ["Meetings captured", operations.meetings_captured], ["Completed meetings", operations.completed_meetings], ["Saved AI chats", operations.saved_chats], ["Active captures", operations.active_captures]] as const : [];
   const review = operations ? [["Capture failures", operations.failed_captures], ["Minutes drafts failed", operations.failed_mom_jobs], ["Knowledge jobs pending", operations.pending_index_jobs], ["Knowledge jobs failed", operations.failed_index_jobs], ["Email delivery failures", operations.failed_email_deliveries]] as const : [];
+
+  const meetingTitle = (id: string) => meetingTitles.get(id) ?? "Untitled or deleted meeting";
+  const byMeeting = (usage?.by_meeting ?? []).filter((item) => matchesQuery(meetingQuery, meetingTitle(item.meeting_id)));
+  const recentCalls = (usage?.recent ?? []).filter((event) => matchesQuery(callQuery, purposeLabel(event.purpose), event.model, providerLabel(event.provider),
+    formatFullDateTime(event.created_at), event.meeting_id ? meetingTitles.get(event.meeting_id) : null));
 
   return <section className="card settings-section" id="settings-operations" aria-labelledby="workspace-operations-title">
     <div className="card-header">
@@ -106,23 +115,26 @@ export function OperationsCard({ meetingTitles }: { meetingTitles: ReadonlyMap<s
         <p className="field-hint">{usage.unpriced_requests} request{usage.unpriced_requests === 1 ? "" : "s"} have no verified price. Spend is an estimate from published model rates, not a provider invoice; Vexa transcription is not reported here yet.</p>
         {usage.by_meeting.length ? <div className="ops-table-block">
           <h4 className="mini-stats-title">By meeting</h4>
-          <ScrollPanel label="AI usage by meeting" size="sm" className="ops-table"><table className="data-table" aria-label="AI usage by meeting">
+          {shouldOfferSearch(usage.by_meeting.length, meetingQuery) ? <div className="list-search-inline"><FilterInput id="ops-meeting-search" label="Search meetings by AI usage" value={meetingQuery} onChange={setMeetingQuery} placeholder="Search meeting title" /></div> : null}
+          {!byMeeting.length ? <NoMatches query={meetingQuery} noun="meetings" onClear={() => setMeetingQuery("")} /> : <ScrollPanel label="AI usage by meeting" size="sm" className="ops-table"><table className="data-table" aria-label="AI usage by meeting">
             <thead><tr><th>Meeting</th><th className="num">Requests</th><th className="num">Tokens in / out</th><th className="num">Estimated cost</th></tr></thead>
-            <tbody>{usage.by_meeting.map((item) => <tr key={item.meeting_id}>
-              <td><span className="cell-stack"><span>{meetingTitles.get(item.meeting_id) ?? "Untitled or deleted meeting"}</span><small>{item.unpriced_requests ? `${item.unpriced_requests} unpriced request${item.unpriced_requests === 1 ? "" : "s"}` : "All calls priced"}</small></span></td>
+            <tbody>{byMeeting.map((item) => <tr key={item.meeting_id}>
+              <td><span className="cell-stack"><span>{meetingTitle(item.meeting_id)}</span><small>{item.unpriced_requests ? `${item.unpriced_requests} unpriced request${item.unpriced_requests === 1 ? "" : "s"}` : "All calls priced"}</small></span></td>
               <td className="num">{item.requests}</td>
               <td className="num">{item.input_tokens.toLocaleString()} / {item.output_tokens.toLocaleString()}</td>
               <td className="num">{money(item.estimated_usd, 5)}</td>
             </tr>)}</tbody>
-          </table></ScrollPanel>
+          </table></ScrollPanel>}
         </div> : null}
         <div className="ops-table-block">
           <h4 className="mini-stats-title">Recent model calls</h4>
-          {usage.recent.length ? <ScrollPanel label="Recent AI usage" size="sm" className="ops-table"><table className="data-table" aria-label="Recent AI usage">
+          {shouldOfferSearch(usage.recent.length, callQuery) ? <div className="list-search-inline"><FilterInput id="ops-call-search" label="Search recent model calls" value={callQuery} onChange={setCallQuery} placeholder="Search process, model or meeting" /></div> : null}
+          {usage.recent.length && !recentCalls.length ? <NoMatches query={callQuery} noun="calls" onClear={() => setCallQuery("")} />
+          : usage.recent.length ? <ScrollPanel label="Recent AI usage" size="sm" className="ops-table"><table className="data-table" aria-label="Recent AI usage">
             <thead><tr><th>Process</th><th>Model</th><th className="num">Tokens in / out</th><th className="num">Estimated cost</th></tr></thead>
-            <tbody>{usage.recent.map((event) => <tr key={event.id}>
+            <tbody>{recentCalls.map((event) => <tr key={event.id}>
               <td><span className="cell-stack"><span>{purposeLabel(event.purpose)}</span><small>{formatFullDateTime(event.created_at)}{event.meeting_id ? ` · ${meetingTitles.get(event.meeting_id) ?? "a meeting"}` : event.knowledge_base_id ? " · AI knowledge" : ""}</small></span></td>
-              <td><span className="cell-stack"><span>{event.model}</span><small>{providerLabel(event.provider)}</small></span></td>
+              <td><span className="cell-stack"><span>{event.model}</span><small><UsageProviderName provider={event.provider} /></small></span></td>
               <td className="num">{event.input_tokens?.toLocaleString() ?? "—"} / {event.output_tokens?.toLocaleString() ?? "—"}</td>
               <td className="num">{event.estimated_usd === null ? <Badge tone="warning">Unpriced</Badge> : money(event.estimated_usd, 5)}</td>
             </tr>)}</tbody>

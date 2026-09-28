@@ -1,8 +1,12 @@
+"use client";
+
 import { ExternalLink, Target } from "lucide-react";
 import type { PrepAttendee, PrepMatchConfidence, PrepPersona, PrepSourceV2 } from "@/lib/types";
 import { Badge } from "./ui/feedback";
 import { Citations, safeHref } from "./prep-shared";
 import { Avatar } from "./ui/avatar";
+import { FilterInput, NoMatches } from "./scroll-panel";
+import { useListSearch } from "./use-list-search";
 
 export const personaLabels: Record<PrepPersona, string> = {
   technical: "Technical", business: "Business", sales: "Sales", executive: "Executive", unknown: "Role unknown",
@@ -16,9 +20,14 @@ const matchCopy: Record<PrepMatchConfidence, { label: string; tone: "success" | 
 
 /** Invitees from the calendar with public-profile context. Only name-and-company matches carry a profile link. */
 export function PrepAttendees({ attendees, sources }: { attendees: PrepAttendee[]; sources: Map<string, PrepSourceV2> }) {
-  return <ul className="prep-people">
-    {attendees.map((person) => <li key={`${person.name}-${person.email ?? ""}`}><PersonCard person={person} sources={sources} /></li>)}
-  </ul>;
+  const search = useListSearch(attendees, (person) => [person.name, person.email, person.title, personaLabels[person.persona], person.side ? sideLabels[person.side] : null,
+    (matchCopy[person.match_confidence] ?? matchCopy.unconfirmed).label, person.likely_interests]);
+  return <>
+    {search.offered ? <div className="list-search-inline"><FilterInput id="prep-attendee-search" label="Search attendees" value={search.query} onChange={search.setQuery} placeholder="Search name, title, email or role" /></div> : null}
+    {search.noMatches ? <NoMatches query={search.query} noun="attendees" onClear={search.clear} /> : <ul className="prep-people">
+    {search.visible.map((person) => <li key={`${person.name}-${person.email ?? ""}`}><PersonCard person={person} sources={sources} /></li>)}
+  </ul>}
+  </>;
 }
 
 function PersonCard({ person, sources }: { person: PrepAttendee; sources: Map<string, PrepSourceV2> }) {

@@ -3,6 +3,8 @@
 import { useMemo } from "react";
 import type { ProviderProfile } from "@/lib/types";
 import { UiSelect } from "./ui-select";
+import { providerOptionIcon } from "./provider-brand-icons";
+import { profileBrand } from "./provider-brand";
 import { ModelCombobox } from "./model-combobox";
 import { recommendedModelIds } from "./provider-profile-info";
 import { useModelCatalog } from "./use-model-catalog";
@@ -28,7 +30,7 @@ export function ModelRoutePicker({ id, name, profiles, value, onChange, noneLabe
 
   return <div className="ai-route">
     <UiSelect id={`${id}-profile`} label={`${name} provider`} value={value.profileId || NONE} onChange={(next) => onChange({ profileId: next === NONE ? "" : next, model: "" })} disabled={disabled}
-      options={[{ value: NONE, label: noneLabel }, ...profiles.map((item) => ({ value: item.id, label: item.label }))]} />
+      options={[{ value: NONE, label: noneLabel }, ...profiles.map((item) => ({ value: item.id, label: item.label, icon: providerOptionIcon(profileBrand(item)) }))]} />
     {profile ? <ModelCombobox id={`${id}-model`} label={`${name} model`} value={value.model} catalog={catalog} disabled={disabled}
       onChange={(model) => onChange({ ...value, model })}
       placeholder={`Provider default · ${profile.model || "not set"}`} recommendedIds={recommendedModelIds[capability]}

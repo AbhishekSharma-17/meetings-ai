@@ -8,6 +8,8 @@ import type { CurrentAccount, WorkspaceOption } from "@/lib/types";
 import { Badge } from "./ui/feedback";
 import { roleLabel } from "./member-access";
 import { NewWorkspaceDialog } from "./new-workspace-dialog";
+import { NoMatches, SearchToolbar } from "./scroll-panel";
+import { useListSearch } from "./use-list-search";
 
 /** "Your workspaces": switch, create, and choose which workspace a new sign-in opens in. */
 export function WorkspaceDirectory({ workspaces, account, canManage, onSwitchWorkspace, onCreateWorkspace, onWorkspacesChange }: {
@@ -24,6 +26,7 @@ export function WorkspaceDirectory({ workspaces, account, canManage, onSwitchWor
   const [actionError, setActionError] = useState<string | null>(null);
   const defaultWorkspace = workspaces.find((item) => item.is_default) ?? null;
   const multiple = workspaces.length > 1;
+  const search = useListSearch(workspaces, (item) => [item.display_name, roleLabel[item.role] ?? item.role, item.is_default ? "Default" : null, item.id === account?.organization_id ? "Current workspace" : null]);
 
   async function switchWorkspace(id: string) {
     setWorkspaceAction(true); setActionError(null);
@@ -47,7 +50,9 @@ export function WorkspaceDirectory({ workspaces, account, canManage, onSwitchWor
       {canManage ? <button type="button" className="button secondary sm" onClick={() => setCreating(true)}><Plus aria-hidden="true" /><span>New workspace</span></button>
         : <span className="section-count">{workspaces.length} {workspaces.length === 1 ? "workspace" : "workspaces"}</span>}
     </div>
-    <ul className="workspace-directory">{workspaces.map((item) => {
+    {search.offered ? <SearchToolbar id="workspace-search" label="Search workspaces" value={search.query} onChange={search.setQuery} placeholder="Search by workspace name or role" /> : null}
+    {search.noMatches ? <NoMatches query={search.query} noun="workspaces" onClear={search.clear} /> : null}
+    <ul className="workspace-directory">{search.visible.map((item) => {
       const current = item.id === account?.organization_id;
       return <li key={item.id} className="list-row workspace-directory-row">
         <span className="avatar workspace-avatar" aria-hidden="true">{initials(item.display_name)}</span>

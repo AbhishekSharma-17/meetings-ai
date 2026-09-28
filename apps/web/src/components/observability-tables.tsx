@@ -6,6 +6,7 @@ import { Avatar } from "./ui/avatar";
 import type { Meeting, UsageSummary, WorkspaceCalendarConnection, WorkspaceMember } from "@/lib/types";
 import { Badge } from "./ui/feedback";
 import { FilterInput, matchesQuery, NoMatches, ScrollPanel } from "./scroll-panel";
+import { shouldOfferSearch } from "@/lib/search";
 import { formatUsd } from "./usage-labels";
 import { calendarProviderNames } from "./calendar-providers";
 import { roleLabel } from "./workspace-people";
@@ -36,21 +37,26 @@ function SearchableCard({ id, title, description, count, search, children, class
   </section>;
 }
 
-export function UsageTable({ id, title, description, firstColumn, rows, format, empty }: { id: string; title: string; description: string; firstColumn: string; rows: UsageRow[]; format(value: string): string; empty: string }) {
+export function UsageTable({ id, title, description, firstColumn, rows, format, renderName, empty }: { id: string; title: string; description: string; firstColumn: string; rows: UsageRow[]; format(value: string): string; /** Rich first-column content (e.g. a provider logo); defaults to `format`. */ renderName?(value: string): ReactNode; empty: string }) {
+  const [query, setQuery] = useState("");
   const totalRequests = rows.reduce((sum, row) => sum + row.requests, 0);
-  return <SearchableCard id={id} title={title} description={description}>
-    <div className="obs-table"><table className="data-table">
+  const visible = rows.filter((row) => matchesQuery(query, [row.name, format(row.name)]));
+  const noun = `${firstColumn.toLowerCase()}${firstColumn.endsWith("s") ? "es" : "s"}`;
+  return <SearchableCard id={id} title={title} description={description}
+    search={shouldOfferSearch(rows.length, query) ? { label: `Search ${noun}`, placeholder: `Search ${noun}`, value: query, onChange: setQuery } : undefined}>
+    {rows.length && !visible.length ? <NoMatches query={query} noun={noun} onClear={() => setQuery("")} /> : <div className="obs-table"><table className="data-table">
       <thead><tr><th>{firstColumn}</th><th className="num">Calls</th><th className="num">Tokens in / out</th><th className="num">Estimate</th></tr></thead>
-      <tbody>{rows.length ? rows.map((row, index) => {
+      <tbody>{visible.length ? visible.map((row) => {
+        const index = rows.indexOf(row);
         const share = totalRequests ? Math.round((row.requests / totalRequests) * 100) : 0;
         return <tr key={row.name}>
-          <td><span className="obs-cell"><span>{format(row.name)}</span><span className="obs-share" title={`${share}% of calls`}><span className="obs-bar" aria-hidden="true"><i style={{ width: `${share}%`, background: `var(--chart-${(index % CHART_COLORS) + 1})` }} /></span><small>{share}% of calls{row.unpriced_requests ? ` · ${row.unpriced_requests} unpriced` : ""}</small></span></span></td>
+          <td><span className="obs-cell">{renderName ? renderName(row.name) : <span>{format(row.name)}</span>}<span className="obs-share" title={`${share}% of calls`}><span className="obs-bar" aria-hidden="true"><i style={{ width: `${share}%`, background: `var(--chart-${(index % CHART_COLORS) + 1})` }} /></span><small>{share}% of calls{row.unpriced_requests ? ` · ${row.unpriced_requests} unpriced` : ""}</small></span></span></td>
           <td className="num">{row.requests}</td>
           <td className="num">{row.input_tokens.toLocaleString()} / {row.output_tokens.toLocaleString()}</td>
           <td className="num">{money(row.estimated_usd)}</td>
         </tr>;
       }) : <EmptyRow span={4}>{empty}</EmptyRow>}</tbody>
-    </table></div>
+    </table></div>}
   </SearchableCard>;
 }
 
@@ -58,7 +64,7 @@ export function PeopleTable({ people }: { people: WorkspaceMember[] }) {
   const [query, setQuery] = useState("");
   const visible = people.filter((person) => matchesQuery(query, [person.display_name, person.email, roleLabel[person.role], person.status]));
   return <SearchableCard id="obs-people" title="People in this workspace" description="Member roles and access status." count={people.length}
-    search={people.length > 5 ? { label: "Search people", placeholder: "Search by name, email or role", value: query, onChange: setQuery } : undefined}>
+    search={shouldOfferSearch(people.length, query) ? { label: "Search people", placeholder: "Search by name, email or role", value: query, onChange: setQuery } : undefined}>
     {people.length && !visible.length ? <NoMatches query={query} noun="people" onClear={() => setQuery("")} /> : <ScrollPanel label="People" className="obs-table"><table className="data-table">
       <thead><tr><th>Person</th><th>Role</th><th>Status</th></tr></thead>
       <tbody>{visible.length ? visible.map((person) => <tr key={person.user_id}>
@@ -74,7 +80,7 @@ export function AccountsTable({ accounts, error }: { accounts: WorkspaceCalendar
   const [query, setQuery] = useState("");
   const visible = accounts.filter((account) => matchesQuery(query, [account.user_name, account.user_email, account.label, words(account.provider), account.status]));
   return <SearchableCard id="obs-accounts" title="Connected meeting accounts" description="Calendar and meeting-source connections for members." count={accounts.length || undefined}
-    search={accounts.length > 5 ? { label: "Search accounts", placeholder: "Search by person or source", value: query, onChange: setQuery } : undefined}>
+    search={shouldOfferSearch(accounts.length, query) ? { label: "Search accounts", placeholder: "Search by person or source", value: query, onChange: setQuery } : undefined}>
     {error ? <div className="card-body obs-card-alert"><p className="form-error" role="alert">{error}</p></div> : null}
     {accounts.length && !visible.length ? <NoMatches query={query} noun="accounts" onClear={() => setQuery("")} /> : <ScrollPanel label="Connected accounts" className="obs-table"><table className="data-table">
       <thead><tr><th>Account</th><th>Source</th><th>Status</th></tr></thead>
@@ -91,7 +97,7 @@ export function MeetingUsageTable({ meetings, usage }: { meetings: Meeting[]; us
   const [query, setQuery] = useState("");
   const visible = meetings.filter((meeting) => matchesQuery(query, [meeting.title, meeting.platform, meetingStatusLabel[meeting.status] ?? meeting.status]));
   return <SearchableCard id="obs-meetings" className="obs-section" title="Meeting activity and AI use" description="Every meeting with its recorded AI spend in this period, including priced transcription. Unpriced calls are excluded." count={meetings.length}
-    search={meetings.length ? { label: "Search meetings", placeholder: "Search by meeting, platform or status", value: query, onChange: setQuery } : undefined}>
+    search={shouldOfferSearch(meetings.length, query) ? { label: "Search meetings", placeholder: "Search by meeting, platform or status", value: query, onChange: setQuery } : undefined}>
     {meetings.length && !visible.length ? <NoMatches query={query} noun="meetings" onClear={() => setQuery("")} /> : <ScrollPanel label="Meeting activity" className="obs-table"><table className="data-table">
       <thead><tr><th>Meeting</th><th>Capture</th><th className="num">AI calls</th><th className="num">Tokens in / out</th><th className="num">Estimated cost</th></tr></thead>
       <tbody>{visible.length ? visible.map((meeting) => {

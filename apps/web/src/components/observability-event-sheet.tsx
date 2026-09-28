@@ -6,8 +6,10 @@ import { Dialog } from "@base-ui/react/dialog";
 import { X } from "lucide-react";
 import type { UsageEvent } from "@/lib/types";
 import { Badge } from "./ui/feedback";
-import { detailLabel, formatDuration, formatUsd, kindLabel, kindTone, providerLabel, purposeLabel, statusLabel, unitsLabel } from "./usage-labels";
+import { detailLabel, formatDuration, formatUsd, kindLabel, kindTone, purposeLabel, statusLabel, unitsLabel } from "./usage-labels";
 import { Avatar } from "./ui/avatar";
+import { UsageProviderName } from "./provider-brand-icons";
+import { usageEndpointHost } from "./provider-brand";
 
 function detailValue(value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";
@@ -43,7 +45,7 @@ export function UsageEventSheet({ event, onClose }: { event: UsageEvent | null; 
             <section aria-labelledby="obs-sheet-call">
               <h3 id="obs-sheet-call">Call</h3>
               <dl className="meta-list">
-                <Row label="Provider">{providerLabel(event.provider)}</Row>
+                <Row label="Provider"><UsageProviderName provider={event.provider} endpointHost={usageEndpointHost(event.details)} /></Row>
                 <Row label="Model"><span className="obs-model">{event.model}</span></Row>
                 <Row label="Input tokens">{event.input_tokens?.toLocaleString() ?? "—"}</Row>
                 <Row label="Output tokens">{event.output_tokens?.toLocaleString() ?? "—"}</Row>

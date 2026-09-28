@@ -1,10 +1,19 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Avatar, DEFAULT_ASSISTANT_NAME, isAssistantName } from "./ui/avatar";
 import type { ActionItem, TranscriptSegment } from "@/lib/types";
 import { EvidenceChips, lines, type EditableDraft } from "./minutes-support";
+import { FilterInput, NoMatches } from "./scroll-panel";
+import { useListSearch } from "./use-list-search";
+import { matchesQuery, shouldOfferSearch } from "@/lib/search";
+
+const actionFields = (item: ActionItem) => [item.description, item.owner, item.due_date];
+
+function ActionSearch({ id, query, onChange }: { id: string; query: string; onChange(value: string): void }) {
+  return <div className="list-search-inline"><FilterInput id={id} label="Search action items" value={query} onChange={onChange} placeholder="Search action, owner or due date" /></div>;
+}
 
 function Section({ id, title, hint, count, actions, children }: { id: string; title: ReactNode; hint?: ReactNode; count?: number; actions?: ReactNode; children: ReactNode }) {
   return <div className="mom-section">
@@ -26,7 +35,11 @@ function ListField({ id, label, value, onChange, rows }: { id: string; label: st
 /** The editable MOM document: every field a reviewer can change before approval. */
 export function MinutesEditor({ draft, segments, onChange }: { draft: EditableDraft; segments: TranscriptSegment[]; onChange(draft: EditableDraft): void }) {
   const updateAction = (index: number, patch: Partial<ActionItem>) => onChange({ ...draft, actions: draft.actions.map((entry, position) => position === index ? { ...entry, ...patch } : entry) });
-  const addAction = () => onChange({ ...draft, actions: [...draft.actions, { description: "", owner: null, due_date: null, evidence_segment_ids: [] }] });
+  const [query, setQuery] = useState("");
+  // The action being edited stays visible even if an edit stops it matching the search.
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const addAction = () => { setQuery(""); onChange({ ...draft, actions: [...draft.actions, { description: "", owner: null, due_date: null, evidence_segment_ids: [] }] }); };
+  const shownActions = draft.actions.map((item, index) => ({ item, index })).filter(({ item, index }) => index === activeIndex || matchesQuery(query, actionFields(item)));
   return <div className="mom-document">
     <div className="field mom-title-field">
       <label htmlFor="mom-title">Title</label>
@@ -42,8 +55,10 @@ export function MinutesEditor({ draft, segments, onChange }: { draft: EditableDr
     </div>
     <Section id="mom-actions" title="Action items" count={draft.actions.length} hint="Only what was explicitly agreed. Every action needs transcript evidence."
       actions={<button type="button" className="button secondary sm" onClick={addAction}><Plus aria-hidden="true" /> Add action</button>}>
-      {draft.actions.length ? <ol className="mom-action-list">
-        {draft.actions.map((item, index) => <li className="mom-action" key={index}>
+      {shouldOfferSearch(draft.actions.length, query) ? <ActionSearch id="mom-action-search" query={query} onChange={(value) => { setActiveIndex(null); setQuery(value); }} /> : null}
+      {draft.actions.length && !shownActions.length ? <NoMatches query={query} noun="action items" onClear={() => setQuery("")} />
+        : draft.actions.length ? <ol className="mom-action-list">
+        {shownActions.map(({ item, index }) => <li className="mom-action" key={index} onFocus={() => setActiveIndex(index)}>
           <div className="field">
             <label htmlFor={`mom-action-${index}`}>Action</label>
             <input id={`mom-action-${index}`} value={item.description} onChange={(event) => updateAction(index, { description: event.target.value })} />
@@ -56,7 +71,7 @@ export function MinutesEditor({ draft, segments, onChange }: { draft: EditableDr
             <EvidenceChips ids={item.evidence_segment_ids ?? []} segments={segments} emptyLabel="No evidence linked"
               onRemove={(id) => updateAction(index, { evidence_segment_ids: (item.evidence_segment_ids ?? []).filter((evidenceId) => evidenceId !== id) })}
               onAdd={(id) => updateAction(index, { evidence_segment_ids: [...new Set([...(item.evidence_segment_ids ?? []), id])] })} addId={`mom-evidence-${index}`} />
-            <button type="button" className="text-button destructive" onClick={() => onChange({ ...draft, actions: draft.actions.filter((_, position) => position !== index) })}><Trash2 aria-hidden="true" /> Remove action</button>
+            <button type="button" className="text-button destructive" onClick={() => { setActiveIndex(null); onChange({ ...draft, actions: draft.actions.filter((_, position) => position !== index) }); }}><Trash2 aria-hidden="true" /> Remove action</button>
           </div>
         </li>)}
       </ol> : <p className="mom-empty-line">No action items. Add one only if it was agreed in the meeting.</p>}
@@ -91,6 +106,7 @@ function ReadList({ items, empty }: { items: string[]; empty: string }) {
 
 /** Locked, read-only rendering of a delivered MOM. */
 export function MinutesDocument({ draft, segments }: { draft: EditableDraft; segments: TranscriptSegment[] }) {
+  const search = useListSearch(draft.actions, actionFields);
   return <div className="mom-document read-only">
     <p className="mom-read-title">{draft.title}</p>
     <Section id="mom-summary-read" title="Executive summary"><p className="mom-read-text">{draft.summary}</p></Section>
@@ -99,7 +115,9 @@ export function MinutesDocument({ draft, segments }: { draft: EditableDraft; seg
       <Section id="mom-decisions-read" title="Decisions"><ReadList items={lines(draft.decisions)} empty="None recorded." /></Section>
     </div>
     <Section id="mom-actions-read" title="Action items" count={draft.actions.length}>
-      {draft.actions.length ? <ol className="mom-action-list">{draft.actions.map((item, index) => <li className="mom-action" key={index}>
+      {search.offered ? <ActionSearch id="mom-action-search-read" query={search.query} onChange={search.setQuery} /> : null}
+      {search.noMatches ? <NoMatches query={search.query} noun="action items" onClear={search.clear} />
+        : draft.actions.length ? <ol className="mom-action-list">{search.visible.map((item) => <li className="mom-action" key={draft.actions.indexOf(item)}>
         <b>{item.description}</b>
         <div className="tag-list">{item.owner ? <span className="tag">Owner · {item.owner}</span> : null}{item.due_date ? <span className="tag">Due · {item.due_date}</span> : null}</div>
         <EvidenceChips ids={item.evidence_segment_ids ?? []} segments={segments} />

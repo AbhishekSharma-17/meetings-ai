@@ -14,6 +14,7 @@ import { PrepUsagePanel } from "./observability-prep";
 import { StoragePanel } from "./storage-panel";
 import { RangePicker, rangeFor, type RangeChoice } from "./observability-range";
 import { formatCompact, formatDuration, formatUsd, providerLabel, purposeLabel } from "./usage-labels";
+import { UsageProviderName } from "./provider-brand-icons";
 
 type Tab = "overview" | "ledger" | "prep" | "storage";
 const tabs: Tab[] = ["overview", "ledger", "prep", "storage"];
@@ -93,7 +94,7 @@ function Overview({ usage, operations, people, accounts, accountsError, meetings
     </div>
     <div className="obs-grid">
       <SpendByKind rows={usage?.by_kind ?? []} />
-      <UsageTable id="obs-provider" title="Cost by provider" description="Usage across connected providers." firstColumn="Provider" rows={usage?.by_provider ?? []} format={providerLabel} empty="No provider usage recorded yet." />
+      <UsageTable id="obs-provider" title="Cost by provider" description="Usage across connected providers." firstColumn="Provider" rows={usage?.by_provider ?? []} format={providerLabel} renderName={(name) => <UsageProviderName provider={name} />} empty="No provider usage recorded yet." />
     </div>
     <div className="obs-grid">
       <UsageTable id="obs-process" title="Cost by process" description="Recorded calls, grouped by what they were for." firstColumn="Process" rows={usage?.by_purpose ?? []} format={purposeLabel} empty="No model usage recorded yet." />

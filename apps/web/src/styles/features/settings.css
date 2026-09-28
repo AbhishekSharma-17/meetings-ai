@@ -94,12 +94,6 @@
 
 /* ---------- AI providers: saved API keys ---------- */
 .provider-overview { display:grid; gap:16px; margin-bottom:20px; }
-.provider-brand { display:grid; place-items:center; flex:none; width:32px; height:32px; border-radius:var(--radius); border:1px solid var(--border); background:var(--muted); color:var(--foreground); }
-.provider-brand.openrouter { background:var(--brand-subtle); border-color:var(--brand-border); color:var(--brand); }
-.provider-brand.exa { background:var(--info-subtle); border-color:var(--info-border); color:var(--info-text); }
-.provider-brand .lucide, .provider-mark { width:17px; height:17px; }
-.provider-mark.stroked { fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
-.provider-mark.filled { fill:currentColor; }
 .provider-keys-state { padding:12px 20px 16px; }
 .provider-keys-empty.empty-state { padding:22px 20px 24px; }
 .provider-keys-note { padding:0 20px 14px; }

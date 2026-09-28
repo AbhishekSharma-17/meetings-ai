@@ -7,7 +7,7 @@ from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
 from .database import Database, MeetingPrepRow, UsageEventRow
@@ -118,6 +118,21 @@ def _window(organization_id: UUID, since: datetime | None, until: datetime | Non
     return conditions
 
 
+def _vendor() -> Any:
+    """The provider as people know it: OpenAI-compatible calls to openrouter.ai are OpenRouter."""
+    return case(
+        (and_(UsageEventRow.provider == "openai_compatible",
+              UsageEventRow.details["endpoint_host"].as_string() == "openrouter.ai"), "openrouter"),
+        else_=UsageEventRow.provider,
+    )
+
+
+def _row_vendor(row: UsageEventRow) -> str:
+    """Python twin of :func:`_vendor` for rows already loaded."""
+    host = (row.details or {}).get("endpoint_host")
+    return "openrouter" if row.provider == "openai_compatible" and host == "openrouter.ai" else row.provider
+
+
 def _group(row: Any, name: str) -> UsageGroupTotal:
     return UsageGroupTotal(name=name, requests=row[1], input_tokens=row[2], output_tokens=row[3],
                            estimated_usd=round(float(row[4]), 6), unpriced_requests=row[5])
@@ -130,11 +145,12 @@ def _grouped(session: Session, column: Any, where: list[Any]) -> list[UsageGroup
 
 
 def _by_model(session: Session, where: list[Any]) -> list[UsageModelTotal]:
+    vendor = _vendor()
     rows = session.execute(select(
-        UsageEventRow.kind, UsageEventRow.provider, UsageEventRow.model, *_aggregates(),
+        UsageEventRow.kind, vendor, UsageEventRow.model, *_aggregates(),
         func.coalesce(func.sum(UsageEventRow.units), 0), func.max(UsageEventRow.unit_type),
         func.count(UsageEventRow.id).filter(UsageEventRow.status != "succeeded"),
-    ).where(*where).group_by(UsageEventRow.kind, UsageEventRow.provider, UsageEventRow.model)
+    ).where(*where).group_by(UsageEventRow.kind, vendor, UsageEventRow.model)
      .order_by(func.coalesce(func.sum(UsageEventRow.estimated_usd), 0).desc(), func.count(UsageEventRow.id).desc())).all()
     return [UsageModelTotal(
         name=f"{row[1]}/{row[2]}", kind=row[0], provider=row[1], model=row[2], requests=row[3],
@@ -192,7 +208,7 @@ def summarize(database: Database, organization_id: UUID, *, since: datetime | No
         ).group_by(UsageEventRow.meeting_id).order_by(
             func.coalesce(func.sum(UsageEventRow.estimated_usd), 0).desc())).all()
         by_purpose = _grouped(session, UsageEventRow.purpose, where)
-        by_provider = _grouped(session, UsageEventRow.provider, where)
+        by_provider = _grouped(session, _vendor(), where)
         by_kind = _grouped(session, UsageEventRow.kind, where)
         by_model = _by_model(session, where)
         prep = _prep(session, organization_id, where, since, until)
@@ -203,7 +219,7 @@ def summarize(database: Database, organization_id: UUID, *, since: datetime | No
         recent=[ModelUsageEvent(
             id=UUID(row.id), meeting_id=UUID(row.meeting_id) if row.meeting_id else None,
             knowledge_base_id=UUID(row.knowledge_base_id) if row.knowledge_base_id else None,
-            purpose=row.purpose, provider=row.provider, model=row.model, kind=row.kind, status=row.status,
+            purpose=row.purpose, provider=_row_vendor(row), model=row.model, kind=row.kind, status=row.status,
             input_tokens=row.input_tokens, output_tokens=row.output_tokens,
             estimated_usd=row.estimated_usd, created_at=row.created_at,
         ) for row in recent],

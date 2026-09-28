@@ -8,6 +8,7 @@ import type { StorageCategory, StorageCategoryKey, StorageItem, StoragePurgeResu
 import { EmptyState, LoadingRow } from "./ui/feedback";
 import { SwitchField } from "./ui/switch";
 import { FilterInput, matchesQuery, NoMatches, ScrollPanel } from "./scroll-panel";
+import { shouldOfferSearch } from "@/lib/search";
 import { storageCopy } from "./storage-copy";
 import { StorageConfirmDialog, type PurgePlan } from "./storage-confirm-dialog";
 import { PurgeResultAlert } from "./storage-result";
@@ -86,7 +87,7 @@ function ManageBody({ category, onPurged, result }: { category: ManagedCategory;
           <h3 id="storage-items-title">Choose what to delete</h3>
           {items.length ? <label className="check-label storage-select-all"><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisible} />Select all{query ? " shown" : ""}</label> : null}
         </div>
-        {items.length > 6 ? <FilterInput id="storage-item-search" label={`Search ${copy.nouns}`} value={query} onChange={setQuery} placeholder={`Search ${copy.nouns}`} /> : null}
+        {shouldOfferSearch(items.length, query) ? <FilterInput id="storage-item-search" label={`Search ${copy.nouns}`} value={query} onChange={setQuery} placeholder={`Search ${copy.nouns}`} /> : null}
         {error ? <p className="form-error" role="alert">{error}</p> : null}
         {loading && !items.length ? <LoadingRow>Loading {copy.nouns}…</LoadingRow>
           : !items.length ? <EmptyState plain icon={<Inbox />} title={`No ${copy.nouns} stored`}>There is nothing to delete here.</EmptyState>
