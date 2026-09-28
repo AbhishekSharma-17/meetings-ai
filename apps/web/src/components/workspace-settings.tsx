@@ -10,11 +10,13 @@ import { WorkspaceDirectory } from "./workspace-directory";
 import { WorkspaceBrief } from "./workspace-brief";
 import { OperationsCard, RetentionCard } from "./workspace-admin-cards";
 import { ActivityCard } from "./workspace-activity";
+import { WorkspaceTeams } from "./workspace-teams";
 
 type SectionLink = { id: string; label: string; adminOnly?: boolean };
 const sectionLinks: SectionLink[] = [
   { id: "settings-organization", label: "Organization" },
   { id: "settings-people", label: "People & access" },
+  { id: "settings-teams", label: "Teams" },
   { id: "settings-workspaces", label: "Your workspaces" },
   { id: "settings-brief", label: "Company profile" },
   { id: "settings-retention", label: "Data retention", adminOnly: true },
@@ -43,6 +45,7 @@ export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceC
   const [pendingRemovalId, setPendingRemovalId] = useState<string | null>(null);
   const [meetingTitles, setMeetingTitles] = useState<ReadonlyMap<string, string>>(new Map());
   const [baseNames, setBaseNames] = useState<ReadonlyMap<string, string>>(new Map());
+  const [teamNames, setTeamNames] = useState<ReadonlyMap<string, string>>(new Map());
   const canManage = account?.role === "owner" || account?.role === "admin";
 
   useEffect(() => {
@@ -138,11 +141,13 @@ export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceC
         <WorkspacePeople members={members} account={account} canManage={canManage} memberBusy={memberBusy} pendingRemovalId={pendingRemovalId} inviteResult={inviteResult} inviting={inviting}
           onChangeRole={(userId, role) => void changeRole(userId, role)} onReset={(userId) => void resetMember(userId)} onRequestRemoval={setPendingRemovalId} onCancelRemoval={() => setPendingRemovalId(null)}
           onRemove={(userId) => void removeMember(userId)} onInvite={invite} onCopyFailed={() => setError("Could not copy the password. Select it and copy it manually.")} />
+        <WorkspaceTeams members={members} canManage={canManage} onMessage={(text) => { setError(null); setMessage(text); }}
+          onTeamsChange={(teams) => setTeamNames(new Map(teams.map((team) => [team.id, team.name])))} />
         <WorkspaceDirectory workspaces={workspaces} account={account} canManage={canManage} onSwitchWorkspace={onSwitchWorkspace} onCreateWorkspace={onCreateWorkspace} onWorkspacesChange={onWorkspacesChange} />
         <WorkspaceBrief workspaceId={workspace.id} canManage={canManage} />
         {canManage ? <RetentionCard onSaved={setMessage} /> : null}
         {canManage ? <OperationsCard meetingTitles={meetingTitles} /> : null}
-        {canManage ? <ActivityCard members={members} meetingTitles={meetingTitles} baseNames={baseNames} /> : null}
+        {canManage ? <ActivityCard members={members} meetingTitles={meetingTitles} baseNames={baseNames} teamNames={teamNames} /> : null}
       </div>
     </div>
     <SettingsToast notice={notice} onDismiss={() => { setError(null); setMessage(null); }} />

@@ -24,6 +24,7 @@ from .chunk_store import ChunkStore, UnitKey, embedding_text
 from .chunking import brief_markdown, chunk_document, split_pages
 from .database import Database, KnowledgeChunkRow, KnowledgeDocumentRow, OrganizationBriefRow
 from .documents import DocumentService
+from .notification_events import NO_EVENTS
 from .repository import ProfileNotFoundError
 from .service import ProviderProfileService, ProviderSelectionError
 from .tenant import tenant_scope
@@ -39,6 +40,9 @@ DOCUMENT_SOURCE_TYPES = ("document", "brief")
 
 
 class IndexingWorker:
+    # Notification hooks (NotificationEvents); a no-op unless wired in create_app.
+    events: Any = NO_EVENTS
+
     def __init__(self, database: Database, documents: DocumentService, store: ChunkStore,
                  knowledge_index: Any, providers: ProviderProfileService) -> None:
         self.database = database
@@ -132,6 +136,8 @@ class IndexingWorker:
             row.status, row.summary, row.indexed_at = "indexed", summary, datetime.now(UTC)
             row.error = (f"Indexed for keyword search only: {result.embedding_error}"
                          if result.embedding_error else None)
+            indexed_at = row.indexed_at
+        self.events.document_indexed({**snapshot, "attempt_key": f"{indexed_at.timestamp():.0f}"})
 
     def _failed(self, document_id: str, exc: Exception) -> None:
         attempts = self._attempts.get(document_id, (0, 0.0))[0] + 1
@@ -146,8 +152,12 @@ class IndexingWorker:
             row.status = "failed" if final else "pending"
             row.error = (f"Indexing failed after {attempts} attempts: " if final
                          else f"Retrying (attempt {attempts}): ") + str(exc)[:500]
+            failed = {name: getattr(row, name) for name in (
+                "id", "organization_id", "scope", "scope_id", "filename", "created_by", "error")} if final else None
         if attempts >= MAX_ATTEMPTS:
             self._attempts.pop(document_id, None)
+        if failed:
+            self.events.document_failed({**failed, "attempt_key": f"{monotonic():.0f}"}, failed["error"])
 
     async def _summarize(self, snapshot: dict[str, Any], usage: dict[str, Any]) -> str | None:
         body = "\n\n".join(text for _, text in split_pages(snapshot["extracted_text"]))[:SUMMARY_INPUT_CHARS]

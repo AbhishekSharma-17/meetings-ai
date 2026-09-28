@@ -58,6 +58,9 @@ class CalendarConnectResponse(BaseModel):
 class CalendarConnectRequest(BaseModel):
     callback_origin: str | None = None
     alias: str | None = Field(default=None, max_length=80)
+    # The browser opened the consent screen in a new tab/popup. This only picks a
+    # fixed callback page on the same server-chosen origin; it never supplies a URL.
+    popup: bool = False
 
 
 class CalendarAliasRequest(BaseModel):
@@ -130,7 +133,10 @@ def _user_id(actor: Actor) -> str:
     return f"meetings-ai:{actor.organization_id}:{actor.user_id}"
 
 
-def calendar_callback_url(requested_origin: str | None, configured_origin: str, app_env: str) -> str:
+CALENDAR_POPUP_CALLBACK_PATH = "/calendar/connected?popup=1"
+
+
+def calendar_callback_url(requested_origin: str | None, configured_origin: str, app_env: str, popup: bool = False) -> str:
     """Allow browser-visible loopback ports in development, not arbitrary redirects."""
     # Production OAuth always returns to the server-configured application URL.
     # The browser may still be on an older Railway URL or a newly added custom
@@ -149,7 +155,8 @@ def calendar_callback_url(requested_origin: str | None, configured_origin: str, 
     if app_env != "production" and origin != configured_origin.rstrip("/"):
         if parts.scheme != "http" or parts.hostname not in {"localhost", "127.0.0.1"}:
             raise CalendarError("calendar callback origin is not allowed")
-    return origin + "/?calendar=connected"
+    # Composio appends status and connected_account_id to either URL.
+    return origin + (CALENDAR_POPUP_CALLBACK_PATH if popup else "/?calendar=connected")
 
 
 def _event_time(value: object, timezone: str) -> datetime | None:

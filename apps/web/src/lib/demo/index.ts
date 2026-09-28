@@ -1,11 +1,14 @@
 import { isDemoActive } from "../demo-mode";
 import { filterLedger, ledgerCsv } from "./fixtures/usage";
+import { registerActivity } from "./handlers/activity";
 import { registerCalendar } from "./handlers/calendar";
 import { registerKnowledge } from "./handlers/knowledge";
 import { registerMeetings } from "./handlers/meetings";
 import { registerMinutes } from "./handlers/minutes";
 import { registerPrep } from "./handlers/prep";
 import { registerProviders } from "./handlers/providers";
+import { registerTeams } from "./handlers/teams";
+import { registerSpeakers } from "./handlers/speakers";
 import { registerUsage } from "./handlers/usage";
 import { registerWorkspace } from "./handlers/workspace";
 import { notify, wait } from "./http";
@@ -24,7 +27,8 @@ let installed = false;
 
 function buildRouter(): DemoRouter {
   const router = new DemoRouter();
-  for (const register of [registerWorkspace, registerMeetings, registerMinutes, registerCalendar, registerPrep, registerKnowledge, registerProviders, registerUsage]) register(router);
+  // Teams first: its delivery-settings and send-configured routes understand internal_group_ids.
+  for (const register of [registerTeams, registerWorkspace, registerMeetings, registerMinutes, registerSpeakers, registerCalendar, registerPrep, registerKnowledge, registerProviders, registerUsage, registerActivity]) register(router);
   return router;
 }
 

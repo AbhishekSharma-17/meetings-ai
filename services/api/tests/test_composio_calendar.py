@@ -490,3 +490,30 @@ def test_manual_schedule_rejects_past_or_naive_times_without_creating_meeting(tm
             })
             assert response.status_code == 400, response.text
         assert client.get("/v1/meetings").json()["count"] == 0
+
+
+def test_popup_connect_uses_fixed_callback_page_on_the_same_allowed_origin(tmp_path, monkeypatch) -> None:
+    assert calendar_callback_url("http://localhost:59631", "http://localhost:3020", "development", popup=True) == \
+        "http://localhost:59631/calendar/connected?popup=1"
+    assert calendar_callback_url("https://attacker.example", "https://app.example", "production", popup=True) == \
+        "https://app.example/calendar/connected?popup=1"
+    with pytest.raises(CalendarError, match="not allowed"):
+        calendar_callback_url("https://attacker.example", "http://localhost:3020", "development", popup=True)
+
+    class FakeCalendar:
+        callback: str | None = None
+
+        async def connect(self, actor, provider, callback_url, alias=None):
+            self.callback = callback_url
+            return CalendarConnectResponse(redirect_url="https://connect.composio.dev/example")
+
+    monkeypatch.setenv("APP_BASE_URL", "https://meeting.genaiprotos.com")
+    fake = FakeCalendar()
+    app = create_app(database_url=f"sqlite+pysqlite:///{tmp_path / 'popup-callback.db'}",
+                     credential_key="test-only-credential-key", calendar_adapter=fake)
+    monkeypatch.setenv("APP_ENV", "production")
+    with TestClient(app) as client:
+        response = client.post("/v1/calendar/connect/googlecalendar",
+                               json={"callback_origin": "https://old.example", "popup": True})
+        assert response.status_code == 200
+        assert fake.callback == "https://meeting.genaiprotos.com/calendar/connected?popup=1"

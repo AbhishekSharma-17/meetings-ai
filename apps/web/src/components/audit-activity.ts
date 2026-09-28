@@ -1,7 +1,7 @@
 import {
   Archive, BookOpen, CalendarCheck, CalendarClock, CalendarPlus, CalendarX, CircleCheck, Cpu, Database, FilePen, FileText,
   FileUp, KeyRound, LogIn, type LucideIcon, MessageSquare, MessageSquareX, Mic, MicOff, PenLine, RefreshCw, Search, Send,
-  Settings2, ShieldAlert, ShieldCheck, Trash2, UserCog, UserMinus, UserPen, UserPlus, Users, Video,
+  Settings2, ShieldAlert, ShieldCheck, Trash2, UserCog, UserMinus, UserPen, UserPlus, Users, UsersRound, Video,
 } from "lucide-react";
 import type { AuditEvent } from "@/lib/types";
 
@@ -19,7 +19,7 @@ export const activityCategories: Record<ActivityCategory, { label: string; icon:
 };
 export const activityCategoryOrder = Object.keys(activityCategories) as ActivityCategory[];
 
-type TargetKind = "meeting" | "knowledge" | "member";
+type TargetKind = "meeting" | "knowledge" | "member" | "team";
 type Rule = {
   method?: string;
   path: string;
@@ -69,6 +69,9 @@ const rules: Rule[] = [
   { path: "/v1/knowledge/chat/stream", category: "knowledge", icon: MessageSquare, verb: "asked AI knowledge a question" },
   { path: "/v1/knowledge/search", category: "knowledge", icon: Search, verb: "searched AI knowledge" },
   { path: "/v1/workspace/invite", category: "people", icon: UserPlus, verb: "invited a new teammate" },
+  { method: "POST", path: "/v1/workspace/teams", category: "people", icon: UsersRound, verb: "created a recipient team" },
+  { method: "DELETE", path: "/v1/workspace/teams/{id}", category: "people", icon: Trash2, verb: "deleted the team", target: "team", unresolved: "deleted a recipient team" },
+  { path: "/v1/workspace/teams/{id}", category: "people", icon: UsersRound, verb: "updated the team", target: "team", unresolved: "updated a recipient team" },
   { path: "/v1/workspace/members/{id}/role", category: "people", icon: UserCog, verb: "changed the role of", target: "member", fallback: "a teammate" },
   { path: "/v1/workspace/members/{id}/temporary-password", category: "security", icon: KeyRound, verb: "reset sign-in access for", target: "member", fallback: "a teammate" },
   { method: "DELETE", path: "/v1/workspace/members/{id}", category: "people", icon: UserMinus, verb: "removed", target: "member", fallback: "a teammate", suffix: "from the workspace" },
@@ -96,6 +99,8 @@ export type ActivityLookup = {
   actorName(userId: string): string | null;
   meetingTitle(id: string): string | null;
   knowledgeName(id: string): string | null;
+  /** Optional: a team's current name. Deleted teams fall back to generic wording. */
+  teamName?(id: string): string | null;
 };
 
 export type ActivityEntry = {
@@ -156,6 +161,7 @@ function resolveTarget(kind: TargetKind | undefined, id: string | null, lookup: 
   if (!kind || !id) return null;
   if (kind === "meeting") return lookup.meetingTitle(id);
   if (kind === "knowledge") return lookup.knowledgeName(id);
+  if (kind === "team") return lookup.teamName?.(id) ?? null;
   return lookup.actorName(id);
 }
 

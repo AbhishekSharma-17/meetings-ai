@@ -2,8 +2,9 @@
 
 import type { ReactNode } from "react";
 import { Send } from "lucide-react";
-import type { ResendStatus } from "@/lib/types";
+import type { ResendStatus, Team, WorkspaceMember } from "@/lib/types";
 import { EmailChips } from "./ui/email-chips";
+import { TeamRecipientChips } from "./team-recipient-chips";
 import { Alert } from "./ui/feedback";
 import { SwitchField } from "./ui/switch";
 
@@ -19,8 +20,13 @@ function senderProblem(status: ResendStatus | null, statusError: boolean): strin
 }
 
 /** Recipients and options for sending the approved recap. Only the approved version is ever sent. */
-export function RecapDeliveryCard({ recipients, participantRecipients, shareParticipants, includeTranscript, resendStatus, resendStatusError, busy, canSend, messages, onRecipientsChange, onParticipantRecipientsChange, onShareParticipantsChange, onIncludeTranscriptChange, onSave, onSend }: {
+export function RecapDeliveryCard({ recipients, participantRecipients, shareParticipants, includeTranscript, resendStatus, resendStatusError, busy, canSend, messages, onRecipientsChange, onParticipantRecipientsChange, onShareParticipantsChange, onIncludeTranscriptChange, onSave, onSend, teams = [], members = [], groupIds = [], onGroupIdsChange }: {
   recipients: string;
+  /** Internal teams targeted by reference; expanded to their current members at send time. */
+  teams?: Team[];
+  members?: WorkspaceMember[];
+  groupIds?: string[];
+  onGroupIdsChange?(next: string[]): void;
   participantRecipients: string;
   shareParticipants: boolean;
   includeTranscript: boolean;
@@ -44,7 +50,9 @@ export function RecapDeliveryCard({ recipients, participantRecipients, sharePart
       {!resendStatus?.can_attempt_send ? <Alert tone="warning" role="status">{senderProblem(resendStatus, resendStatusError)}</Alert>
         : <p className="field-hint" role="status">Sender: {resendStatus.sender}. Domain verification is confirmed only when Resend accepts a send.</p>}
       <div className="field-row">
-        <EmailChips id="mom-internal-recipients" label="Internal team recipients" value={toList(recipients)} onChange={(list) => onRecipientsChange(toText(list))} placeholder="team@company.com" />
+        <TeamRecipientChips id="mom-internal-recipients" label="Internal team recipients" value={toList(recipients)} onChange={(list) => onRecipientsChange(toText(list))}
+          groupIds={groupIds} onGroupIdsChange={onGroupIdsChange ?? (() => undefined)} teams={teams} members={members}
+          placeholder={teams.length ? "team@company.com or @team" : "team@company.com"} />
         <EmailChips id="mom-participant-recipients" label="Participant recipients" labelSuffix={<span className="optional">optional</span>} value={toList(participantRecipients)} onChange={(list) => onParticipantRecipientsChange(toText(list))} placeholder="Exact addresses only" />
       </div>
       <div className="mom-delivery-switches">

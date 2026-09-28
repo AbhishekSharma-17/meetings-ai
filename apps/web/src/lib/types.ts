@@ -284,6 +284,20 @@ export type SpeakerIdentity = {
   confirmed_at: string;
 };
 
+export type SpeakerSuggestionSource = "invite" | "organizer" | "workspace_member";
+
+/** An advisory speaker → email match. Only a person's approval links the email. */
+export type SpeakerSuggestion = {
+  speaker: string;
+  status: "suggested" | "ambiguous";
+  email: string | null;
+  display_name: string | null;
+  source: SpeakerSuggestionSource | null;
+  confidence: "high" | "medium" | "low" | null;
+  reason: string;
+  alternatives: { email: string; display_name: string; source: SpeakerSuggestionSource }[];
+};
+
 export type MinutesStatus = "draft" | "approved" | "sent";
 
 export type ActionItem = {
@@ -336,7 +350,11 @@ export type EmailDelivery = {
   provider_message_id: string | null;
   error: string | null;
   created_at: string;
+  /** Teams expanded into `recipients`, as named and sized at send time. */
+  groups?: DeliveryGroupUsed[];
 };
+
+export type DeliveryGroupUsed = { id: string; name: string; member_count: number };
 
 export type ResendStatus = {
   api_key_configured: boolean;
@@ -399,6 +417,38 @@ export type MeetingDeliverySettings = {
   participant_recipients: string[];
   send_to_participants: boolean;
   include_transcript: boolean;
+  /** Internal teams targeted by reference; expanded to their current members when the recap is sent. */
+  internal_group_ids?: string[];
+};
+
+/** A workspace member or external address in an internal team. */
+export type TeamMember = {
+  email: string;
+  user_id: string | null;
+  display_name: string | null;
+  photo_url?: string | null;
+  /** False once the account has left the workspace; such entries are skipped when sending. */
+  active: boolean;
+};
+
+/** An internal team (recipient group) that recaps can target. */
+export type Team = {
+  id: string;
+  name: string;
+  description: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  member_count: number;
+  /** Meetings that currently target this team for their recap. */
+  meeting_count: number;
+  members: TeamMember[];
+};
+
+export type TeamInput = {
+  name: string;
+  description: string | null;
+  members: Array<{ user_id: string } | { email: string }>;
 };
 
 export type PostMeetingJob = {
@@ -611,4 +661,40 @@ export type ModelCatalogQuery = {
   profileId?: string;
   credentialId?: string;
   baseUrl?: string;
+};
+
+/* ---------- Notification center and background jobs ---------- */
+export type NotificationSeverity = "info" | "success" | "warning" | "danger";
+/** Where a notification leads: a shell view plus an optional record id (meeting, calendar event, knowledge base). */
+export type NotificationLinkView = "meeting" | "prep" | "knowledge" | "workspace" | "calendar" | "meetings" | string;
+export type AppNotification = {
+  id: string;
+  kind: string;
+  severity: NotificationSeverity;
+  title: string;
+  body: string | null;
+  link_view: NotificationLinkView | null;
+  link_id: string | null;
+  meeting_id: string | null;
+  created_at: string;
+  read_at: string | null;
+};
+export type NotificationPage = { items: AppNotification[]; next_cursor: string | null; unread_count: number };
+export type BackgroundJobKind = "prep_briefing" | "minutes_draft" | "knowledge_reindex" | string;
+export type BackgroundJobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+export type BackgroundJob = {
+  id: string;
+  kind: BackgroundJobKind;
+  subject_id: string | null;
+  status: BackgroundJobStatus;
+  stage: string | null;
+  message: string | null;
+  result: Record<string, unknown> | null;
+  error: string | null;
+  attempts: number;
+  user_id: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  updated_at: string;
 };

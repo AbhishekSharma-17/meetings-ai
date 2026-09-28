@@ -1,4 +1,4 @@
-import type { AuditEvent, BriefDocument, CalendarConnection, CalendarEvent, CalendarPeriod, CalendarSchedule, CalendarSnapshot, Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeTextProfile, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, MomGuidance, OrganizationBrief, PostMeetingJob, PrepReport, AiSettingsInput, AiSettingsView, CredentialTestResult, ModelCatalog, ModelCatalogQuery, ProfileKeyChoice, ProfileKind, ProviderProfile, ResendStatus, VaultCredential, VaultCredentialInput, VaultProviderType, RetentionPolicy, SpeakerIdentity, TextModelCatalog, TranscriptSegment, TranscriptionRoute, UsageSummary, Workspace, WorkspaceCalendarConnection, WorkspaceMember, WorkspaceOperations, WorkspaceOption } from "./types";
+import type { AuditEvent, BriefDocument, CalendarConnection, CalendarEvent, CalendarPeriod, CalendarSchedule, CalendarSnapshot, Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeTextProfile, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, MomGuidance, OrganizationBrief, PostMeetingJob, PrepReport, AiSettingsInput, AiSettingsView, CredentialTestResult, ModelCatalog, ModelCatalogQuery, ProfileKeyChoice, ProfileKind, ProviderProfile, ResendStatus, VaultCredential, VaultCredentialInput, VaultProviderType, RetentionPolicy, SpeakerIdentity, SpeakerSuggestion, Team, TeamInput, TextModelCatalog, TranscriptSegment, TranscriptionRoute, UsageSummary, Workspace, WorkspaceCalendarConnection, WorkspaceMember, WorkspaceOperations, WorkspaceOption } from "./types";
 
 export interface MeetingsService {
   getSession(): Promise<boolean>;
@@ -25,6 +25,10 @@ export interface MeetingsService {
   uploadBriefDocument(file: File): Promise<BriefDocument>;
   deleteBriefDocument(id: string): Promise<void>;
   listWorkspaceMembers(): Promise<WorkspaceMember[]>;
+  listTeams(): Promise<Team[]>;
+  createTeam(input: TeamInput): Promise<Team>;
+  updateTeam(id: string, input: Partial<TeamInput>): Promise<Team>;
+  deleteTeam(id: string): Promise<void>;
   listWorkspaceAudit(): Promise<AuditEvent[]>;
   getWorkspaceOperations(): Promise<WorkspaceOperations>;
   getWorkspaceUsage(): Promise<UsageSummary>;
@@ -52,7 +56,8 @@ export interface MeetingsService {
   scheduleMeeting(input: CreateMeetingInput, startsAt: string): Promise<MeetingDetail>;
   listCalendarConnections(): Promise<CalendarConnection[]>;
   listWorkspaceCalendarConnections(): Promise<WorkspaceCalendarConnection[]>;
-  connectCalendar(provider: CalendarConnection["provider"], alias?: string): Promise<string>;
+  /** Returns the provider consent URL. `popup` asks for the callback page that reports back to the opening tab. */
+  connectCalendar(provider: CalendarConnection["provider"], alias?: string, options?: { popup?: boolean }): Promise<string>;
   renameCalendarConnection(connectionId: string, alias: string): Promise<CalendarConnection>;
   disconnectCalendar(connectionId: string): Promise<void>;
   scanCalendar(connectionId: string, period: CalendarPeriod, timezone: string): Promise<CalendarEvent[]>;
@@ -78,6 +83,8 @@ export interface MeetingsService {
   getParticipants(id: string): Promise<MeetingParticipants>;
   getSpeakerIdentities(id: string): Promise<SpeakerIdentity[]>;
   saveSpeakerIdentity(id: string, speaker: string, email: string | null): Promise<SpeakerIdentity[]>;
+  getSpeakerSuggestions(id: string): Promise<SpeakerSuggestion[]>;
+  saveSpeakerIdentities(id: string, identities: { speaker: string; email: string }[]): Promise<SpeakerIdentity[]>;
   correctSpeaker(id: string, segmentId: string, displayName: string | null, applyToRawLabel: boolean): Promise<TranscriptSegment[]>;
   getMinutes(id: string): Promise<MeetingMinutes | null>;
   getMomGuidance(id: string): Promise<MomGuidance>;
@@ -236,6 +243,10 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
+}
+
+function withTeamPhotos(team: Team): Team {
+  return { ...team, members: team.members.map(withPhoto) };
 }
 
 /** Profile photo URLs are API paths; resolve them against the configured API origin. */
@@ -456,6 +467,22 @@ class HttpMeetingsService implements MeetingsService {
     return (await api<WorkspaceMember[]>("/v1/workspace/members")).map(withPhoto);
   }
 
+  async listTeams(): Promise<Team[]> {
+    return (await api<Team[]>("/v1/workspace/teams")).map(withTeamPhotos);
+  }
+
+  async createTeam(input: TeamInput): Promise<Team> {
+    return withTeamPhotos(await api<Team>("/v1/workspace/teams", { method: "POST", body: JSON.stringify(input) }));
+  }
+
+  async updateTeam(id: string, input: Partial<TeamInput>): Promise<Team> {
+    return withTeamPhotos(await api<Team>(`/v1/workspace/teams/${id}`, { method: "PATCH", body: JSON.stringify(input) }));
+  }
+
+  async deleteTeam(id: string): Promise<void> {
+    await api<void>(`/v1/workspace/teams/${id}`, { method: "DELETE" });
+  }
+
   async listWorkspaceAudit(): Promise<AuditEvent[]> {
     return api<AuditEvent[]>("/v1/workspace/audit?limit=30");
   }
@@ -649,9 +676,9 @@ class HttpMeetingsService implements MeetingsService {
     return api<CalendarConnection[]>("/v1/calendar/connections");
   }
 
-  async connectCalendar(provider: CalendarConnection["provider"], alias = ""): Promise<string> {
+  async connectCalendar(provider: CalendarConnection["provider"], alias = "", options: { popup?: boolean } = {}): Promise<string> {
     const result = await api<{ redirect_url: string }>(`/v1/calendar/connect/${provider}`, {
-      method: "POST", body: JSON.stringify({ callback_origin: window.location.origin, alias: alias.trim() || null }),
+      method: "POST", body: JSON.stringify({ callback_origin: window.location.origin, alias: alias.trim() || null, popup: Boolean(options.popup) }),
     });
     return result.redirect_url;
   }
@@ -793,6 +820,16 @@ class HttpMeetingsService implements MeetingsService {
   async saveSpeakerIdentity(id: string, speaker: string, email: string | null): Promise<SpeakerIdentity[]> {
     return api<SpeakerIdentity[]>(`/v1/meetings/${id}/speaker-identities`, {
       method: "PUT", body: JSON.stringify({ speaker, email }),
+    });
+  }
+
+  async getSpeakerSuggestions(id: string): Promise<SpeakerSuggestion[]> {
+    return api<SpeakerSuggestion[]>(`/v1/meetings/${id}/speaker-suggestions`);
+  }
+
+  async saveSpeakerIdentities(id: string, identities: { speaker: string; email: string }[]): Promise<SpeakerIdentity[]> {
+    return api<SpeakerIdentity[]>(`/v1/meetings/${id}/speaker-identities/bulk`, {
+      method: "POST", body: JSON.stringify({ identities }),
     });
   }
 
@@ -1109,5 +1146,52 @@ export const storageService = {
   },
   purge(request: StoragePurgeRequestT): Promise<StoragePurgeResultT> {
     return api<StoragePurgeResultT>("/v1/workspace/storage/purge", { method: "POST", body: JSON.stringify(request) });
+  },
+};
+
+/* ---------- Notification center and background jobs (every role; own records only) ---------- */
+type AppNotificationT = import("./types").AppNotification;
+type NotificationPageT = import("./types").NotificationPage;
+type BackgroundJobT = import("./types").BackgroundJob;
+
+export const notificationService = {
+  list(options: { unread?: boolean; limit?: number; cursor?: string | null } = {}): Promise<NotificationPageT> {
+    return api<NotificationPageT>(`/v1/notifications${usageQuery({}, { unread: options.unread ? "true" : null, limit: options.limit ?? 30, cursor: options.cursor ?? null })}`);
+  },
+  async unreadCount(): Promise<number> {
+    return (await api<{ unread_count: number }>("/v1/notifications/unread-count")).unread_count;
+  },
+  markRead(id: string): Promise<AppNotificationT> {
+    return api<AppNotificationT>(`/v1/notifications/${id}/read`, { method: "POST" });
+  },
+  async markAllRead(): Promise<number> {
+    return (await api<{ unread_count: number }>("/v1/notifications/read-all", { method: "POST" })).unread_count;
+  },
+  remove(id: string): Promise<void> {
+    return api<void>(`/v1/notifications/${id}`, { method: "DELETE" });
+  },
+};
+
+export const jobService = {
+  get(id: string): Promise<BackgroundJobT> {
+    return api<BackgroundJobT>(`/v1/background-jobs/${id}`);
+  },
+  /** The newest active job for one subject (e.g. a calendar event or meeting), or null. */
+  async active(kind: string, subjectId: string): Promise<BackgroundJobT | null> {
+    const jobs = await api<BackgroundJobT[]>(`/v1/background-jobs${usageQuery({}, { kind, subject_id: subjectId, active: "true", limit: 1 })}`);
+    return jobs[0] ?? null;
+  },
+  cancel(id: string): Promise<BackgroundJobT> {
+    return api<BackgroundJobT>(`/v1/background-jobs/${id}/cancel`, { method: "POST" });
+  },
+  /** Starts a briefing in the background (or returns the one already running for this event). */
+  startPrep(eventId: string, input: PrepGenerateInputT): Promise<BackgroundJobT> {
+    return api<BackgroundJobT>(`/v1/calendar/events/${eventId}/prep/jobs`, { method: "POST", body: JSON.stringify(input) });
+  },
+  startMinutes(meetingId: string): Promise<BackgroundJobT> {
+    return api<BackgroundJobT>(`/v1/meetings/${meetingId}/minutes/jobs`, { method: "POST" });
+  },
+  startReindex(baseId: string): Promise<BackgroundJobT> {
+    return api<BackgroundJobT>(`/v1/knowledge-bases/${baseId}/reindex/jobs`, { method: "POST" });
   },
 };

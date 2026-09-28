@@ -61,8 +61,11 @@ from .database import (
     TranscriptSpeakerCorrectionRow,
     TranscriptReviewStateRow,
     MinutesSourceRow,
+    MeetingDeliveryGroupRow,
+    EmailDeliveryGroupRow,
+    RecipientGroupRow,
 )
-from .repository import MeetingNotFoundError, MinutesNotFoundError, ProfileNotFoundError
+from .repository import MeetingNotFoundError, MinutesNotFoundError, ProfileNotFoundError, RecipientGroupNotFoundError
 from .security import CredentialCipher
 from .tenant import current_organization_id
 
@@ -378,7 +381,8 @@ class SQLAlchemyRepository:
                 MeetingDeliverySettingsRow, PostMeetingJobRow, TranscriptSegmentRow,
                 TranscriptSegmentMetadataRow, TranscriptSpeakerCorrectionRow,
                 MeetingSpeakerIdentityRow, TranscriptReviewStateRow, MinutesSourceRow,
-                MeetingMinutesEvidenceRow, MeetingMinutesRow, EmailDeliveryRow,
+                MeetingMinutesEvidenceRow, MeetingMinutesRow, MeetingDeliveryGroupRow,
+                EmailDeliveryGroupRow, EmailDeliveryRow,
                 MeetingTranscriptionRouteRow, MeetingTenantRow,
             ):
                 session.execute(delete(model).where(model.meeting_id == key))
@@ -395,14 +399,40 @@ class SQLAlchemyRepository:
         self.get_meeting(meeting_id)
         with self.database.session_factory() as session:
             row = session.get(MeetingDeliverySettingsRow, str(meeting_id))
+            group_ids = session.execute(
+                select(MeetingDeliveryGroupRow.group_id)
+                .join(RecipientGroupRow, RecipientGroupRow.id == MeetingDeliveryGroupRow.group_id)
+                .where(MeetingDeliveryGroupRow.meeting_id == str(meeting_id),
+                       RecipientGroupRow.organization_id == str(current_organization_id()))
+                .order_by(RecipientGroupRow.name_key)
+            ).scalars().all()
             if row is None:
-                return MeetingDeliverySettings()
+                return MeetingDeliverySettings(internal_group_ids=[UUID(item) for item in group_ids])
             return MeetingDeliverySettings(
                 internal_recipients=row.internal_recipients,
                 participant_recipients=row.participant_recipients,
                 send_to_participants=row.send_to_participants,
                 include_transcript=row.include_transcript,
+                internal_group_ids=[UUID(item) for item in group_ids],
             )
+
+    def require_recipient_groups(self, group_ids: list[UUID]) -> None:
+        """Raise unless every team id belongs to the current workspace."""
+        if not group_ids:
+            return
+        with self.database.session_factory() as session:
+            self._require_recipient_groups(session, group_ids)
+
+    @staticmethod
+    def _require_recipient_groups(session, group_ids: list[UUID]) -> None:
+        wanted = {str(item) for item in group_ids}
+        found = set(session.execute(select(RecipientGroupRow.id).where(
+            RecipientGroupRow.id.in_(wanted),
+            RecipientGroupRow.organization_id == str(current_organization_id()),
+        )).scalars().all())
+        missing = wanted - found
+        if missing:
+            raise RecipientGroupNotFoundError(f"team not found: {sorted(missing)[0]}")
 
     def get_mom_guidance(self, meeting_id: UUID) -> MomGuidance:
         self.get_meeting(meeting_id)
@@ -438,6 +468,10 @@ class SQLAlchemyRepository:
             row.participant_recipients = settings.participant_recipients
             row.send_to_participants = settings.send_to_participants
             row.include_transcript = settings.include_transcript
+            self._require_recipient_groups(session, settings.internal_group_ids)
+            session.execute(delete(MeetingDeliveryGroupRow).where(MeetingDeliveryGroupRow.meeting_id == str(meeting_id)))
+            session.add_all(MeetingDeliveryGroupRow(meeting_id=str(meeting_id), group_id=str(group_id))
+                            for group_id in settings.internal_group_ids)
         return settings
 
     def get_post_meeting_job(self, meeting_id: UUID) -> PostMeetingJobRow | None:
@@ -768,6 +802,11 @@ class SQLAlchemyRepository:
                     created_at=delivery.created_at,
                 )
             )
+            session.flush()
+            session.add_all(EmailDeliveryGroupRow(
+                delivery_id=str(delivery.id), group_id=str(group["id"]), meeting_id=str(delivery.meeting_id),
+                group_name=str(group["name"]), member_count=int(group["member_count"]),
+            ) for group in delivery.groups)
         return delivery
 
     def save_meeting(self, meeting: Meeting) -> Meeting:

@@ -8,6 +8,9 @@ import { meetingsService } from "@/lib/meetings-service";
 import type { CachedCalendarEvent, CalendarConnection, CalendarSchedule, CalendarSnapshot } from "@/lib/types";
 import type { CalendarSelection } from "./calendar-import-dialog";
 import { CalendarIntegrations } from "./calendar-integrations";
+import { CalendarConnectWaiting } from "./calendar-connect-waiting";
+import { SettingsToast, type SettingsNotice } from "./settings-toast";
+import { useCalendarConnect } from "./use-calendar-connect";
 import { findEntry, mergeCalendarEvents, type CalendarEntry } from "./calendar-events";
 import { DayAgenda, EventDetail, MonthGrid, dayKey, eventDay } from "./calendar-month";
 import { browserTimeZone, calendarProviderNames } from "./calendar-providers";
@@ -91,6 +94,7 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
   const [busy, setBusy] = useState(false);
   const [syncingIds, setSyncingIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<SettingsNotice | null>(null);
   const autoRefreshKey = useRef<string | null>(null);
   const rangeDays = (Date.parse(`${endDate}T00:00:00Z`) - Date.parse(`${startDate}T00:00:00Z`)) / 86_400_000 + 1;
   const rangeValid = Number.isFinite(rangeDays) && rangeDays >= 1 && rangeDays <= 90;
@@ -216,10 +220,25 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
     finally { setSyncingIds((current) => current.filter((id) => id !== connectionId)); }
   }
 
-  async function connect(provider: CalendarConnection["provider"], alias: string) {
-    setBusy(true); setError(null);
-    try { window.location.assign(await meetingsService.connectCalendar(provider, alias)); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "Could not connect this account."); setBusy(false); }
+  const connectFlow = useCalendarConnect({
+    onConnected: (next, connectionId, provider) => {
+      setConnections(next);
+      const added = next.find((item) => item.id === connectionId);
+      setNotice({ tone: "success", text: added ? `${calendarProviderNames[provider]} connected: ${added.label}. Loading its meetings…` : `${calendarProviderNames[provider]} connected.` });
+      if (added?.status === "ACTIVE") {
+        // Same outcome as returning from the provider in this tab: the new account is selected.
+        setAccountFilter(added.id);
+        void syncAccount(added.id);
+      }
+    },
+    onError: (message) => { setBusy(false); setError(message); },
+    onRedirect: () => setBusy(true),
+  });
+
+  /** Called from the alias dialog's submit, so the new tab opens inside the user's gesture. */
+  function connect(provider: CalendarConnection["provider"], alias: string) {
+    setError(null); setNotice(null);
+    connectFlow.start(provider, alias, connections.map((item) => item.id));
   }
 
   async function rename(connectionId: string, alias: string): Promise<boolean> {
@@ -267,6 +286,7 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
         <Tabs.Tab value="integrations"><Plug aria-hidden="true" />Integrations <span className="count">{active.length}</span></Tabs.Tab>
       </Tabs.List>
       {error ? <p className="form-error calendar-error" role="alert">{error}</p> : null}
+      <CalendarConnectWaiting wait={connectFlow.wait} onReopen={connectFlow.reopen} onRecheck={connectFlow.recheck} onCancel={connectFlow.cancel} />
 
       <Tabs.Panel value="calendar" className="calendar-panel">
         <div className="calendar-toolbar">
@@ -294,9 +314,10 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
       </Tabs.Panel>
 
       <Tabs.Panel value="integrations">
-        <CalendarIntegrations connections={connections} syncs={snapshot.syncs} busy={busy} syncingIds={syncingIds} canSync={rangeValid} onSync={(connectionId) => void syncAccount(connectionId)} onConnect={(provider, alias) => void connect(provider, alias)} onRename={rename} onDisconnect={disconnect} />
+        <CalendarIntegrations connections={connections} syncs={snapshot.syncs} busy={busy} connecting={connectFlow.wait !== null} syncingIds={syncingIds} canSync={rangeValid} onSync={(connectionId) => void syncAccount(connectionId)} onConnect={connect} onRename={rename} onDisconnect={disconnect} />
       </Tabs.Panel>
     </Tabs.Root>
+    <SettingsToast notice={notice} onDismiss={() => setNotice(null)} />
   </section>;
 }
 

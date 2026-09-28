@@ -116,3 +116,5 @@ class EmailDelivery:
     error: str | None = None
     id: UUID = field(default_factory=uuid4)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    # Teams expanded into `recipients`: [{"id", "name", "member_count"}].
+    groups: list[dict[str, object]] = field(default_factory=list)

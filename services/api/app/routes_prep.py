@@ -38,7 +38,8 @@ def _http_error(exc: Exception) -> HTTPException:
 
 
 def register_prep_routes(app: FastAPI, *, meeting_prep: MeetingPrepService) -> None:
-    prep_limit = prep_generation_limiter()
+    # Shared with the background-job route (routes_jobs) so every generation path counts once.
+    prep_limit = app.state.prep_limiter = prep_generation_limiter()
 
     @app.get("/v1/calendar/events/{event_id}/prep", response_model=PrepReportV2 | PrepReport | None)
     def latest_meeting_prep(event_id: UUID, request: Request) -> PrepReportV2 | PrepReport | None:

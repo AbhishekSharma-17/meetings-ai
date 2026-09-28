@@ -7,6 +7,7 @@ from hashlib import sha256
 from datetime import UTC, datetime
 from html import escape
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 from meetings_contracts import (
@@ -24,6 +25,7 @@ from pydantic import ValidationError
 
 from .adapters.base import ProviderExecutionError
 from .adapters.resend import EmailDeliveryError, ResendAdapter
+from .notification_events import NO_EVENTS
 from .repository import MinutesNotFoundError
 from .service import ProviderProfileService, ProviderSelectionError
 
@@ -48,6 +50,9 @@ _CAPTURE_IN_PROGRESS = {
 
 
 class MinutesService:
+    # Notification hooks (NotificationEvents); a no-op unless wired in create_app.
+    events: Any = NO_EVENTS
+
     def __init__(
         self,
         repository: object,
@@ -208,8 +213,10 @@ class MinutesService:
         return self.repository.save_minutes(minutes)
 
     async def send(
-        self, meeting_id: UUID, request: MinutesEmailRequest
+        self, meeting_id: UUID, request: MinutesEmailRequest,
+        groups: list[dict[str, object]] | None = None,
     ) -> EmailDelivery:
+        """Send the approved MOM. `groups` records which teams were expanded into the recipients."""
         meeting = self.repository.get_meeting(meeting_id)
         minutes = self.get(meeting_id)
         if minutes.status is not MinutesStatus.APPROVED:
@@ -222,6 +229,7 @@ class MinutesService:
             meeting_id=meeting_id,
             recipients=request.recipients,
             status="failed",
+            groups=list(groups or []),
         )
         try:
             delivery_identity = json.dumps(
@@ -243,6 +251,7 @@ class MinutesService:
             minutes.updated_at = datetime.now(UTC)
             self.repository.save_email_delivery(delivery)
             self.repository.save_minutes(minutes)
+            self.events.recap_failed(meeting_id, delivery.id, delivery.error)
             raise
         delivery.status = "sent"
         self.repository.save_email_delivery(delivery)
@@ -252,6 +261,7 @@ class MinutesService:
         minutes.updated_at = now
         minutes.last_error = None
         self.repository.save_minutes(minutes)
+        self.events.recap_sent(meeting_id, delivery.id, len(delivery.recipients))
         return delivery
 
     def _require_current_transcript(self, meeting_id: UUID) -> None:

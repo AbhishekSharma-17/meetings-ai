@@ -3,10 +3,18 @@
 import { useState, type ReactNode } from "react";
 import { Collapsible } from "@base-ui/react/collapsible";
 import { ChevronDown } from "lucide-react";
-import type { CalendarEvent, KnowledgeBase } from "@/lib/types";
+import type { CalendarEvent, KnowledgeBase, Team, WorkspaceMember } from "@/lib/types";
+import { ChipInput } from "./ui/chip-input";
 import { EmailChips, mergeEmails, PersonChips } from "./ui/email-chips";
 import { SwitchField } from "./ui/switch";
 import { UiSelect } from "./ui-select";
+import { TeamRecipientChips } from "./team-recipient-chips";
+
+/** Server limits (MeetingCreate / MomGuidance): 12 tags of 2–50 characters, 8 focus fields of 1–80. */
+export const MAX_MEETING_TAGS = 12;
+export const MAX_TAG_LENGTH = 50;
+export const MAX_FOCUS_FIELDS = 8;
+export const MAX_FOCUS_LENGTH = 80;
 
 export type MomTemplate = "standard" | "actions" | "client" | "discovery" | "custom";
 
@@ -17,10 +25,6 @@ const momTemplates: { value: MomTemplate; label: string }[] = [
   { value: "discovery", label: "Discovery notes" },
   { value: "custom", label: "Custom focus" },
 ];
-
-function splitList(value: string): string[] {
-  return value.split(/[,;\n]+/).map((item) => item.trim()).filter(Boolean);
-}
 
 /** Calendar details carried into the dialog. Invitees are listed, never treated as verified. */
 export function SourcePreview({ event }: { event: CalendarEvent }) {
@@ -35,7 +39,7 @@ export function SourcePreview({ event }: { event: CalendarEvent }) {
   </div>;
 }
 
-export function KnowledgeOptions({ disabled, bases, basesError, enabled, onEnabledChange, selectedBaseId, onSelectBase, newBaseName, onNewBaseNameChange, tagInput, onTagInputChange }: {
+export function KnowledgeOptions({ disabled, bases, basesError, enabled, onEnabledChange, selectedBaseId, onSelectBase, newBaseName, onNewBaseNameChange, tags, onTagsChange }: {
   disabled: boolean;
   bases: KnowledgeBase[];
   basesError: string | null;
@@ -45,12 +49,11 @@ export function KnowledgeOptions({ disabled, bases, basesError, enabled, onEnabl
   onSelectBase(value: string): void;
   newBaseName: string;
   onNewBaseNameChange(value: string): void;
-  tagInput: string;
-  onTagInputChange(value: string): void;
+  tags: string[];
+  onTagsChange(value: string[]): void;
 }) {
   const trimmedName = newBaseName.trim().toLocaleLowerCase();
   const reusesBase = Boolean(trimmedName) && bases.some((base) => base.name.trim().toLocaleLowerCase() === trimmedName);
-  const tags = splitList(tagInput);
   return <section className={enabled ? "nm-section nm-knowledge enabled" : "nm-section nm-knowledge"} aria-label="AI knowledge">
     <SwitchField id="knowledge-enabled" label="Add this meeting to AI knowledge" description="Index its transcript and approved minutes for AI search after the meeting." checked={enabled} onChange={onEnabledChange} disabled={disabled} />
     <div className="nm-knowledge-fields">
@@ -64,11 +67,9 @@ export function KnowledgeOptions({ disabled, bases, basesError, enabled, onEnabl
       </div>
       {reusesBase ? <p className="field-hint" role="status">This knowledge base already exists. The meeting will be added to it.</p> : null}
       {basesError ? <p className="form-error" role="alert">{basesError}</p> : null}
-      <div className="field">
-        <label htmlFor="meeting-tags">Knowledge tags <span className="optional">comma-separated</span></label>
-        <input id="meeting-tags" name="meeting-tags" value={tagInput} onChange={(event) => onTagInputChange(event.target.value)} placeholder="e.g. discovery, roadmap, Acme" disabled={disabled} />
-        {tags.length ? <ul className="tag-list" aria-label="Tags to add">{tags.map((item, index) => <li className="tag" key={`${item}:${index}`}>#{item}</li>)}</ul> : null}
-      </div>
+      <ChipInput id="meeting-tags" name="meeting-tags" kind="tag" label="Knowledge tags" labelSuffix={<span className="optional">optional</span>}
+        value={tags} onChange={onTagsChange} placeholder="e.g. discovery, roadmap, Acme" disabled={disabled}
+        maxItems={MAX_MEETING_TAGS} maxItemLength={MAX_TAG_LENGTH} />
       <p className="field-hint">One knowledge base per meeting. A new name creates a base; an existing name reuses it.</p>
     </div>
   </section>;
@@ -90,20 +91,20 @@ export function MinutesOptions({ disabled, template, onTemplateChange, focus, on
   disabled: boolean;
   template: MomTemplate;
   onTemplateChange(value: MomTemplate): void;
-  focus: string;
-  onFocusChange(value: string): void;
+  focus: string[];
+  onFocusChange(value: string[]): void;
   instructions: string;
   onInstructionsChange(value: string): void;
 }) {
-  const summary = momTemplates.find((item) => item.value === template)?.label ?? "Balanced meeting minutes";
+  const templateLabel = momTemplates.find((item) => item.value === template)?.label ?? "Balanced meeting minutes";
+  const summary = focus.length ? `${templateLabel} · ${focus.length} focus field${focus.length === 1 ? "" : "s"}` : templateLabel;
   return <CollapsibleSection title="Minutes format" summary={summary}>
     <div className="form-stack">
       <div className="field-row">
         <UiSelect id="mom-template" label="Template" value={template} onChange={(value) => onTemplateChange(value as MomTemplate)} options={momTemplates} disabled={disabled} />
-        <div className="field">
-          <label htmlFor="mom-focus">Additional fields to cover <span className="optional">comma-separated</span></label>
-          <input id="mom-focus" value={focus} onChange={(event) => onFocusChange(event.target.value)} placeholder="e.g. Risks, Budget, Dependencies" disabled={disabled} />
-        </div>
+        <ChipInput id="mom-focus" name="mom-focus" kind="text" label="Additional fields to cover" labelSuffix={<span className="optional">optional</span>}
+          value={focus} onChange={onFocusChange} placeholder="e.g. Risks, Budget, Dependencies" disabled={disabled}
+          maxItems={MAX_FOCUS_FIELDS} maxItemLength={MAX_FOCUS_LENGTH} />
       </div>
       <div className="field">
         <label htmlFor="mom-instructions">Organizer guidance <span className="optional">optional</span></label>
@@ -114,23 +115,35 @@ export function MinutesOptions({ disabled, template, onTemplateChange, focus, on
   </CollapsibleSection>;
 }
 
-export function DeliveryOptions({ disabled, defaultParticipants }: { disabled: boolean; defaultParticipants: string[] }) {
+export function DeliveryOptions({ disabled, defaultParticipants, teams, members, groupIds, onGroupIdsChange }: {
+  disabled: boolean;
+  defaultParticipants: string[];
+  teams: Team[];
+  members: WorkspaceMember[];
+  groupIds: string[];
+  onGroupIdsChange(next: string[]): void;
+}) {
   const [internal, setInternal] = useState<string[]>([]);
   const [participants, setParticipants] = useState<string[]>(() => mergeEmails([], defaultParticipants));
-  const summary = internal.length + participants.length
-    ? `${internal.length + participants.length} recipient${internal.length + participants.length === 1 ? "" : "s"} · sent after approval`
-    : "Sent only after you approve the minutes";
+  const people = internal.length + participants.length;
+  const audience = [
+    groupIds.length ? `${groupIds.length} team${groupIds.length === 1 ? "" : "s"}` : null,
+    people ? `${people} recipient${people === 1 ? "" : "s"}` : null,
+  ].filter(Boolean).join(" + ");
+  const summary = audience ? `${audience} · sent after approval` : "Sent only after you approve the minutes";
   return <CollapsibleSection title="Recap delivery options" summary={summary}>
     <div className="form-stack">
       <div className="field-row">
-        <EmailChips id="internal-recipients" name="internal-recipients" label="Internal team email addresses" value={internal} onChange={setInternal} placeholder="team@company.com" disabled={disabled} />
+        <TeamRecipientChips id="internal-recipients" name="internal-recipients" groupName="internal-group-ids" label="Internal team email addresses"
+          value={internal} onChange={setInternal} groupIds={groupIds} onGroupIdsChange={onGroupIdsChange} teams={teams} members={members}
+          placeholder={teams.length ? "team@company.com or @team" : "team@company.com"} disabled={disabled} />
         <EmailChips id="participant-recipients" name="participant-recipients" label="Participant email addresses" value={participants} onChange={setParticipants} placeholder="Exact addresses only" disabled={disabled} />
       </div>
       <div className="stack nm-delivery-checks">
         <label className="check-label"><input type="checkbox" name="share-participants" disabled={disabled} /> Also send to listed participants after approval</label>
         <label className="check-label"><input type="checkbox" name="include-transcript" disabled={disabled} /> Include full transcript in the email</label>
       </div>
-      <p className="field-hint">Press Enter after each address or paste a list. Recipients are saved with the meeting; nothing is emailed until you approve its minutes.</p>
+      <p className="field-hint">Press Enter after each address or paste a list. Teams are expanded to their current members when the recap is sent; nothing is emailed until you approve the minutes.</p>
     </div>
   </CollapsibleSection>;
 }

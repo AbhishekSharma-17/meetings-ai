@@ -67,6 +67,11 @@ def org_conversations(org: str) -> Any:
     return select(conversations.c.id).where(conversations.c.knowledge_base_id.in_(org_bases(org)))
 
 
+def org_groups(org: str) -> Any:
+    groups = T["recipient_groups"]
+    return select(groups.c.id).where(groups.c.organization_id == org)
+
+
 def org_profiles(org: str) -> Any:
     tenants = T["provider_tenants"]
     return select(tenants.c.provider_id).where(tenants.c.organization_id == org)
@@ -105,7 +110,7 @@ _MEETING_TABLES = (
     "calendar_schedules", "meeting_delivery_settings", "post_meeting_jobs", "meeting_mom_guidance",
     "transcript_segments", "transcript_segment_metadata", "transcript_speaker_corrections",
     "meeting_speaker_identities", "transcript_review_state", "minutes_source", "meeting_minutes_evidence",
-    "meeting_minutes", "email_deliveries",
+    "meeting_minutes", "meeting_delivery_groups", "email_delivery_groups", "email_deliveries",
 )
 
 CATEGORIES: tuple[CategorySpec, ...] = (
@@ -154,7 +159,9 @@ CATEGORIES: tuple[CategorySpec, ...] = (
                   TableSpec("provider_credentials", _org("provider_credentials")),
                   TableSpec("provider_profile_credentials", _in("provider_profile_credentials", "profile_id", org_profiles)),
                   TableSpec("organization_ai_settings", _org("organization_ai_settings")),
-                  TableSpec("workspace_retention", _org("workspace_retention"))),
+                  TableSpec("workspace_retention", _org("workspace_retention")),
+                  TableSpec("recipient_groups", _org("recipient_groups")),
+                  TableSpec("recipient_group_members", _in("recipient_group_members", "group_id", org_groups))),
                  purgeable=False),
 )
 CATEGORY_BY_KEY = {category.key: category for category in CATEGORIES}

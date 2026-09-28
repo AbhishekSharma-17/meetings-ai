@@ -52,3 +52,7 @@ class InMemoryProviderRepository:
     def get_default(self, capability: Capability) -> DefaultSelection | None:
         with self._lock:
             return self._defaults.get(capability)
+
+
+class RecipientGroupNotFoundError(LookupError):
+    """A team id that does not exist in the caller's workspace."""

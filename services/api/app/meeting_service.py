@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import Any
 from hashlib import sha256
 from uuid import UUID
 from urllib.parse import urlsplit
@@ -18,6 +19,8 @@ from meetings_contracts import (
 
 from .adapters.vexa import VexaAPIError, VexaCaptureAdapter
 from .meeting_links import parse_meeting_url
+from .notification_events import NO_EVENTS
+from .repository import RecipientGroupNotFoundError
 from .service import ProviderProfileService
 from .stt_route import signed_stt_override
 
@@ -36,6 +39,9 @@ _TERMINAL_STATUSES = {MeetingStatus.COMPLETED, MeetingStatus.FAILED}
 
 
 class MeetingService:
+    # Notification hooks (NotificationEvents); a no-op unless wired in create_app.
+    events: Any = NO_EVENTS
+
     def __init__(
         self, repository: object, vexa: VexaCaptureAdapter,
         providers: ProviderProfileService | None = None,
@@ -58,6 +64,13 @@ class MeetingService:
         platform, native_id = parsed
         if payload.knowledge_base_id and self.knowledge_bases:
             self.knowledge_bases.get(payload.knowledge_base_id)
+        require_groups = getattr(self.repository, "require_recipient_groups", None)
+        if payload.delivery_settings.internal_group_ids and require_groups:
+            try:
+                require_groups(payload.delivery_settings.internal_group_ids)
+            except RecipientGroupNotFoundError as exc:
+                # Checked before anything is saved, so a stale team id never leaves a half-created meeting.
+                raise MeetingValidationError(str(exc)) from exc
         meeting = Meeting(
             meeting_url=meeting_url,
             title=payload.title,
@@ -163,6 +176,7 @@ class MeetingService:
             meeting.last_error = str(exc)
             meeting.updated_at = datetime.now(UTC)
             self.repository.save_meeting(meeting)
+            self.events.meeting_status(meeting)
             raise
 
         meeting.platform = _enum_or_current(
@@ -184,6 +198,7 @@ class MeetingService:
             )
         else:
             self.repository.clear_transcription_route(meeting.id)
+        self.events.meeting_status(saved)
         return saved
 
     async def refresh(self, meeting_id: UUID) -> Meeting:
@@ -198,7 +213,9 @@ class MeetingService:
         meeting.last_refreshed_at = now
         meeting.updated_at = now
         meeting.last_error = _upstream_failure(upstream, meeting.status)
-        return self.repository.save_meeting(meeting)
+        saved = self.repository.save_meeting(meeting)
+        self.events.meeting_status(saved)
+        return saved
 
     async def stop(self, meeting_id: UUID) -> Meeting:
         meeting = self.repository.get_meeting(meeting_id)
@@ -242,6 +259,7 @@ class MeetingService:
         meeting.last_refreshed_at = now
         meeting.updated_at = now
         self.repository.save_meeting(meeting)
+        self.events.meeting_status(meeting)
         segments = [
             _segment(raw)
             for raw in upstream.get("segments", [])

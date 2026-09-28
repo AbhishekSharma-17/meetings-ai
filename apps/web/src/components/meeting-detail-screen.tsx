@@ -245,7 +245,7 @@ export function MeetingDetailScreen({ meetingId, focusSegmentId, backLabel = "Al
       </div>
       <aside className="record-side" aria-label="Meeting information">
         <MeetingDetailsCard meeting={meeting} route={transcriptionRoute} />
-        <MeetingPeopleCard participants={participants} assistantName={meeting.botName} namedSpeakers={namedSpeakers} speakerIdentities={speakerIdentities} source={source} onSaveIdentity={saveIdentity} />
+        <MeetingPeopleCard meetingId={meetingId} participants={participants} assistantName={meeting.botName} namedSpeakers={namedSpeakers} speakerIdentities={speakerIdentities} source={source} onSaveIdentity={saveIdentity} onIdentitiesSaved={setSpeakerIdentities} />
         {source ? <MeetingSourceCard source={source} /> : null}
         <MeetingKnowledgeSettings key={meeting.id} meeting={meeting} onSaved={acceptMeeting} />
         {deletableStatuses.has(meeting.status) ? <MeetingDangerZone deleting={deleting} onDelete={() => void deleteMeeting()} /> : null}

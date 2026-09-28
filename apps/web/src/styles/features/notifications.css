@@ -1,0 +1,73 @@
+/* Notification center (top-bar bell, feed popover, toasts) and background-job hints. Layout only; tokens throughout. */
+
+.notification-trigger { position:relative; }
+.notification-trigger .lucide { width:18px; height:18px; }
+.notification-trigger[data-popup-open] { background:var(--muted); color:var(--foreground); }
+.notification-count {
+  position:absolute; top:1px; right:0; min-width:17px; height:17px; padding:0 4px; border-radius:999px;
+  background:var(--brand); color:var(--brand-foreground); outline:2px solid var(--background);
+  font-size:10.5px; font-weight:600; line-height:17px; text-align:center; font-variant-numeric:tabular-nums; pointer-events:none;
+}
+
+.notification-panel { display:flex; flex-direction:column; width:min(400px, calc(100vw - 24px)); max-height:min(580px, var(--available-height, 580px)); padding:0; overflow:hidden; }
+.notification-panel-head { flex:none; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 16px 10px; }
+.notification-panel-title { font-size:14.5px; font-weight:600; }
+.notification-filter { flex:none; margin:0 16px 10px; align-self:flex-start; }
+.notification-scroll { flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:2px 6px 8px; border-top:1px solid var(--border); }
+.notification-scroll > .form-error { margin:10px 8px 0; }
+.notification-scroll > .loading-row { padding:28px 12px; justify-content:center; }
+.notification-group ul { list-style:none; margin:0; padding:0; display:grid; gap:1px; }
+.notification-group-label { padding:12px 10px 4px; color:var(--text-tertiary); font-size:12px; font-weight:600; }
+.notification-more { margin:8px 0 2px; }
+
+.notification-empty { display:grid; justify-items:center; gap:6px; padding:36px 24px 32px; text-align:center; }
+.notification-empty .empty-icon { display:grid; place-items:center; width:40px; height:40px; margin-bottom:6px; border:1px solid var(--border); border-radius:var(--radius); background:var(--muted); color:var(--text-secondary); }
+.notification-empty .empty-icon .lucide { width:18px; height:18px; }
+.notification-empty b { font-size:14px; font-weight:600; }
+.notification-empty p { max-width:34ch; color:var(--text-secondary); font-size:13px; line-height:1.5; }
+
+.notification-row { position:relative; }
+.notification-item {
+  display:grid; grid-template-columns:32px minmax(0, 1fr) 8px; align-items:start; gap:12px; width:100%;
+  padding:10px 34px 10px 10px; border:0; border-radius:var(--radius); background:transparent; color:var(--foreground); text-align:left;
+  transition:background var(--duration-fast) ease;
+}
+.notification-item:hover { background:var(--muted); }
+.notification-item:focus-visible { outline:none; box-shadow:var(--focus-shadow); }
+.notification-icon { display:grid; place-items:center; width:32px; height:32px; border:1px solid var(--border); border-radius:var(--radius); background:var(--muted); color:var(--text-secondary); }
+.notification-icon .lucide { width:16px; height:16px; }
+.notification-icon[data-tone=info] { background:var(--info-subtle); border-color:var(--info-border); color:var(--info-text); }
+.notification-icon[data-tone=success] { background:var(--success-subtle); border-color:var(--success-border); color:var(--success-text); }
+.notification-icon[data-tone=warning] { background:var(--warning-subtle); border-color:var(--warning-border); color:var(--warning-text); }
+.notification-icon[data-tone=danger] { background:var(--destructive-subtle); border-color:var(--destructive-border); color:var(--destructive-text); }
+.notification-copy { display:grid; gap:2px; min-width:0; }
+.notification-title { font-size:13.5px; font-weight:500; line-height:1.4; overflow-wrap:anywhere; }
+.notification-row[data-unread] .notification-title { font-weight:600; }
+.notification-body { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; color:var(--text-secondary); font-size:12.5px; line-height:1.45; overflow-wrap:anywhere; }
+.notification-copy time { margin-top:2px; color:var(--text-tertiary); font-size:11.5px; }
+.notification-dot { width:8px; height:8px; margin-top:6px; border-radius:50%; background:var(--brand); }
+.notification-dismiss { position:absolute; top:8px; right:4px; opacity:0; transition:opacity var(--duration-fast) ease; }
+.notification-row:hover .notification-dismiss, .notification-dismiss:focus-visible { opacity:1; }
+@media (hover:none) { .notification-dismiss { opacity:1; } }
+
+.notification-toast-region { position:fixed; z-index:80; right:24px; bottom:24px; width:min(400px, calc(100vw - 32px)); pointer-events:none; }
+.notification-toast {
+  display:grid; grid-template-columns:32px minmax(0, 1fr) auto; align-items:start; gap:12px; padding:12px 12px 12px 14px;
+  border:1px solid var(--border); border-radius:var(--radius-lg); background:var(--popover); color:var(--foreground);
+  box-shadow:var(--elevation-overlay); pointer-events:auto; animation:notification-toast-in var(--duration-slow) cubic-bezier(.16,1,.3,1);
+}
+.notification-toast-actions { display:flex; align-items:center; gap:4px; }
+@keyframes notification-toast-in { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+@media (prefers-reduced-motion:reduce) { .notification-toast { animation:none; } }
+
+/* Background jobs: "keep working, we'll tell you" hint under a live progress card. */
+.prep-background-hint { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:16px; padding-top:12px; border-top:1px solid var(--border); }
+.prep-background-hint .field-hint { display:inline-flex; align-items:center; gap:8px; margin:0; }
+.prep-background-hint .field-hint .lucide { width:15px; height:15px; flex:none; color:var(--brand); }
+.minutes-background-hint { display:flex; align-items:center; gap:8px; }
+.minutes-background-hint .lucide { width:15px; height:15px; flex:none; color:var(--brand); }
+
+@media (max-width:640px) {
+  .notification-toast-region { right:16px; bottom:16px; }
+  .prep-background-hint { flex-direction:column; align-items:flex-start; }
+}

@@ -15,7 +15,7 @@ type CategoryFilter = ActivityCategory | "all";
 type ActorFace = { name: string; photoUrl: string | null; kind: "person" | "assistant" };
 
 /** Workspace audit trail in plain language: who did what, to which meeting, person or knowledge base. */
-export function ActivityCard({ members, meetingTitles, baseNames }: { members: WorkspaceMember[]; meetingTitles: ReadonlyMap<string, string>; baseNames: ReadonlyMap<string, string> }) {
+export function ActivityCard({ members, meetingTitles, baseNames, teamNames }: { members: WorkspaceMember[]; meetingTitles: ReadonlyMap<string, string>; baseNames: ReadonlyMap<string, string>; teamNames?: ReadonlyMap<string, string> }) {
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -42,9 +42,10 @@ export function ActivityCard({ members, meetingTitles, baseNames }: { members: W
       actorName: (id: string) => names.get(id) ?? null,
       meetingTitle: (id: string) => meetingTitles.get(id) ?? null,
       knowledgeName: (id: string) => baseNames.get(id) ?? null,
+      teamName: (id: string) => teamNames?.get(id) ?? null,
     };
     return events.map((event) => describeAuditEvent(event, lookup));
-  }, [events, members, meetingTitles, baseNames]);
+  }, [events, members, meetingTitles, baseNames, teamNames]);
 
   const faces = useMemo(() => {
     const byId = new Map(members.map((member) => [member.user_id, member]));

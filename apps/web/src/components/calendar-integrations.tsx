@@ -10,10 +10,12 @@ import { Badge, EmptyState } from "./ui/feedback";
 const syncFormat: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" };
 
 /** Integrations tab: connect sources, then name, rename or disconnect each account. */
-export function CalendarIntegrations({ connections, syncs, busy, syncingIds, canSync, onSync, onConnect, onRename, onDisconnect }: {
+export function CalendarIntegrations({ connections, syncs, busy, connecting = false, syncingIds, canSync, onSync, onConnect, onRename, onDisconnect }: {
   connections: CalendarConnection[];
   syncs: CalendarSyncState[];
   busy: boolean;
+  /** A provider sign-in is open in another tab. */
+  connecting?: boolean;
   /** Accounts with a per-row sync in flight. */
   syncingIds: string[];
   /** False while the calendar's date range is invalid. */
@@ -39,8 +41,8 @@ export function CalendarIntegrations({ connections, syncs, busy, syncingIds, can
     <div className="section-heading">
       <div><h2>Connected meeting sources</h2><p>Connect as many accounts as you need. Each meeting keeps its original source.</p></div>
     </div>
-    <ProviderGrid activeConnections={active} disabled={busy} onConnect={setConnectProvider} />
-    <CalendarAliasDialog provider={connectProvider} busy={busy} onCancel={() => setConnectProvider(null)} onSubmit={(alias) => { if (connectProvider) onConnect(connectProvider, alias); }} />
+    <ProviderGrid activeConnections={active} disabled={busy || connecting} onConnect={setConnectProvider} />
+    <CalendarAliasDialog provider={connectProvider} busy={busy} onCancel={() => setConnectProvider(null)} onSubmit={(alias) => { if (connectProvider) { onConnect(connectProvider, alias); setConnectProvider(null); } }} />
 
     <section className="card calendar-accounts" aria-labelledby="calendar-accounts-title">
       <div className="card-header">

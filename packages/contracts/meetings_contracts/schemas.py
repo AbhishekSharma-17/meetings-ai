@@ -246,9 +246,12 @@ class MeetingDeliverySettings(BaseModel):
     participant_recipients: list[str] = Field(default_factory=list, max_length=50)
     send_to_participants: bool = False
     include_transcript: bool = False
+    # Internal teams targeted by reference; expanded to their current members when the recap is sent.
+    internal_group_ids: list[UUID] = Field(default_factory=list, max_length=20)
 
     @model_validator(mode="after")
     def validate_addresses(self) -> "MeetingDeliverySettings":
+        self.internal_group_ids = list(dict.fromkeys(self.internal_group_ids))
         for field_name in ("internal_recipients", "participant_recipients"):
             normalized: list[str] = []
             for recipient in getattr(self, field_name):
@@ -503,6 +506,14 @@ class MinutesEmailRequest(BaseModel):
         return self
 
 
+class DeliveryGroupUsed(BaseModel):
+    """A team a delivery expanded, as named and sized at send time."""
+
+    id: UUID
+    name: str
+    member_count: int
+
+
 class EmailDeliveryPublic(BaseModel):
     id: UUID
     meeting_id: UUID
@@ -511,3 +522,4 @@ class EmailDeliveryPublic(BaseModel):
     provider_message_id: str | None
     error: str | None
     created_at: datetime
+    groups: list[DeliveryGroupUsed] = Field(default_factory=list)

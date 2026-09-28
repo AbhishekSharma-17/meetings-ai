@@ -184,3 +184,27 @@
 .record-main.capturing > .record-call { order:-2; }
 .record-main.capturing > .transcript-card { order:-1; }
 .record-side .card-header > div:first-child { flex-basis:140px; }
+
+/* ---------- Speaker contact suggestions (People & capture) ---------- */
+.speaker-contacts-head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px 14px; flex-wrap:wrap; }
+.speaker-contacts-head > div:first-child { flex:1 1 180px; min-width:0; }
+.speaker-contacts-bulk { display:flex; flex-direction:column; align-items:flex-end; gap:6px; }
+.speaker-contacts .form-error, .speaker-contacts-notice { margin-top:10px; }
+.speaker-contact .record-identity-row { align-items:center; }
+.speaker-contact .record-identity-row .avatar { flex:none; }
+.speaker-suggestion { display:grid; gap:10px; margin:8px 0 0; padding:10px 8px 10px 12px; border:1px dashed var(--brand-border); border-radius:var(--radius); background:var(--brand-subtle); }
+.speaker-suggestion.ambiguous { border-color:var(--border); background:var(--muted); }
+.speaker-suggestion-match { display:flex; align-items:flex-start; gap:10px; min-width:0; }
+.speaker-suggestion-copy { display:grid; gap:2px; min-width:0; flex:1; }
+.speaker-suggestion-match .speaker-suggestion-reason { flex:1; }
+.speaker-suggestion-dismiss { margin:-4px 0 0 auto; }
+.speaker-suggestion-title { display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; min-width:0; }
+.speaker-suggestion-title b { font-size:13.5px; font-weight:500; overflow-wrap:anywhere; }
+.speaker-suggestion-email { color:var(--foreground); font-size:12.5px; overflow-wrap:anywhere; }
+.speaker-suggestion-reason { margin:0; color:var(--text-secondary); font-size:12px; line-height:1.45; }
+.speaker-suggestion-options { display:flex; flex-wrap:wrap; gap:6px; }
+.speaker-suggestion-options .button { gap:6px; background:var(--card); border:1px solid var(--border); }
+.speaker-suggestion-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px 14px; }
+@media (max-width: 640px) {
+  .speaker-contacts-bulk { align-items:flex-start; width:100%; }
+}

@@ -10,6 +10,7 @@ is never returned.
 import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import UUID
 
 from meetings_contracts import Capability, EmbeddingRequest
@@ -22,6 +23,7 @@ from .chunk_store import ChunkStore, EmbeddingUnavailableError, UnitKey
 from .database import Database, KnowledgeChunkRow, KnowledgeIndexJobRow
 from .knowledge_service import KnowledgeQuery, KnowledgeSource
 from .meeting_chunks import meeting_drafts
+from .notification_events import NO_EVENTS
 from .repository import ProfileNotFoundError
 from .retrieval import ChunkRetriever
 from .service import ProviderProfileService, ProviderSelectionError
@@ -52,6 +54,9 @@ class KnowledgeIndexStatus(BaseModel):
 
 
 class KnowledgeIndexService:
+    # Notification hooks (NotificationEvents); a no-op unless wired in create_app.
+    events: Any = NO_EVENTS
+
     def __init__(
         self, database: Database, knowledge: object, bases: object, providers: ProviderProfileService,
         store: ChunkStore | None = None, retriever: ChunkRetriever | None = None,
@@ -153,6 +158,7 @@ class KnowledgeIndexService:
                     job.started_at = now
                     job.attempts += 1
                     attempts = job.attempts
+                reference = requested_at.isoformat() if requested_at else "unknown"
                 try:
                     await self.reindex(base_id)
                 except Exception as exc:
@@ -163,6 +169,9 @@ class KnowledgeIndexService:
                             job.last_error = str(exc)[:1000]
                             job.next_retry_at = datetime.now(UTC) + timedelta(seconds=min(60 * 2 ** min(attempts, 8), 3600))
                     logger.warning("knowledge indexing failed for %s: %s", base_id, exc)
+                    self.events.knowledge_index_failed(organization_id, base_id, str(exc), reference=reference)
+                else:
+                    self.events.knowledge_indexed(organization_id, base_id, reference=reference)
 
     async def run(self, interval_seconds: int = 20) -> None:
         while True:

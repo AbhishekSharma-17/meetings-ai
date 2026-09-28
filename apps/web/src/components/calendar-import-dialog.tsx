@@ -6,6 +6,8 @@ import { CalendarSearch, X } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
 import type { CalendarConnection, CalendarEvent, CalendarPeriod, CalendarSchedule } from "@/lib/types";
 import { AccountRow, CalendarAliasDialog, ProviderGrid } from "./calendar-connections";
+import { CalendarConnectWaiting } from "./calendar-connect-waiting";
+import { useCalendarConnect } from "./use-calendar-connect";
 import { browserTimeZone, calendarProviderNames, platformLabel } from "./calendar-providers";
 import { PageHeader } from "./ui/page-header";
 import { Alert, Badge, EmptyState } from "./ui/feedback";
@@ -33,6 +35,17 @@ export function CalendarImportDialog({ open, preferredConnectionId, onClose, onC
   const [busy, setBusy] = useState(false);
   const [scanned, setScanned] = useState(false);
   const [connectProvider, setConnectProvider] = useState<CalendarConnection["provider"] | null>(null);
+  const [connectedNotice, setConnectedNotice] = useState<string | null>(null);
+  const connectFlow = useCalendarConnect({
+    onConnected: (next, newId, provider) => {
+      setConnections(next);
+      const added = next.find((item) => item.id === newId && item.status === "ACTIVE");
+      if (added) { setConnectionId(added.id); setScanned(false); }
+      setConnectedNotice(`${calendarProviderNames[provider]} connected${added ? `: ${added.label}` : ""}. Choose when to look for meetings.`);
+    },
+    onError: (message) => { setBusy(false); setError(message); },
+    onRedirect: () => setBusy(true),
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -52,10 +65,10 @@ export function CalendarImportDialog({ open, preferredConnectionId, onClose, onC
     return () => { alive = false; };
   }, [open, preferredConnectionId]);
 
-  async function connect(provider: CalendarConnection["provider"], alias: string) {
-    setBusy(true); setError(null);
-    try { window.location.assign(await meetingsService.connectCalendar(provider, alias)); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "Could not start calendar connection."); setBusy(false); }
+  /** Runs inside the alias dialog's submit so the provider tab opens from the user's gesture. */
+  function connect(provider: CalendarConnection["provider"], alias: string) {
+    setError(null); setConnectedNotice(null);
+    connectFlow.start(provider, alias, connections.map((item) => item.id));
   }
 
   async function scan() {
@@ -74,8 +87,10 @@ export function CalendarImportDialog({ open, preferredConnectionId, onClose, onC
   const intro = "Connect one or more accounts, then pick an upcoming meeting to set up the assistant.";
 
   const body = <div className="calendar-import">
-    <ProviderGrid activeConnections={activeConnections} disabled={busy || loadingConnections} onConnect={setConnectProvider} />
-    <CalendarAliasDialog provider={connectProvider} busy={busy} onCancel={() => setConnectProvider(null)} onSubmit={(alias) => { if (connectProvider) void connect(connectProvider, alias); }} />
+    <ProviderGrid activeConnections={activeConnections} disabled={busy || loadingConnections || connectFlow.wait !== null} onConnect={setConnectProvider} />
+    <CalendarAliasDialog provider={connectProvider} busy={busy} onCancel={() => setConnectProvider(null)} onSubmit={(alias) => { if (connectProvider) { connect(connectProvider, alias); setConnectProvider(null); } }} />
+    <CalendarConnectWaiting wait={connectFlow.wait} onReopen={connectFlow.reopen} onRecheck={connectFlow.recheck} onCancel={connectFlow.cancel} />
+    {connectedNotice ? <Alert tone="success" className="calendar-connect-done">{connectedNotice}</Alert> : null}
     {connections.length > 0 && !activeConnections.length ? <Alert tone="warning">A connection is pending or expired. Finish the provider’s consent screen or connect again.</Alert> : null}
     {activeConnections.length ? <section className="card calendar-accounts" aria-labelledby={`${titleId}-accounts`}>
       <div className="card-header"><div><h3 id={`${titleId}-accounts`}>Connected accounts</h3></div><span className="section-count">{activeConnections.length}</span></div>

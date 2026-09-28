@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, date, datetime, timedelta
+from typing import Any
 from uuid import UUID
 
 from meetings_contracts import MeetingCreate, MeetingPublic
@@ -16,6 +17,7 @@ from .composio_calendar import CalendarError, CalendarEvent, CalendarRange, Comp
 from .database import CalendarScheduleRow, Database, MeetingSourceRow
 from .adapters.vexa import VexaAPIError
 from .meeting_service import MeetingService
+from .notification_events import NO_EVENTS
 from .tenant import tenant_scope
 
 logger = logging.getLogger(__name__)
@@ -61,6 +63,9 @@ def _public(row: CalendarScheduleRow) -> CalendarSchedulePublic:
 
 
 class CalendarScheduleService:
+    # Notification hooks (NotificationEvents); a no-op unless wired in create_app.
+    events: Any = NO_EVENTS
+
     def __init__(self, database: Database, calendar: ComposioCalendar, meetings: MeetingService):
         self.database, self.calendar, self.meetings = database, calendar, meetings
 
@@ -169,6 +174,7 @@ class CalendarScheduleService:
                 created_at=now, updated_at=now,
             )
             session.add(row)
+        self.events.schedule_created(actor.organization_id, meeting.id, meeting.title, event.starts_at)
         return _public(row), self.meetings.to_public(meeting)
 
     def create_manual(self, actor: Actor, payload: ManualScheduleCreate) -> tuple[CalendarSchedulePublic, MeetingPublic]:
@@ -193,6 +199,7 @@ class CalendarScheduleService:
                 created_at=now, updated_at=now,
             )
             session.add(row)
+        self.events.schedule_created(actor.organization_id, meeting.id, meeting.title, starts_at)
         return _public(row), self.meetings.to_public(meeting)
 
     def cancel(self, actor: Actor, meeting_id: UUID) -> CalendarSchedulePublic:
@@ -216,6 +223,7 @@ class CalendarScheduleService:
 
     async def tick(self) -> None:
         now = datetime.now(UTC)
+        self.events.schedule_reminders(now)
         with self.database.session_factory() as session:
             rows = session.execute(select(CalendarScheduleRow.organization_id, CalendarScheduleRow.meeting_id, CalendarScheduleRow.starts_at, CalendarScheduleRow.ends_at).where(
                 CalendarScheduleRow.status == "pending",
@@ -230,6 +238,7 @@ class CalendarScheduleService:
                         CalendarScheduleRow.meeting_id == meeting_id,
                         CalendarScheduleRow.status == "pending",
                     ).values(status="missed", last_error="scheduled start was missed; use a fresh meeting link to join manually", updated_at=now))
+                self.events.schedule_missed(organization_id, meeting_id)
                 continue
             with self.database.session_factory.begin() as session:
                 claimed = session.execute(update(CalendarScheduleRow).where(
@@ -243,6 +252,8 @@ class CalendarScheduleService:
                     await self.meetings.join(UUID(meeting_id))
             except Exception as exc:
                 logger.warning("scheduled join failed for meeting %s: %s", meeting_id, exc)
+                if not isinstance(exc, VexaAPIError):  # a Vexa failure is announced by the meeting status hook
+                    self.events.schedule_failed(organization_id, meeting_id, str(exc), 1)
                 with self.database.session_factory.begin() as session:
                     row = session.get(CalendarScheduleRow, meeting_id)
                     if row:

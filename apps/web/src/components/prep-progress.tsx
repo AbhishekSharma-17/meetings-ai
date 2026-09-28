@@ -1,4 +1,4 @@
-import { Check } from "lucide-react";
+import { BellRing, Check } from "lucide-react";
 import type { PrepStage } from "@/lib/types";
 
 const researchSteps: { stage: PrepStage; label: string }[] = [
@@ -13,8 +13,11 @@ const contextSteps: { stage: PrepStage; label: string }[] = [
 ];
 const order: PrepStage[] = ["queued", "planning", "searching", "reading", "writing", "done"];
 
-/** Live research steps from the SSE stream. `stage` null means the synchronous fallback is running (no step detail). */
-export function PrepProgress({ stage, research }: { stage: PrepStage | null; research: boolean }) {
+/**
+ * Live research steps from the background job (or the SSE stream on older APIs). `stage` null means the
+ * synchronous fallback is running (no step detail). `background` marks a server-side job the user can leave.
+ */
+export function PrepProgress({ stage, research, background = false, onCancel }: { stage: PrepStage | null; research: boolean; background?: boolean; onCancel?(): void }) {
   const steps = research ? researchSteps : contextSteps;
   const current = stage ? order.indexOf(stage) : -1;
   return <section className="card prep-progress" aria-labelledby="prep-progress-title">
@@ -32,6 +35,10 @@ export function PrepProgress({ stage, research }: { stage: PrepStage | null; res
           </li>;
         })}
       </ol>
+      {background ? <div className="prep-background-hint">
+        <p className="field-hint"><BellRing aria-hidden="true" />Running in the background — you can leave this page. We’ll notify you when it’s ready.</p>
+        {onCancel ? <button type="button" className="button ghost sm" onClick={onCancel}>Cancel</button> : null}
+      </div> : null}
     </div>
   </section>;
 }

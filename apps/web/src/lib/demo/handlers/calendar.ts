@@ -77,7 +77,10 @@ export function registerCalendar(router: DemoRouter): void {
       const label = str(body.alias)?.trim() || (provider === "googlecalendar" ? "Personal" : PROVIDER_LABELS[provider]);
       store.connections = [...store.connections, { id, provider, status: "ACTIVE", label, identity: `alex.morgan@${provider === "outlook" ? "outlook" : "gmail"}.example` }];
       saveAdded(store);
-      try { window.sessionStorage.setItem(DEMO_PENDING_NOTICE_KEY, JSON.stringify(`Demo: ${PROVIDER_LABELS[provider]} sign-in was simulated — no real account was connected. Sync to load sample events.`)); } catch { /* Notice is optional. */ }
+      // The new-tab flow says "simulated" in its own waiting message; the same-tab flow shows this after its reload.
+      if (body.popup !== true) {
+        try { window.sessionStorage.setItem(DEMO_PENDING_NOTICE_KEY, JSON.stringify(`Demo: ${PROVIDER_LABELS[provider]} sign-in was simulated — no real account was connected. Sync to load sample events.`)); } catch { /* Notice is optional. */ }
+      }
       return json({ redirect_url: `${window.location.pathname}?calendar=connected&connected_account_id=${encodeURIComponent(id)}` });
     })
     .on("PATCH", "/v1/calendar/connections/:id", ({ store, params, body }) => {

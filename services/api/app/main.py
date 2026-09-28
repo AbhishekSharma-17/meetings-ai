@@ -54,7 +54,12 @@ from .calendar_schedule import CalendarScheduleError, CalendarSchedulePublic, Ca
 from .calendar_cache import CalendarCacheService, CalendarSyncRequest, CalendarSyncResponse, CachedCalendarResponse
 from .meeting_prep import OrganizationBriefService, OrganizationBrief, BriefDocument, MeetingPrepService, PrepError
 from .routes_prep import register_prep_routes
+from .background_wiring import install_background_services, start_background_services, stop_background_services
 from .routes_people import register_people_routes
+from .recipient_groups import RecipientGroupService
+from .routes_teams import register_team_routes
+from .repository import RecipientGroupNotFoundError
+from .routes_speakers import register_speaker_routes
 from .profile_photos import ProfilePhotoService
 from .database import Database, SchemaVersionRow, LEGACY_ADMIN_USER_ID, LEGACY_ORGANIZATION_ID
 from .accounts import AccountError, AccountPublic, AccountService, Actor, ChangePasswordRequest, InviteRequest, InviteResult, MemberRolePatch, OrganizationCreateRequest, OrganizationOption, ProfilePatch
@@ -190,9 +195,11 @@ def create_app(
         index_task = asyncio.create_task(indexing_worker.run()) if os.getenv("AUTO_KNOWLEDGE_INDEX_ENABLED") == "1" else None
         retention_task = asyncio.create_task(retention.run()) if os.getenv("AUTO_RETENTION_ENABLED") == "1" else None
         schedule_task = asyncio.create_task(calendar_schedule.run()) if os.getenv("AUTO_CALENDAR_SCHEDULE_ENABLED") == "1" else None
+        await start_background_services(app)
         try:
             yield
         finally:
+            await stop_background_services(app)
             for running in (task, index_task, retention_task, schedule_task):
                 if running:
                     running.cancel()
@@ -245,6 +252,16 @@ def create_app(
     register_prep_routes(app, meeting_prep=meeting_prep)
     profile_photos = ProfilePhotoService(database)
     register_people_routes(app, accounts=accounts, photos=profile_photos)
+    teams = RecipientGroupService(database)
+    app.state.teams = teams
+    register_team_routes(app, teams=teams)
+    register_speaker_routes(app, repository=repository, meeting_service=meeting_service,
+                            calendar_schedule=calendar_schedule, workspace_service=workspace_service)
+    install_background_services(
+        app, database=database, meeting_prep=meeting_prep, repository=repository, meeting_service=meeting_service,
+        minutes_service=minutes_service, post_meeting_worker=worker, calendar_schedule=calendar_schedule,
+        knowledge_index=knowledge_index, knowledge_bases=knowledge_bases, indexing_worker=indexing_worker,
+    )
 
     @app.middleware("http")
     async def require_admin(request: Request, call_next):
@@ -273,6 +290,7 @@ def create_app(
                     allowed = (
                         path == "/v1/auth/change-password"
                         or (method == "GET" and path in {"/v1/workspace", "/v1/workspace/members", "/v1/workspaces"})
+                        or (method == "GET" and re.fullmatch(r"/v1/workspace/teams(?:/[0-9a-f-]{36})?", path))
                         or (method == "POST" and (path == "/v1/workspaces" or re.fullmatch(r"/v1/workspaces/[0-9a-f-]+/switch", path)))
                         or (path.startswith("/v1/knowledge-bases") and method in {"GET", "POST", "PATCH"})
                         or (method == "DELETE" and re.fullmatch(r"/v1/knowledge-bases/[0-9a-f-]+", path))
@@ -295,6 +313,12 @@ def create_app(
                         or (method in {"GET", "POST"} and re.fullmatch(r"/v1/calendar/events/[0-9a-f-]+/prep(?:/stream)?", path))
                         or (method in {"GET", "PUT"} and re.fullmatch(r"/v1/calendar/events/[0-9a-f-]+/prep/inputs", path))
                         or (method == "GET" and re.fullmatch(r"/v1/calendar/events/[0-9a-f-]+/prep/history", path))
+                        or (method == "POST" and re.fullmatch(r"/v1/calendar/events/[0-9a-f-]+/prep/jobs", path))
+                        or (method == "GET" and re.fullmatch(r"/v1/background-jobs(?:/[0-9a-f-]{36})?", path))
+                        or (method == "POST" and re.fullmatch(r"/v1/background-jobs/[0-9a-f-]{36}/cancel", path))
+                        or (method == "GET" and path in {"/v1/notifications", "/v1/notifications/unread-count"})
+                        or (method == "POST" and re.fullmatch(r"/v1/notifications/(?:read-all|[0-9a-f-]{36}/read)", path))
+                        or (method == "DELETE" and re.fullmatch(r"/v1/notifications/[0-9a-f-]{36}", path))
                         or (method == "GET" and path in {"/v1/workspace/brief", "/v1/workspace/brief/documents"})
                         or (method in {"GET", "POST", "DELETE"} and re.fullmatch(r"/v1/documents(?:/url|/[0-9a-f-]{36}(?:/reindex)?)?", path))
                         or (method == "GET" and re.fullmatch(r"/v1/meetings/[0-9a-f-]+(?:/transcript)?", path))
@@ -322,7 +346,8 @@ def create_app(
                         return JSONResponse(status_code=404, content={"detail": "meeting not found"})
             response = await call_next(request)
             if request.method in {"POST", "PUT", "PATCH", "DELETE"} and path.startswith("/v1/") \
-                    and path not in {"/v1/auth/login", "/v1/auth/logout"} and response.status_code < 400:
+                    and path not in {"/v1/auth/login", "/v1/auth/logout"} and response.status_code < 400 \
+                    and not path.startswith("/v1/notifications"):  # reading notifications is not auditable activity
                 route = request.scope.get("route")
                 template = getattr(route, "path", path)
                 match = re.search(r"/([0-9a-f]{8}-[0-9a-f-]{27,})", path)
@@ -947,6 +972,7 @@ def create_app(
                 payload.callback_origin if payload else None,
                 os.getenv("APP_BASE_URL", "http://localhost:3020"),
                 os.getenv("APP_ENV", "development"),
+                popup=bool(payload and payload.popup),
             )
             return await calendar.connect(request.state.actor, provider, callback_url, payload.alias if payload else None)
         except CalendarError as exc:
@@ -1070,6 +1096,8 @@ def create_app(
             return repository.save_delivery_settings(meeting_id, payload)
         except MeetingNotFoundError as exc:
             raise api_error(exc) from exc
+        except RecipientGroupNotFoundError as exc:
+            raise HTTPException(status_code=422, detail="one of the selected teams no longer exists") from exc
 
     @app.get("/v1/meetings/{meeting_id}/post-meeting-job")
     def get_post_meeting_job(meeting_id: UUID) -> dict[str, object]:
@@ -1215,6 +1243,8 @@ def create_app(
         except (MeetingNotFoundError, SpeakerIdentityConflictError) as exc:
             raise api_error(exc) from exc
 
+    MAX_RECAP_RECIPIENTS = 50  # MinutesEmailRequest's limit
+
     MINUTES_EXCEPTIONS = (
         MeetingNotFoundError,
         MinutesNotFoundError,
@@ -1296,16 +1326,24 @@ def create_app(
     async def send_configured_minutes(meeting_id: UUID) -> EmailDeliveryPublic:
         try:
             settings = repository.get_delivery_settings(meeting_id)
-            if not settings.internal_recipients:
-                raise MinutesConflictError("configure at least one internal recipient before sending")
-            recipients = list(settings.internal_recipients)
+            # Teams are expanded to their current members now, at send time.
+            expansion = teams.expand(settings.internal_group_ids)
+            internal = list(dict.fromkeys([*settings.internal_recipients, *expansion.emails]))
+            if not internal:
+                raise MinutesConflictError("configure at least one internal recipient or team before sending")
+            recipients = list(internal)
             if settings.send_to_participants:
                 recipients.extend(settings.participant_recipients)
-            payload = MinutesEmailRequest(
-                recipients=list(dict.fromkeys(recipients)),
-                include_transcript=settings.include_transcript,
-            )
-            return minutes_service.delivery_to_public(await minutes_service.send(meeting_id, payload))
+            recipients = list(dict.fromkeys(recipients))
+            if len(recipients) > MAX_RECAP_RECIPIENTS:
+                raise MinutesConflictError(
+                    f"this recap would go to {len(recipients)} addresses; the limit is {MAX_RECAP_RECIPIENTS} per send")
+            payload = MinutesEmailRequest(recipients=recipients, include_transcript=settings.include_transcript)
+            return minutes_service.delivery_to_public(
+                await minutes_service.send(meeting_id, payload, groups=expansion.groups))
+        except RecipientGroupNotFoundError as exc:
+            # A targeted team was deleted between reading the settings and sending.
+            raise HTTPException(status_code=422, detail="a selected team no longer exists; review the recipients and send again") from exc
         except MINUTES_EXCEPTIONS as exc:
             raise api_error(exc) from exc
 

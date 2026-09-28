@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Tabs } from "@base-ui/react/tabs";
 import { FileSearch, History, KeyRound, NotebookPen, SlidersHorizontal } from "lucide-react";
-import { meetingsService, prepService, serviceErrorStatus } from "@/lib/meetings-service";
-import type { AnyPrepReport, CachedCalendarEvent, KnowledgeTextProfile, PrepGenerateInput, PrepHistory, PrepStage } from "@/lib/types";
+import { jobService, meetingsService, prepService, serviceErrorStatus } from "@/lib/meetings-service";
+import type { AnyPrepReport, BackgroundJob, CachedCalendarEvent, KnowledgeTextProfile, PrepGenerateInput, PrepHistory, PrepStage } from "@/lib/types";
 import { PrepReportView } from "./meeting-prep-report";
 import { PrepDocuments } from "./prep-documents";
 import { PrepHistoryList } from "./prep-history";
@@ -13,12 +13,22 @@ import { PrepProgress } from "./prep-progress";
 import { Alert, EmptyState, Skeleton } from "./ui/feedback";
 import { SwitchField } from "./ui/switch";
 import { UiSelect } from "./ui-select";
+import { useBackgroundJob } from "./use-background-job";
 
 type Tab = "briefing" | "inputs" | "history";
 type PrepFailure = { message: string; status: number | null };
 
 /** A 404/405 from the stream means an older API: fall back to the synchronous endpoint. */
 const STREAM_FALLBACK = new Set([0, 404, 405]);
+/** A 404/405 from the job endpoint means an API without background jobs: use the stream instead. */
+const JOB_FALLBACK = new Set([404, 405]);
+const PREP_STAGES = new Set<string>(["queued", "planning", "searching", "reading", "writing", "done"]);
+
+/** Job stages map onto the prep steps; the runner's "starting" is still the queued step. */
+function jobStage(job: BackgroundJob | null): PrepStage | null {
+  if (!job) return null;
+  return job.stage && PREP_STAGES.has(job.stage) ? job.stage as PrepStage : "queued";
+}
 
 function websiteError(value: string): string | null {
   if (!value.trim()) return null;
@@ -50,6 +60,11 @@ export function MeetingPrepPanel({ event, canEdit = true, onOpenProviders }: {
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [failure, setFailure] = useState<PrepFailure | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Briefings run as server-side jobs: leaving this page does not stop one, and coming back resumes its progress.
+  const prepJob = useBackgroundJob("prep_briefing", event.id, {
+    onResume: () => { setBusy(true); setFailure(null); setTab("briefing"); },
+    onFinish: (job) => finishJob(job),
+  });
 
   const loadHistory = useCallback(() => {
     void prepService.getHistory(event.id).then(setHistory).catch(() => setHistory(null));
@@ -89,6 +104,30 @@ export function MeetingPrepPanel({ event, canEdit = true, onOpenProviders }: {
     }
   }
 
+  function finishJob(job: BackgroundJob) {
+    setBusy(false); setStage(null);
+    if (job.status === "succeeded") {
+      void prepService.getLatest(event.id).then((saved) => { if (saved) { setReport(saved); setTab("briefing"); } }).catch(() => setLoadError("The new briefing could not be loaded. Refresh to see it."));
+      loadHistory();
+    } else if (job.status === "failed") {
+      const status = job.result?.error_status;
+      setFailure({ message: job.error ?? "Meeting prep failed.", status: typeof status === "number" ? status : null });
+      setTab("inputs");
+    }
+  }
+
+  /** Starts the background job; false means this API has no job endpoint and the caller should stream instead. */
+  async function startJob(input: PrepGenerateInput): Promise<boolean> {
+    try {
+      prepJob.track(await jobService.startPrep(event.id, input));
+      return true;
+    } catch (cause) {
+      const status = serviceErrorStatus(cause);
+      if (status !== null && JOB_FALLBACK.has(status)) return false;
+      throw cause;
+    }
+  }
+
   async function generate() {
     if (websiteProblem) return;
     setBusy(true); setFailure(null); setStage("queued"); setTab("briefing");
@@ -96,8 +135,11 @@ export function MeetingPrepPanel({ event, canEdit = true, onOpenProviders }: {
       context, target_company: targetCompany.trim() || null, company_website: website.trim() || null,
       profile_urls: links.filter(isHttpsLink), text_profile_id: textProfileId || null, research_enabled: researchEnabled,
     };
+    let background = false;
     try {
       if (canEdit && !(await saveInputs())) { setTab("inputs"); return; }
+      background = await startJob(input);
+      if (background) return;
       let next: AnyPrepReport;
       try {
         next = await prepService.generateStream(event.id, input, (value) => setStage(value));
@@ -112,7 +154,7 @@ export function MeetingPrepPanel({ event, canEdit = true, onOpenProviders }: {
     } catch (cause) {
       setFailure({ message: cause instanceof Error ? cause.message : "Meeting prep failed.", status: serviceErrorStatus(cause) });
       setTab("inputs");
-    } finally { setBusy(false); setStage(null); }
+    } finally { if (!background) { setBusy(false); setStage(null); } }
   }
 
   const needsSetup = failure?.status === 409 && /exa key|provider/i.test(failure.message);
@@ -126,7 +168,7 @@ export function MeetingPrepPanel({ event, canEdit = true, onOpenProviders }: {
     </Tabs.List>
 
     <Tabs.Panel value="briefing" className="prep-tab-panel">
-      {busy ? <PrepProgress stage={stage} research={researchEnabled} />
+      {busy ? <PrepProgress stage={prepJob.running ? jobStage(prepJob.job) : stage} research={researchEnabled} background={prepJob.running} onCancel={prepJob.running ? () => void prepJob.cancel().catch(() => undefined) : undefined} />
         : loadingReport ? <div className="card card-body"><Skeleton lines={5} /></div>
           : report ? <PrepReportView report={report} />
             : <div className="card"><EmptyState plain icon={<FileSearch />} title="No briefing yet" action={<button type="button" className="button secondary" onClick={() => setTab("inputs")}>Add inputs</button>}>Tell us who you are meeting, then generate a briefing.</EmptyState></div>}

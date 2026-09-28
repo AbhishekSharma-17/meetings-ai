@@ -3,7 +3,8 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Popover } from "@base-ui/react/popover";
 import { BookOpenText, Building2, Database, Download, Ellipsis, Library, Lock, MessageSquare, Plus, Search, ShieldCheck, Trash2, Users } from "lucide-react";
-import { meetingsService } from "@/lib/meetings-service";
+import { jobService, meetingsService, serviceErrorStatus } from "@/lib/meetings-service";
+import { useBackgroundJob } from "./use-background-job";
 import { useUiPreference } from "@/lib/ui-preferences";
 import type { AiSettingsView, CurrentAccount, KnowledgeBase, ProviderProfile, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeWikiOverview, WorkspaceMember } from "@/lib/types";
 import { BasePicker, ChatModelInfo, ChatTurn, ChatWelcome, Composer, PendingTurn, type Exchange, type PendingAnswer } from "./knowledge-chat";
@@ -111,6 +112,13 @@ export function KnowledgeScreen({ identity, onOpenSource, onOpenProviders, accou
   const [error, setError] = useState<string | null>(null);
   const conversationRef = useRef(conversationId);
   const threadRef = useRef<HTMLDivElement>(null);
+  const reindexJob = useBackgroundJob("knowledge_reindex", storedBaseId && storedBaseId !== ALL_MEETINGS ? storedBaseId : "no-base", {
+    onFinish: (job) => {
+      const baseId = storedBaseId === ALL_MEETINGS ? "" : storedBaseId;
+      if (baseId) void meetingsService.getKnowledgeIndex(baseId).then(setIndexStatus).catch(() => undefined);
+      if (job.status === "failed") setError(job.error || "Reindexing failed.");
+    },
+  });
   // Bumped whenever the visible base or thread changes, so a late streamed answer is not shown in the wrong chat.
   const threadGeneration = useRef(0);
 
@@ -245,9 +253,19 @@ export function KnowledgeScreen({ identity, onOpenSource, onOpenProviders, accou
   async function reindexBase() {
     if (!selectedBaseId) return;
     setIndexing(true); setError(null);
-    try { setIndexStatus(await meetingsService.reindexKnowledge(selectedBaseId)); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "Could not update the knowledge index."); }
-    finally { setIndexing(false); }
+    try {
+      // Runs as a background job so it keeps going if the user leaves this page.
+      reindexJob.track(await jobService.startReindex(selectedBaseId));
+    } catch (cause) {
+      const status = serviceErrorStatus(cause);
+      if (status === 404 || status === 405) {
+        // An API without job endpoints: fall back to the synchronous reindex.
+        try { setIndexStatus(await meetingsService.reindexKnowledge(selectedBaseId)); }
+        catch (inner) { setError(inner instanceof Error ? inner.message : "Could not update the knowledge index."); }
+      } else {
+        setError(cause instanceof Error ? cause.message : "Could not update the knowledge index.");
+      }
+    } finally { setIndexing(false); }
   }
 
   async function exportConversation() {
@@ -380,7 +398,7 @@ export function KnowledgeScreen({ identity, onOpenSource, onOpenProviders, accou
           </div>
         </div> : null}
         {selectedBase ? <div className="kl-index" role="group" aria-label="Semantic index">
-          <div className="kl-index-head"><Database aria-hidden="true" /><b>Semantic index</b>{canManageBase ? <button type="button" className="text-button" disabled={indexing} onClick={() => void reindexBase()}>{indexing ? "Indexing…" : "Reindex now"}</button> : null}</div>
+          <div className="kl-index-head"><Database aria-hidden="true" /><b>Semantic index</b>{canManageBase ? <button type="button" className="text-button" disabled={indexing || reindexJob.running} onClick={() => void reindexBase()}>{indexing || reindexJob.running ? "Indexing…" : "Reindex now"}</button> : null}</div>
           <small>{indexed ? `${plural(indexed, "source")} indexed · ${indexStatus?.model ?? "embedding model"}` : "No sources indexed yet"}</small>
           {indexStatus?.job_status && indexStatus.job_status !== "succeeded" ? <small role="status">Background index: {indexStatus.job_status}{indexStatus.next_retry_at ? ` · retry ${new Date(indexStatus.next_retry_at).toLocaleString()}` : ""}</small> : null}
           {indexStatus?.last_error ? <small className="inline-error" role="alert">{indexStatus.last_error}</small> : null}

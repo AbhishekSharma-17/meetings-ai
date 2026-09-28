@@ -2,13 +2,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Check, FilePenLine, FileText, RotateCcw, Trash2 } from "lucide-react";
-import { meetingsService } from "@/lib/meetings-service";
-import type { MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MomGuidance, PostMeetingJob, ResendStatus, TranscriptSegment } from "@/lib/types";
+import { jobService, meetingsService, serviceErrorStatus } from "@/lib/meetings-service";
+import type { MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MomGuidance, PostMeetingJob, ResendStatus, Team, TranscriptSegment, WorkspaceMember } from "@/lib/types";
 import { Alert, EmptyState } from "./ui/feedback";
 import { MinutesEditor, MinutesDocument } from "./minutes-editor";
 import { MinutesFormat } from "./minutes-format";
 import { RecapDeliveryCard } from "./minutes-delivery";
 import { toEditable, toPayload, type EditableDraft } from "./minutes-support";
+import { BackgroundJobHint } from "./background-job-hint";
+import { useBackgroundJob } from "./use-background-job";
+import type { BackgroundJob } from "@/lib/types";
 
 const captureInProgress = new Set<MeetingDetail["status"]>([
   "created", "joining", "waiting_room", "live", "needs_attention", "stopping", "processing",
@@ -27,6 +30,9 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
   const [participantRecipients, setParticipantRecipients] = useState("");
   const [shareParticipants, setShareParticipants] = useState(false);
   const [includeTranscript, setIncludeTranscript] = useState(false);
+  const [groupIds, setGroupIds] = useState<string[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [members, setMembers] = useState<WorkspaceMember[]>([]);
   const [resendStatus, setResendStatus] = useState<ResendStatus | null>(null);
   const [resendStatusError, setResendStatusError] = useState(false);
   const [postMeetingJob, setPostMeetingJob] = useState<PostMeetingJob | null>(null);
@@ -34,6 +40,11 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
   const [momFocusInput, setMomFocusInput] = useState("");
   const [savingGuidance, setSavingGuidance] = useState(false);
   const [messageAt, setMessageAt] = useState<"mom" | "delivery">("mom");
+  // Manual drafts run as a server-side job: leaving the meeting does not stop it, and coming back resumes it.
+  const minutesJob = useBackgroundJob("minutes_draft", meeting.id, {
+    onResume: () => { setBusy("generate"); setMessageAt("mom"); },
+    onFinish: (job) => finishMinutesJob(job),
+  });
 
   useEffect(() => {
     let current = true;
@@ -73,9 +84,18 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
       setParticipantRecipients(settings.participant_recipients.join(", "));
       setShareParticipants(settings.send_to_participants);
       setIncludeTranscript(settings.include_transcript);
+      setGroupIds(settings.internal_group_ids ?? []);
     }).catch((requestError) => { if (current) setError(messageFor(requestError)); });
     return () => { current = false; };
   }, [meeting.id]);
+
+  // Teams and teammates for recipient suggestions; recipients still work by address without them.
+  useEffect(() => {
+    let current = true;
+    void meetingsService.listTeams().then((items) => { if (current) setTeams(items); }).catch(() => undefined);
+    void meetingsService.listWorkspaceMembers().then((items) => { if (current) setMembers(items); }).catch(() => undefined);
+    return () => { current = false; };
+  }, []);
 
   useEffect(() => {
     if (minutes || captureInProgress.has(meeting.status)) return;
@@ -133,6 +153,7 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
       participant_recipients: participantList,
       send_to_participants: shareParticipants,
       include_transcript: includeTranscript,
+      internal_group_ids: groupIds,
     };
   }
 
@@ -163,12 +184,30 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
 
   async function generate() {
     setBusy("generate"); setMessageAt("mom"); setError(null); setNotice(null);
+    let background = false;
     try {
       await meetingsService.saveMomGuidance(meeting.id, { ...momGuidance, focus_fields: momFocusInput.split(/[,;\n]+/).map((item) => item.trim()).filter(Boolean) });
+      try {
+        minutesJob.track(await jobService.startMinutes(meeting.id));
+        background = true;
+        return;
+      } catch (cause) {
+        const status = serviceErrorStatus(cause);
+        if (status !== 404 && status !== 405) throw cause; // an API without background jobs drafts synchronously
+      }
       accept(await meetingsService.generateMinutes(meeting.id));
       setNotice("MOM draft generated. Review every field before approval.");
     } catch (requestError) { setError(messageFor(requestError)); }
-    finally { setBusy(null); }
+    finally { if (!background) setBusy(null); }
+  }
+
+  function finishMinutesJob(job: BackgroundJob) {
+    setBusy(null); setMessageAt("mom");
+    if (job.status === "failed") { setError(job.error ?? "MOM generation failed."); return; }
+    if (job.status !== "succeeded") return;
+    void meetingsService.getMinutes(meeting.id).then((value) => {
+      if (value) { accept(value); setNotice("MOM draft generated. Review every field before approval."); }
+    }).catch((requestError) => setError(messageFor(requestError)));
   }
 
   async function retryAutomaticDraft() {
@@ -213,7 +252,7 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
   async function send() {
     setMessageAt("delivery");
     if (!resendStatus?.can_attempt_send) { setError("Email delivery is not configured yet."); return; }
-    if (!recipientList.length) { setError("Enter at least one recipient email address."); return; }
+    if (!recipientList.length && !groupIds.length) { setError("Enter at least one recipient email address or team."); return; }
     setBusy("send"); setError(null); setNotice(null);
     try {
       await meetingsService.saveDeliverySettings(meeting.id, settingsPayload());
@@ -221,7 +260,8 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
       const refreshed = await meetingsService.getMinutes(meeting.id);
       if (refreshed) accept(refreshed);
       setMessageAt("mom");
-      setNotice(`Recap sent to ${delivery.recipients.length} recipient${delivery.recipients.length === 1 ? "" : "s"}.`);
+      const viaTeams = delivery.groups?.length ? ` (including ${delivery.groups.map((group) => group.name).join(", ")})` : "";
+      setNotice(`Recap sent to ${delivery.recipients.length} recipient${delivery.recipients.length === 1 ? "" : "s"}${viaTeams}.`);
     } catch (requestError) { setError(messageFor(requestError)); }
     finally { setBusy(null); }
   }
@@ -243,6 +283,7 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
       </div>
       <div className="card-body mom-body">
         {!inFooter && !inDelivery ? messages : null}
+        {minutesJob.running ? <BackgroundJobHint>Drafting in the background — you can leave this page. We’ll notify you when it’s ready.</BackgroundJobHint> : null}
         {locked ? <Alert tone="success" title="Recap sent">This delivered MOM is locked. Corrections require a future versioned workflow.</Alert> : null}
         <MinutesFormat guidance={momGuidance} focusInput={momFocusInput} locked={locked} saving={savingGuidance} onGuidanceChange={setMomGuidance} onFocusInputChange={setMomFocusInput} onSave={() => void saveGuidance()} />
         {!minutes || !draft ? <EmptyState plain icon={<FileText />} title="No MOM draft yet." action={<div className="button-group">
@@ -272,8 +313,8 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
       </div> : null}
     </section>
     {minutes?.status === "approved" ? <RecapDeliveryCard recipients={recipients} participantRecipients={participantRecipients} shareParticipants={shareParticipants} includeTranscript={includeTranscript}
-      resendStatus={resendStatus} resendStatusError={resendStatusError} busy={busy} canSend={Boolean(recipientList.length && !(shareParticipants && !participantList.length) && resendStatus?.can_attempt_send)}
-      messages={inDelivery ? messages : null} onRecipientsChange={setRecipients} onParticipantRecipientsChange={setParticipantRecipients} onShareParticipantsChange={setShareParticipants} onIncludeTranscriptChange={setIncludeTranscript}
+      resendStatus={resendStatus} resendStatusError={resendStatusError} busy={busy} canSend={Boolean((recipientList.length || groupIds.length) && !(shareParticipants && !participantList.length) && resendStatus?.can_attempt_send)}
+      messages={inDelivery ? messages : null} onRecipientsChange={setRecipients} teams={teams} members={members} groupIds={groupIds} onGroupIdsChange={setGroupIds} onParticipantRecipientsChange={setParticipantRecipients} onShareParticipantsChange={setShareParticipants} onIncludeTranscriptChange={setIncludeTranscript}
       onSave={() => void saveDeliverySettings()} onSend={() => void send()} /> : null}
   </div>;
 }

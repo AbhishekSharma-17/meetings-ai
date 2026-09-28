@@ -27,6 +27,8 @@ import { BrainCircuit, Building2, CalendarDays, ChartNoAxesCombined, Check, Chev
 import { Avatar } from "./ui/avatar";
 import { EmptyState, LoadingRow } from "./ui/feedback";
 import { DemoBanner, DemoPill } from "./demo-banner";
+import { NotificationCenter } from "./notification-center";
+import { rememberSelection, type NotificationTarget } from "./notification-feed";
 
 type View = "dashboard" | "meetings" | "calendar" | "prep" | "providers" | "meeting" | "workspace" | "knowledge" | "observability" | "profile";
 const views: View[] = ["dashboard", "meetings", "calendar", "prep", "providers", "meeting", "workspace", "knowledge", "observability", "profile"];
@@ -66,6 +68,8 @@ export function AppShell() {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [loggingIn, setLoggingIn] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
+  // Bumped when a notification opens a record on prep/knowledge, so the screen remounts and reads the new selection.
+  const [focusNonce, setFocusNonce] = useState(0);
 
   const identity = account ? `${account.organization_id}:${account.user_id}` : null;
 
@@ -173,6 +177,20 @@ export function AppShell() {
     setActiveMeetingId(id); setFocusSegmentId(segmentId ?? null);
     setMeetingReturnView(view === "knowledge" || segmentId ? "knowledge" : view === "meetings" ? "meetings" : view === "calendar" ? "calendar" : "dashboard"); setView("meeting");
   }, [view]);
+  const openNotification = useCallback((target: NotificationTarget) => {
+    if (!identity || !account) return;
+    const admin = account.role === "owner" || account.role === "admin";
+    if (target.view === "meeting" && target.id) { openMeeting(target.id); return; }
+    if (target.view === "prep" && account.role !== "viewer") {
+      if (target.id) rememberSelection(`meetings-ai:prep-event:${identity}`, target.id);
+      setPrepEvent(null); setFocusNonce((value) => value + 1); setView("prep"); return;
+    }
+    if (target.view === "knowledge") {
+      if (target.id) rememberSelection(`meetings-ai:knowledge-base:${identity}`, target.id);
+      setFocusNonce((value) => value + 1); setView("knowledge"); return;
+    }
+    if (isView(target.view) && (admin || ["calendar", "profile"].includes(target.view))) setView(target.view);
+  }, [identity, account, openMeeting]);
   const updateMeeting = useCallback((meeting: Meeting) => {
     setMeetings((current) => current.some((candidate) => candidate.id === meeting.id) ? current.map((candidate) => candidate.id === meeting.id ? meeting : candidate) : [meeting, ...current]);
   }, []);
@@ -231,15 +249,15 @@ export function AppShell() {
         <header className="topbar">
           <button className="icon-button mobile-nav-trigger" aria-label="Open navigation" onClick={() => setMobileNavOpen(true)}><Menu /></button>
           <nav className="topbar-context" aria-label="Breadcrumb"><span className="topbar-kicker">{workspace?.display_name ?? "Meetings AI"}</span><span className="topbar-sep" aria-hidden="true">/</span><span className="topbar-location" aria-current="page">{viewTitle[view]}</span></nav>
-          <div className="topbar-actions">{demoMode ? <DemoPill /> : null}{liveCount && view !== "meetings" ? <button type="button" className="status live" onClick={() => setView("meetings")}>{liveCount} live</button> : null}</div>
+          <div className="topbar-actions">{demoMode ? <DemoPill /> : null}{liveCount && view !== "meetings" ? <button type="button" className="status live" onClick={() => setView("meetings")}>{liveCount} live</button> : null}{identity ? <NotificationCenter key={identity} identity={identity} onNavigate={openNotification} /> : null}</div>
         </header>
         <main id="main-content">
           {view === "dashboard" ? <Dashboard meetings={meetings} account={account} onNewMeeting={() => { setCalendarSelection(null); setDialogOpen(true); }} onOpenCalendar={() => setView("calendar")} onOpenProviders={() => setView("providers")} onOpenKnowledge={() => setView("knowledge")} onOpenMeetings={() => setView("meetings")} onOpenMeeting={openMeeting} /> : null}
           {view === "meetings" && identity ? <MeetingsLibrary key={identity} identity={identity} meetings={meetings} onOpen={openMeeting} onNew={() => { setCalendarSelection(null); setDialogOpen(true); }} onCalendar={() => setView("calendar")} /> : null}
           {view === "calendar" && account && account.role !== "viewer" ? <CalendarWorkspace key={identity} calendarIdentity={`${account.organization_id}:${account.user_id}`} preferredConnectionId={preferredCalendarConnectionId} onPreferredConnectionApplied={() => setPreferredCalendarConnectionId(null)} canSchedule={account.role === "owner" || account.role === "admin"} onChoose={(selection) => { setCalendarSelection(selection); setDialogOpen(true); }} onPrepare={(event) => { setPrepEvent(event); setView("prep"); }} onNewMeeting={account.role === "owner" || account.role === "admin" ? () => { setCalendarSelection(null); setDialogOpen(true); } : undefined} /> : null}
-          {view === "prep" && account && account.role !== "viewer" && identity ? <MeetingPrepWorkspace key={identity} identity={identity} initialEvent={prepEvent} onOpenCalendar={() => setView("calendar")} onOpenOrganization={() => setView("workspace")} onOpenProviders={account.role === "owner" || account.role === "admin" ? () => setView("providers") : undefined} /> : null}
+          {view === "prep" && account && account.role !== "viewer" && identity ? <MeetingPrepWorkspace key={`${identity}:${focusNonce}`} identity={identity} initialEvent={prepEvent} onOpenCalendar={() => setView("calendar")} onOpenOrganization={() => setView("workspace")} onOpenProviders={account.role === "owner" || account.role === "admin" ? () => setView("providers") : undefined} /> : null}
           {view === "providers" ? providersLoadError ? <section className="page narrow"><EmptyState icon={<ProvidersIcon />} title="AI providers are unavailable" action={<button className="button secondary" onClick={() => void meetingsService.listProviderProfiles().then((nextProfiles) => { setProfiles(nextProfiles); setProvidersLoadError(null); }).catch(() => undefined)}>Retry</button>}><span role="alert">{providersLoadError}</span></EmptyState></section> : identity ? <ProviderSettings key={identity} identity={identity} profiles={profiles} onProfilesChange={setProfiles} /> : null : null}
-          {view === "knowledge" && identity ? <KnowledgeScreen key={identity} identity={identity} account={account} onOpenSource={openMeeting} onOpenProviders={account?.role === "owner" || account?.role === "admin" ? () => setView("providers") : undefined} /> : null}
+          {view === "knowledge" && identity ? <KnowledgeScreen key={`${identity}:${focusNonce}`} identity={identity} account={account} onOpenSource={openMeeting} onOpenProviders={account?.role === "owner" || account?.role === "admin" ? () => setView("providers") : undefined} /> : null}
           {view === "observability" && (account?.role === "owner" || account?.role === "admin") ? <ObservabilityScreen /> : null}
           {view === "workspace" ? workspace
             ? <WorkspaceSettings workspace={workspace} workspaces={workspaces} account={account} onWorkspaceChange={setWorkspace} onSwitchWorkspace={switchWorkspace} onCreateWorkspace={createWorkspace} onWorkspacesChange={setWorkspaces} />

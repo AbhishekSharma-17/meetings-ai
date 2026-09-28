@@ -3,10 +3,12 @@
 import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import UUID
 
 from meetings_contracts import MeetingStatus
 
+from .notification_events import NO_EVENTS
 from .repository import MinutesNotFoundError
 from .tenant import tenant_scope
 
@@ -22,6 +24,9 @@ class PostMeetingJobConflictError(RuntimeError):
 
 
 class PostMeetingWorker:
+    # Notification hooks (NotificationEvents); a no-op unless wired in create_app.
+    events: Any = NO_EVENTS
+
     def __init__(self, repository: object, meetings: object, minutes: object, interval_seconds: int = 20):
         self.repository = repository
         self.meetings = meetings
@@ -104,10 +109,12 @@ class PostMeetingWorker:
         try:
             await self.meetings.transcript(meeting.id)
             await self.minutes.generate(meeting.id)
+            completed = datetime.now(UTC)
             self.repository.save_post_meeting_job(
                 meeting.id, attempts=job.attempts,
-                next_retry_at=None, last_error=None, completed_at=datetime.now(UTC),
+                next_retry_at=None, last_error=None, completed_at=completed,
             )
+            self.events.minutes_ready(meeting.id, reference=f"auto-{completed.timestamp():.0f}")
         except Exception as exc:
             attempts = job.attempts + 1
             self.repository.save_post_meeting_job(
@@ -116,3 +123,5 @@ class PostMeetingWorker:
                 last_error=str(exc)[:1000], completed_at=None,
             )
             logger.warning("MOM draft attempt %s failed for %s: %s", attempts, meeting.id, exc)
+            if attempts >= 5:  # retries exhausted; a person has to act
+                self.events.minutes_failed(meeting.id, str(exc), reference=f"auto-{now.timestamp():.0f}")

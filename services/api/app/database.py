@@ -704,6 +704,102 @@ class UserProfilePhotoRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class RecipientGroupRow(Base):
+    """A named internal team that a meeting recap can target by reference."""
+
+    __tablename__ = "recipient_groups"
+    # name_key is the case-folded name, so "Leadership" and "leadership" collide on every dialect.
+    __table_args__ = (UniqueConstraint("organization_id", "name_key", name="uq_recipient_group_name"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    name_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str | None] = mapped_column(String(36))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class RecipientGroupMemberRow(Base):
+    """One address in a team: a workspace member (user_id set) or an external email."""
+
+    __tablename__ = "recipient_group_members"
+
+    group_id: Mapped[str] = mapped_column(String(36), ForeignKey("recipient_groups.id"), primary_key=True)
+    email: Mapped[str] = mapped_column(String(320), primary_key=True)
+    # No FK: a removed workspace member is skipped at send time instead of blocking account cleanup.
+    user_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class MeetingDeliveryGroupRow(Base):
+    """A team targeted by a meeting's recap; expanded to current members when sending."""
+
+    __tablename__ = "meeting_delivery_groups"
+
+    meeting_id: Mapped[str] = mapped_column(String(36), ForeignKey("meetings.id"), primary_key=True)
+    group_id: Mapped[str] = mapped_column(String(36), ForeignKey("recipient_groups.id"), primary_key=True, index=True)
+
+
+class EmailDeliveryGroupRow(Base):
+    """Which teams (as named and sized at send time) an email delivery expanded."""
+
+    __tablename__ = "email_delivery_groups"
+
+    delivery_id: Mapped[str] = mapped_column(String(36), ForeignKey("email_deliveries.id"), primary_key=True)
+    # No FK: deleting a team later must not rewrite delivery history.
+    group_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    meeting_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    group_name: Mapped[str] = mapped_column(String(80), nullable=False)
+    member_count: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class NotificationRow(Base):
+    """A per-user in-app notification (notification center)."""
+
+    __tablename__ = "notifications"
+    # PostgreSQL and SQLite both allow several NULL dedupe keys under this constraint.
+    __table_args__ = (UniqueConstraint("user_id", "dedupe_key", name="uq_notification_dedupe"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(60), nullable=False)
+    severity: Mapped[str] = mapped_column(String(20), nullable=False)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    body: Mapped[str | None] = mapped_column(Text)
+    link_view: Mapped[str | None] = mapped_column(String(40))
+    link_id: Mapped[str | None] = mapped_column(String(120))
+    meeting_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    dedupe_key: Mapped[str | None] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class BackgroundJobRow(Base):
+    """A tracked background AI job (queued → running → succeeded/failed/cancelled)."""
+
+    __tablename__ = "background_jobs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+    user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(60), nullable=False)
+    subject_id: Mapped[str | None] = mapped_column(String(120), index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    stage: Mapped[str | None] = mapped_column(String(40))
+    message: Mapped[str | None] = mapped_column(Text)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    result: Mapped[dict | None] = mapped_column(JSON)
+    error: Mapped[str | None] = mapped_column(Text)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class SchemaVersionRow(Base):
     __tablename__ = "schema_version"
 
@@ -750,6 +846,10 @@ SCHEMA_TABLES_BY_VERSION: dict[int, tuple[str, ...]] = {
         "usage_events", "knowledge_documents", "knowledge_chunks", "meeting_prep_inputs",
     ),
     23: ("user_workspace_preferences", "user_profile_photos"),
+    24: (
+        "recipient_groups", "recipient_group_members", "meeting_delivery_groups",
+        "email_delivery_groups", "notifications", "background_jobs",
+    ),
 }
 
 SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
@@ -805,6 +905,12 @@ SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
     "meeting_prep_inputs": ("calendar_event_id", "organization_id", "target_company", "company_website", "links", "notes", "updated_by", "updated_at"),
     "user_workspace_preferences": ("user_id", "default_organization_id", "last_organization_id", "updated_at"),
     "user_profile_photos": ("user_id", "content_type", "image", "width", "height", "byte_size", "updated_at"),
+    "recipient_groups": ("id", "organization_id", "name", "name_key", "description", "created_by", "created_at", "updated_at"),
+    "recipient_group_members": ("group_id", "email", "user_id", "added_at"),
+    "meeting_delivery_groups": ("meeting_id", "group_id"),
+    "email_delivery_groups": ("delivery_id", "group_id", "meeting_id", "group_name", "member_count"),
+    "notifications": ("id", "organization_id", "user_id", "kind", "severity", "title", "body", "link_view", "link_id", "meeting_id", "dedupe_key", "created_at", "read_at"),
+    "background_jobs": ("id", "organization_id", "user_id", "kind", "subject_id", "status", "stage", "message", "payload", "result", "error", "attempts", "created_at", "started_at", "finished_at", "updated_at"),
 }
 
 
@@ -887,7 +993,7 @@ def _migrate_to_v22(connection) -> None:
 class Database:
     """Upgrades known schemas and rejects unknown or incomplete ones."""
 
-    SCHEMA_VERSION = 23
+    SCHEMA_VERSION = 24
 
     def __init__(self, url: str) -> None:
         engine_options: dict[str, object] = {"pool_pre_ping": True}

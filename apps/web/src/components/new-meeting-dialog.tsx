@@ -4,10 +4,12 @@ import { FormEvent, useEffect, useId, useState } from "react";
 import { Dialog } from "@base-ui/react/dialog";
 import { CircleCheck, Link2, X } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
-import type { KnowledgeBase, MeetingDetail } from "@/lib/types";
+import type { KnowledgeBase, MeetingDetail, Team, WorkspaceMember } from "@/lib/types";
 import type { CalendarSelection } from "./calendar-import-dialog";
 import { calendarProviderNames } from "./calendar-providers";
 import { DeliveryOptions, KnowledgeOptions, MinutesOptions, SourcePreview, type MomTemplate } from "./new-meeting-sections";
+import { readSetupDefaults, saveSetupDefaults } from "./new-meeting-defaults";
+import { chipProblem } from "./ui/chip-input";
 import { Alert } from "./ui/feedback";
 
 const SUPPORTED_PLATFORMS = "Google Meet, Zoom, Microsoft Teams or Jitsi";
@@ -32,10 +34,14 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
   const [knowledgeEnabled, setKnowledgeEnabled] = useState(false);
   const [selectedBaseId, setSelectedBaseId] = useState("");
   const [newBaseName, setNewBaseName] = useState("");
-  const [tagInput, setTagInput] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
   const [momTemplate, setMomTemplate] = useState<MomTemplate>("standard");
   const [momInstructions, setMomInstructions] = useState("");
-  const [momFocusInput, setMomFocusInput] = useState("");
+  const [momFocus, setMomFocus] = useState<string[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [members, setMembers] = useState<WorkspaceMember[]>([]);
+  const [groupIds, setGroupIds] = useState<string[]>([]);
+  const [identity, setIdentity] = useState<string | null>(null);
   const [joinTiming, setJoinTiming] = useState<"now" | "scheduled">("now");
   const [scheduledStart, setScheduledStart] = useState("");
   const [linkValue, setLinkValue] = useState("");
@@ -43,16 +49,34 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
   useEffect(() => {
     if (!open) return;
     let active = true;
-    void meetingsService.listKnowledgeBases().then((items) => {
+    const loadedBases = meetingsService.listKnowledgeBases().then((items) => {
       if (active) { setBases(items); setBasesError(null); }
+      return items;
     }).catch(() => {
       if (active) { setBases([]); setBasesError("Knowledge bases could not be loaded. Please retry or choose a new name."); }
+      return [] as KnowledgeBase[];
+    });
+    // Teams and teammates power recipient suggestions; the dialog works without them.
+    const loadedTeams = meetingsService.listTeams().catch(() => [] as Team[]);
+    void meetingsService.listWorkspaceMembers().then((items) => { if (active) setMembers(items); }).catch(() => undefined);
+    void Promise.all([meetingsService.getCurrentAccount().catch(() => null), loadedTeams, loadedBases]).then(([account, teamList, baseList]) => {
+      if (!active) return;
+      setTeams(teamList);
+      if (!account) return;
+      const key = `${account.organization_id}:${account.user_id}`;
+      const remembered = readSetupDefaults(key);
+      setIdentity(key);
+      // Last time's teams and knowledge base, if they still exist. Knowledge stays off until chosen.
+      setGroupIds((current) => current.length ? current : remembered.teamIds.filter((id) => teamList.some((team) => team.id === id)));
+      if (remembered.knowledgeBaseId && baseList.some((base) => base.id === remembered.knowledgeBaseId)) {
+        setSelectedBaseId((current) => current || remembered.knowledgeBaseId);
+      }
     });
     return () => { active = false; };
   }, [open]);
   if (!open) return null;
 
-  function close() { setError(null); setJoining(false); setSelectedBaseId(""); setNewBaseName(""); setTagInput(""); setKnowledgeEnabled(false); setMomTemplate("standard"); setMomInstructions(""); setMomFocusInput(""); setJoinTiming("now"); setScheduledStart(""); setLinkValue(""); setLinkError(null); onClose(); }
+  function close() { setError(null); setJoining(false); setSelectedBaseId(""); setNewBaseName(""); setTags([]); setKnowledgeEnabled(false); setMomTemplate("standard"); setMomInstructions(""); setMomFocus([]); setGroupIds([]); setJoinTiming("now"); setScheduledStart(""); setLinkValue(""); setLinkError(null); onClose(); }
 
   async function resolveKnowledgeBaseId(): Promise<string | null> {
     if (!knowledgeEnabled) return null;
@@ -90,7 +114,12 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
         participant_recipients: addresses(String(form.get("participant-recipients") ?? "")),
         send_to_participants: form.get("share-participants") === "on",
         include_transcript: form.get("include-transcript") === "on",
+        internal_group_ids: addresses(String(form.get("internal-group-ids") ?? "")),
       };
+      const tagList = addresses(String(form.get("meeting-tags") ?? ""));
+      const badTag = tagList.find((tag) => chipProblem("tag", tag, 50));
+      if (badTag) throw new Error(`Knowledge tag “${badTag}” ${chipProblem("tag", badTag, 50)}. Edit or remove it.`);
+      const focusFields = addresses(String(form.get("mom-focus") ?? ""));
       if (deliverySettings.send_to_participants && deliverySettings.participant_recipients.length === 0) {
         throw new Error("Add at least one participant email address, or turn off participant delivery.");
       }
@@ -107,29 +136,38 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
         meetingUrl: String(form.get("meeting-link") ?? ""),
         title: String(form.get("meeting-title") ?? "") || undefined,
         botName: String(form.get("bot-name") ?? "") || undefined,
-        tags: tagInput.split(/[,;\n]+/).map((item) => item.trim()).filter(Boolean),
+        tags: tagList,
         knowledgeEnabled,
         knowledgeBaseId,
         deliverySettings,
-        momGuidance: { template: momTemplate, instructions: momInstructions.trim(), focus_fields: momFocusInput.split(/[,;\n]+/).map((item) => item.trim()).filter(Boolean) },
+        momGuidance: { template: momTemplate, instructions: momInstructions.trim(), focus_fields: focusFields },
+      };
+      const remember = () => {
+        if (!identity) return;
+        const previous = readSetupDefaults(identity);
+        saveSetupDefaults(identity, { teamIds: deliverySettings.internal_group_ids, knowledgeBaseId: knowledgeEnabled ? knowledgeBaseId ?? "" : previous.knowledgeBaseId });
       };
       const shouldSchedule = calendarSelection && new Date(calendarSelection.event.starts_at).getTime() > Date.now() + 60_000;
       if (shouldSchedule) {
         const scheduled = await meetingsService.scheduleCalendarEvent(calendarSelection.event, calendarSelection.period, calendarSelection.timezone, input, calendarSelection.eventDate);
+        remember();
         onMeetingJoined(scheduled);
         return;
       }
       if (calendarSelection) {
         const joined = await meetingsService.joinCalendarEvent(calendarSelection.event, calendarSelection.period, calendarSelection.timezone, input, calendarSelection.eventDate);
+        remember();
         onMeetingJoined(joined);
         return;
       }
       if (scheduledStartIso) {
         const scheduled = await meetingsService.scheduleMeeting(input, scheduledStartIso);
+        remember();
         onMeetingJoined(scheduled);
         return;
       }
       const meeting = await meetingsService.createMeeting(input);
+      remember();
       try {
         const joined = await meetingsService.joinMeeting(meeting.id);
         onMeetingJoined(joined);
@@ -213,12 +251,13 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
           enabled={knowledgeEnabled} onEnabledChange={setKnowledgeEnabled}
           selectedBaseId={selectedBaseId} onSelectBase={(value) => { setSelectedBaseId(value); if (value) setKnowledgeEnabled(true); }}
           newBaseName={newBaseName} onNewBaseNameChange={(value) => { setNewBaseName(value); if (value.trim()) setKnowledgeEnabled(true); }}
-          tagInput={tagInput} onTagInputChange={setTagInput}
+          tags={tags} onTagsChange={setTags}
         />
 
         <div className="nm-section nm-disclosures">
-          <MinutesOptions disabled={joining} template={momTemplate} onTemplateChange={setMomTemplate} focus={momFocusInput} onFocusChange={setMomFocusInput} instructions={momInstructions} onInstructionsChange={setMomInstructions} />
-          <DeliveryOptions disabled={joining} defaultParticipants={(source?.invitees ?? []).flatMap((person) => person.email ? [person.email] : [])} />
+          <MinutesOptions disabled={joining} template={momTemplate} onTemplateChange={setMomTemplate} focus={momFocus} onFocusChange={setMomFocus} instructions={momInstructions} onInstructionsChange={setMomInstructions} />
+          <DeliveryOptions disabled={joining} defaultParticipants={(source?.invitees ?? []).flatMap((person) => person.email ? [person.email] : [])}
+            teams={teams} members={members} groupIds={groupIds} onGroupIdsChange={setGroupIds} />
         </div>
 
         <Alert tone="info" role="note" title="Disclosure is required." className="nm-disclosure">Before sending, confirm the host will announce: “Meetings AI has joined and will record and transcribe this conversation.”</Alert>

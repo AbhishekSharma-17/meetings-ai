@@ -542,3 +542,35 @@
   .workspace-directory-actions > .button.ghost:first-child { margin-left:-10px; }
   .workspace-landing { padding:10px 16px; }
 }
+
+/* Teams (workspace-teams.tsx, workspace-team-dialog.tsx) */
+.team-list { list-style:none; }
+.team-list > li + li { border-top:1px solid var(--border); }
+.team-row { display:grid; grid-template-columns:32px minmax(0,1fr) auto minmax(150px,auto); align-items:center; gap:10px 16px; min-height:62px; padding:10px 20px; }
+.team-row[data-confirming] { background:var(--destructive-subtle); }
+.team-row-icon { display:grid; place-items:center; width:32px; height:32px; border-radius:var(--radius); border:1px solid var(--brand-border); background:var(--brand-subtle); color:var(--brand); }
+.team-row-icon .lucide { width:16px; height:16px; }
+.team-row-identity { display:grid; min-width:0; }
+.team-row-identity b { font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.team-row-identity small { color:var(--text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.team-row-actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; }
+.team-row-confirm { color:var(--destructive-text); font-size:12.5px; }
+.team-row-error { grid-column:2 / -1; }
+.avatar-stack { display:inline-flex; align-items:center; padding-left:4px; }
+.avatar-stack > .avatar { margin-left:-4px; outline:2px solid var(--card); }
+.team-row[data-confirming] .avatar-stack > .avatar { outline-color:var(--destructive-subtle); }
+.avatar-more { background:var(--muted); color:var(--text-secondary); font-size:10px; }
+.team-dialog .team-picker { display:grid; gap:8px; min-width:0; }
+.team-dialog .team-member-options { margin-top:0; max-height:220px; }
+.team-dialog-total { margin-right:auto; color:var(--text-secondary); font-size:13px; }
+.team-dialog-empty { margin-top:16px; }
+.team-member-list { display:grid; gap:2px; margin-top:16px; list-style:none; max-height:min(60dvh,420px); overflow-y:auto; }
+.team-member-list li { display:flex; align-items:center; gap:10px; padding:6px 4px; }
+.team-member-list li > span:not(.avatar):not(.tag) { display:grid; min-width:0; flex:1; }
+.team-member-list b { font-size:13.5px; font-weight:500; }
+.team-member-list small { color:var(--text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+@media (max-width: 640px) {
+  .team-row { grid-template-columns:32px minmax(0,1fr) auto; padding:12px 16px; }
+  .team-row-actions { grid-column:2 / -1; justify-content:flex-start; }
+  .team-row-error { grid-column:1 / -1; }
+}

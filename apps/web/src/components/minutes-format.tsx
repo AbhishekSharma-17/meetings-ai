@@ -5,6 +5,11 @@ import { Collapsible } from "@base-ui/react/collapsible";
 import { ChevronDown, SlidersHorizontal } from "lucide-react";
 import type { MomGuidance } from "@/lib/types";
 import { UiSelect } from "./ui-select";
+import { ChipInput } from "./ui/chip-input";
+
+/** The panel keeps focus fields as one comma-separated string; the chips edit it as a list. */
+const toList = (value: string) => [...new Set(value.split(/[,;\n]+/).map((item) => item.trim()).filter(Boolean))];
+const toText = (list: string[]) => list.join(", ");
 
 const templateOptions: { value: MomGuidance["template"]; label: string }[] = [
   { value: "standard", label: "Balanced meeting minutes" },
@@ -26,7 +31,8 @@ export function MinutesFormat({ guidance, focusInput, locked, saving, onGuidance
 }) {
   const [open, setOpen] = useState(false);
   const templateLabel = templateOptions.find((option) => option.value === guidance.template)?.label ?? "Balanced meeting minutes";
-  const focusSummary = focusInput.trim() ? ` · Focus: ${focusInput.trim()}` : "";
+  const focusList = toList(focusInput);
+  const focusSummary = focusList.length ? ` · Focus: ${focusList.join(", ")}` : "";
   return <Collapsible.Root className="mom-format" open={open && !locked} onOpenChange={setOpen}>
     <div className="mom-format-bar">
       <SlidersHorizontal aria-hidden="true" />
@@ -36,7 +42,8 @@ export function MinutesFormat({ guidance, focusInput, locked, saving, onGuidance
     <Collapsible.Panel className="mom-format-panel">
       <div className="field-row">
         <UiSelect id="mom-template" label="Template" value={guidance.template} options={templateOptions} onChange={(value) => onGuidanceChange({ ...guidance, template: value as MomGuidance["template"] })} disabled={locked} />
-        <div className="field"><label htmlFor="mom-focus">Focus fields <small>comma-separated</small></label><input id="mom-focus" value={focusInput} disabled={locked} onChange={(event) => onFocusInputChange(event.target.value)} placeholder="Risks, Budget, Dependencies" /></div>
+        <ChipInput id="mom-focus" kind="text" label="Focus fields" labelSuffix={<span className="optional">optional</span>} value={focusList}
+          onChange={(list) => onFocusInputChange(toText(list))} disabled={locked} placeholder="Risks, Budget, Dependencies" maxItems={8} maxItemLength={80} />
       </div>
       <div className="field"><label htmlFor="mom-guidance">Organizer guidance</label><textarea id="mom-guidance" rows={3} maxLength={2000} value={guidance.instructions} disabled={locked} onChange={(event) => onGuidanceChange({ ...guidance, instructions: event.target.value })} placeholder="What should the draft emphasize?" /></div>
       <div className="mom-format-foot">

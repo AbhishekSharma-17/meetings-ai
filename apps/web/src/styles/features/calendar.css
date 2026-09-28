@@ -411,3 +411,24 @@ a.prep-citation.internal { border-color:var(--border); background:var(--muted); 
   .meeting-prep-panel .card-header { flex-wrap:wrap; }
 }
 .prep-progress h2 { display:flex; align-items:center; gap:8px; }
+
+/* ---------- Connect in a new tab ---------- */
+.calendar-connect-wait { margin-bottom:16px; align-items:center; }
+.calendar-connect-wait .alert-actions { flex-wrap:wrap; }
+.calendar-connect-done { margin-bottom:16px; }
+@media (max-width: 640px) {
+  .calendar-connect-wait { flex-wrap:wrap; }
+  .calendar-connect-wait .alert-actions { width:100%; }
+}
+
+/* The provider's return page when consent ran in a new tab. */
+.oauth-callback { min-height:100dvh; display:grid; place-items:center; padding:24px 16px; background:var(--background); }
+.oauth-callback-card { width:min(420px, 100%); display:grid; justify-items:center; gap:12px; padding:28px 24px; text-align:center; }
+.oauth-callback-card h1 { font-size:18px; font-weight:600; }
+.oauth-callback-card p { color:var(--text-secondary); font-size:13.5px; line-height:1.55; }
+.oauth-callback-card .button { margin-top:6px; }
+.oauth-callback-logo { border-radius:var(--radius); }
+.oauth-callback-icon { display:inline-grid; place-items:center; width:40px; height:40px; border-radius:50%; }
+.oauth-callback-icon .lucide { width:22px; height:22px; }
+.oauth-callback-icon.success { background:var(--success-subtle); color:var(--success-text); }
+.oauth-callback-icon.danger { background:var(--destructive-subtle); color:var(--destructive-text); }
