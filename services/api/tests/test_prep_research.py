@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from account_links import accept_invite
 from app.composio_calendar import CalendarConnection, CalendarEvent, CalendarEventsResponse
 from app.database import LEGACY_ADMIN_USER_ID, LEGACY_ORGANIZATION_ID, KnowledgeDocumentRow, MeetingPrepRow, UsageEventRow
 from app.exa_client import ExaClient, ExaError, ExaResult, UsageContext
@@ -329,10 +330,7 @@ def test_viewers_cannot_generate_or_edit_inputs(tmp_path, monkeypatch):
         invited = owner.post("/v1/workspace/invite", json={
             "email": "viewer@ourco.example", "display_name": "View Only", "role": "viewer"})
         assert invited.status_code == 201, invited.text
-        temporary = invited.json()["temporary_password"]
-        assert viewer.post("/v1/auth/login", json={"email": "viewer@ourco.example", "password": temporary}).status_code == 200
-        assert viewer.post("/v1/auth/change-password", json={
-            "current_password": temporary, "new_password": "viewer-new-password-for-test"}).status_code == 200
+        accept_invite(viewer, invited.json(), "viewer-new-password-for-test")
         synced = viewer.post("/v1/calendar/sync", json={"start_date": "2026-10-01", "end_date": "2026-10-31", "timezone": "UTC"})
         assert synced.status_code == 200, synced.text
         event_id = synced.json()["events"][0]["id"]

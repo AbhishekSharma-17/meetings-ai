@@ -180,24 +180,6 @@
 .settings-readonly { display:flex; align-items:center; min-height:36px; padding:0 11px; border:1px dashed var(--border-strong); border-radius:var(--radius); background:var(--muted); color:var(--text-secondary); font-size:13px; }
 
 /* ---------- People & access ---------- */
-.member-list { list-style:none; }
-.member-list > li + li { border-top:1px solid var(--border); }
-.member-row { display:grid; grid-template-columns:28px minmax(0,1fr) 130px 92px minmax(170px,auto); align-items:center; gap:12px 16px; min-height:60px; padding:10px 20px; }
-.member-identity { display:grid; min-width:0; }
-.member-name { display:flex; align-items:center; gap:8px; min-width:0; }
-.member-name b { font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.member-identity small { color:var(--text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.member-role-text { color:var(--text-secondary); font-size:13px; padding-left:2px; }
-.member-actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; }
-.invite-panel { display:grid; gap:16px; padding:18px 20px 20px; border-top:1px solid var(--border); background:var(--muted); border-radius:0 0 var(--radius-lg) var(--radius-lg); }
-.invite-panel .settings-icon { background:var(--card); }
-.invite-heading { display:flex; align-items:center; gap:12px; }
-.invite-footer { display:flex; align-items:center; justify-content:space-between; gap:12px 20px; }
-.invite-footer .field-hint { max-width:60ch; }
-.invite-secret { display:grid; gap:8px; margin-top:8px; }
-.invite-secret dt { font-size:12px; opacity:.85; }
-.invite-secret dd { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-.invite-secret code { padding:3px 8px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--card); color:var(--foreground); font-size:13px; overflow-wrap:anywhere; user-select:all; }
 
 /* ---------- Workspaces, company profile, operations, audit ---------- */
 .workspace-directory { list-style:none; }
@@ -207,8 +189,6 @@
 .workspace-directory-copy { display:grid; flex:1; min-width:0; }
 .workspace-directory-copy b { font-weight:500; }
 .workspace-directory-copy small { color:var(--text-secondary); }
-.workspace-create { justify-content:flex-start; flex-wrap:nowrap; }
-.workspace-create input { flex:1 1 auto; min-width:0; }
 .brief-documents .section-heading { margin-bottom:10px; }
 .brief-upload { cursor:pointer; }
 .brief-upload:has(input:focus-visible) { outline:2px solid var(--ring); outline-offset:2px; }
@@ -233,20 +213,9 @@
 @media (max-width: 1100px) {
   .settings-layout { grid-template-columns:minmax(0,1fr); }
   .settings-nav { display:none; }
-  .member-row { grid-template-columns:28px minmax(0,1fr) 130px auto; }
-  .member-status { display:none; }
 }
 @media (max-width: 640px) {
-  .member-row { grid-template-columns:28px minmax(0,1fr) auto; padding:12px 16px; }
-  .member-role { grid-column:2 / 3; }
-  .member-status { display:block; grid-column:3; grid-row:1; }
-  .member-actions { grid-column:2 / -1; justify-content:flex-start; }
-  .member-actions:empty { display:none; }
-  .invite-panel { padding:16px; }
-  .invite-footer { flex-direction:column; align-items:stretch; }
   .workspace-directory .list-row { padding:10px 16px; }
-  .workspace-create { flex-wrap:wrap; }
-  .workspace-create .button { width:100%; }
 }
 
 /* ---------- My profile ---------- */

@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from meetings_contracts import ProviderType, TextGenerationRequest
+from account_links import accept_invite
 from app.adapters.openai_compatible import OpenAICompatibleAdapter
 from app.credential_vault import EXA_SEARCH_USD_PER_REQUEST, CredentialVault
 from app.database import LEGACY_ORGANIZATION_ID, ProviderCredentialRow, ProviderProfileCredentialRow, ProviderProfileRow, UsageEventRow
@@ -233,12 +234,8 @@ def _login(client, email: str, password: str) -> None:
 def _invite(client, email: str, role: str) -> None:
     invited = client.post("/v1/workspace/invite", json={"email": email, "display_name": "Team Mate", "role": role})
     assert invited.status_code == 201, invited.text
-    temporary = invited.json()["temporary_password"]
     client.post("/v1/auth/logout")
-    _login(client, email, temporary)
-    assert client.post("/v1/auth/change-password", json={
-        "current_password": temporary, "new_password": f"{role}-long-password-123",
-    }).status_code == 200
+    accept_invite(client, invited.json(), f"{role}-long-password-123")
     client.post("/v1/auth/logout")
 
 

@@ -9,14 +9,16 @@ import type { DemoStore } from "../store";
 
 export const accountOf = (store: DemoStore): CurrentAccount => ownerAccount(store.orgId, store.photoUrl, store.displayName);
 
-function demoPassword(): string {
-  const words = ["harbor", "maple", "orbit", "cedar", "lumen", "delta", "quartz", "willow"];
-  const pick = () => words[Math.floor(Math.random() * words.length)];
-  return `demo-${pick()}-${pick()}-${Math.floor(1000 + Math.random() * 9000)}`;
-}
+/** Demo invite and reset links "expire" like real ones; no link or token is ever produced. */
+const DEMO_LINK_MS = 10 * 60_000;
+const demoLinkExpiry = () => new Date(Date.now() + DEMO_LINK_MS).toISOString();
 
 function memberAccount(store: DemoStore, member: WorkspaceMember): CurrentAccount {
-  return { user_id: member.user_id, organization_id: store.orgId, email: member.email, display_name: member.display_name, role: member.role, must_change_password: true, photo_url: null };
+  return { user_id: member.user_id, organization_id: store.orgId, email: member.email, display_name: member.display_name, role: member.role, must_change_password: false, photo_url: null };
+}
+
+function simulatedEmail(store: DemoStore, member: WorkspaceMember, note: string): InviteResult {
+  return { account: memberAccount(store, member), temporary_password: null, email_sent: true, accept_url: null, link_expires_at: demoLinkExpiry(), note };
 }
 
 function operations(store: DemoStore) {
@@ -92,16 +94,27 @@ export function registerWorkspace(router: DemoRouter): void {
       const name = str(body.display_name)?.trim();
       if (!email || !email.includes("@") || !name) return problem(422, "Enter a name and a valid email address.");
       if (store.members.some((member) => member.email === email)) return problem(409, "That person is already in this workspace.");
-      const member: WorkspaceMember = { user_id: newId(2), display_name: name, email, role: (str(body.role) as WorkspaceMember["role"]) ?? "member", status: "invited", photo_url: null };
+      const member: WorkspaceMember = { user_id: newId(2), display_name: name, email, role: (str(body.role) as WorkspaceMember["role"]) ?? "member", status: "invited", photo_url: null, invite_expires_at: demoLinkExpiry() };
       store.members = [...store.members, member];
-      const result: InviteResult = { account: memberAccount(store, member), temporary_password: demoPassword(), email_sent: false, note: "Demo: no invitation email was sent and this temporary password works nowhere. In a real workspace you would share it securely; it must be changed at first sign-in." };
-      return json(result, 201);
+      return json(simulatedEmail(store, member, `Demo: in a real workspace ${email} would get an “Accept invite” email with a link that works once for 10 minutes. Nothing was sent.`), 201);
     })
-    .on("POST", "/v1/workspace/members/:id/temporary-password", ({ store, params }) => {
+    .on("POST", "/v1/workspace/members/:id/resend-invite", ({ store, params }) => {
       const member = store.members.find((item) => item.user_id === params.id);
       if (!member) return problem(404, "member not found");
-      return json({ account: memberAccount(store, member), temporary_password: demoPassword(), email_sent: false, note: "Demo: a sample temporary password — it does not work anywhere." } satisfies InviteResult);
+      if (member.status !== "invited") return problem(409, "this person has already accepted their invitation");
+      const refreshed = { ...member, invite_expires_at: demoLinkExpiry() };
+      store.members = store.members.map((item) => item.user_id === member.user_id ? refreshed : item);
+      return json(simulatedEmail(store, refreshed, "Demo: a fresh invitation link would be emailed and the old one would stop working. Nothing was sent."));
     })
+    .on("POST", "/v1/workspace/members/:id/reset-access", ({ store, params }) => {
+      const member = store.members.find((item) => item.user_id === params.id);
+      if (!member) return problem(404, "member not found");
+      if (member.role === "owner") return problem(409, "you can't manage this member's access");
+      return json(simulatedEmail(store, member, `Demo: ${member.display_name}’s sessions would end and they’d get a “Set a new password” link valid for 10 minutes. Nothing was sent or changed.`));
+    })
+    .on("POST", "/v1/auth/password-reset", () => json({ accepted: true, message: "If an account exists for that email, we've emailed a link to set a new password." }, 202))
+    .on("POST", "/v1/auth/account-link", () => json({ state: "invalid", purpose: null, email: null, display_name: null, workspace_name: null, expires_at: null }))
+    .on("POST", "/v1/auth/account-link/accept", () => problem(410, { reason: "invalid", message: "Demo: invitation links only work in a real workspace." }))
     .on("PATCH", "/v1/workspace/members/:id/role", ({ store, params, body }) => {
       const role = str(body.role) as WorkspaceMember["role"] | null;
       const member = store.members.find((item) => item.user_id === params.id);

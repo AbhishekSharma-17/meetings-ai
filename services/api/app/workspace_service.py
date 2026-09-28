@@ -5,15 +5,17 @@ from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from .database import (
+    AccountTokenRow,
     Database,
     OrganizationMembershipRow,
     OrganizationRow,
     UserProfilePhotoRow,
     UserRow,
 )
+from .account_tokens import as_utc
 from .profile_photos import photo_url
 from .tenant import current_organization_id
 
@@ -63,6 +65,8 @@ class WorkspaceMemberPublic(BaseModel):
     role: str
     status: str
     photo_url: str | None = None
+    # Latest usable invitation link for this workspace; null when none is outstanding.
+    invite_expires_at: datetime | None = None
 
 
 class WorkspaceService:
@@ -94,18 +98,26 @@ class WorkspaceService:
             return self._public(row)
 
     def list_members(self) -> list[WorkspaceMemberPublic]:
+        organization_id = str(current_organization_id())
         with self.database.session_factory() as session:
+            invites = dict(session.execute(
+                select(AccountTokenRow.user_id, func.max(AccountTokenRow.expires_at))
+                .where(AccountTokenRow.organization_id == organization_id, AccountTokenRow.purpose == "invite",
+                       AccountTokenRow.used_at.is_(None), AccountTokenRow.revoked_at.is_(None))
+                .group_by(AccountTokenRow.user_id)
+            ).all())
             rows = session.execute(
                 select(OrganizationMembershipRow, UserRow, UserProfilePhotoRow.updated_at)
                 .join(UserRow, UserRow.id == OrganizationMembershipRow.user_id)
                 .outerjoin(UserProfilePhotoRow, UserProfilePhotoRow.user_id == UserRow.id)
-                .where(OrganizationMembershipRow.organization_id == str(current_organization_id()))
+                .where(OrganizationMembershipRow.organization_id == organization_id)
                 .order_by(UserRow.display_name)
             ).all()
             return [WorkspaceMemberPublic(
                 user_id=UUID(user.id), display_name=user.display_name,
                 email=user.email, role=membership.role, status=user.status,
                 photo_url=photo_url(user.id, photo_updated_at),
+                invite_expires_at=as_utc(invites[user.id]) if user.status == "invited" and user.id in invites else None,
             ) for membership, user, photo_updated_at in rows]
 
     @staticmethod
@@ -115,3 +127,4 @@ class WorkspaceService:
             contact_email=row.contact_email, status=row.status,
             created_at=row.created_at, updated_at=row.updated_at,
         )
+

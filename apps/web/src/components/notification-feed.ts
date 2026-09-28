@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { notificationService } from "@/lib/meetings-service";
 import type { AppNotification } from "@/lib/types";
+import { formatDate, formatFullDateTime, zonedDayKey } from "@/lib/time-store";
 import { JOB_ACTIVITY_EVENT } from "./use-background-job";
 
 const POLL_MS = 20_000;
@@ -24,9 +25,10 @@ export type NotificationGroup = { label: string; items: AppNotification[] };
 
 /** "Today" first, then "Earlier", newest first inside each group. */
 export function groupNotifications(items: AppNotification[], now = new Date()): NotificationGroup[] {
-  const startOfDay = new Date(now); startOfDay.setHours(0, 0, 0, 0);
-  const today = items.filter((item) => new Date(item.created_at) >= startOfDay);
-  const earlier = items.filter((item) => new Date(item.created_at) < startOfDay);
+  // "Today" in the person's time zone.
+  const todayKey = zonedDayKey(now);
+  const today = items.filter((item) => zonedDayKey(item.created_at) === todayKey);
+  const earlier = items.filter((item) => zonedDayKey(item.created_at) !== todayKey);
   return [{ label: "Today", items: today }, { label: "Earlier", items: earlier }].filter((group) => group.items.length);
 }
 
@@ -36,11 +38,11 @@ export function relativeTime(value: string, now = Date.now()): string {
   const seconds = Math.round((new Date(value).getTime() - now) / 1000);
   const abs = Math.abs(seconds);
   if (abs < 45) return "Just now";
-  if (!relative) return new Date(value).toLocaleString();
+  if (!relative) return formatFullDateTime(value);
   if (abs < 3_600) return relative.format(Math.round(seconds / 60), "minute");
   if (abs < 86_400) return relative.format(Math.round(seconds / 3_600), "hour");
   if (abs < 7 * 86_400) return relative.format(Math.round(seconds / 86_400), "day");
-  return new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return formatDate(value, { month: "short", day: "numeric" });
 }
 
 /**

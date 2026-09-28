@@ -1,17 +1,60 @@
-import type { PrepDocument, PrepGenerateInput, PrepHistory, PrepInputs, PrepReportV2, PrepUsageTotals, UsageEvent } from "../../types";
+import type { AttendeeSides, CachedCalendarEvent, OrganizationIdentity, PrepDocument, PrepGenerateInput, PrepHistory, PrepInputs, PrepReportV2, PrepUsageTotals, UsageEvent } from "../../types";
 import { newId } from "../fixtures/ids";
 import { generatedReport } from "../fixtures/prep-generate";
 import { bool, json, noContent, notify, problem, sse, type SseFrame, str, strList, wait } from "../http";
 import type { DemoRequest, DemoRouter } from "../router";
 import type { DemoStore } from "../store";
+import { demoIdentity, demoWhosWho } from "../whos-who";
 
 const DOCUMENT_PROCESSING_MS = 4_000;
+
+const DOMAIN = /^(?=.{3,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+const PERSONAL = new Set(["gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "yahoo.com", "icloud.com", "aol.com", "proton.me"]);
+
+function sidesOf(value: unknown): AttendeeSides {
+  if (!value || typeof value !== "object") return {};
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+    .filter(([, side]) => side === "ours" || side === "theirs").slice(0, 100)
+    .map(([key, side]) => [key.trim().toLowerCase(), side as "ours" | "theirs"]));
+}
 
 function inputOf(body: Record<string, unknown>): PrepGenerateInput {
   return {
     context: str(body.context) ?? "", target_company: str(body.target_company), company_website: str(body.company_website),
     profile_urls: strList(body.profile_urls), text_profile_id: str(body.text_profile_id), research_enabled: bool(body.research_enabled, true),
+    attendee_sides: sidesOf(body.attendee_sides),
   };
+}
+
+/** The same who's who the API would compute; generated briefings never treat the sample company as the client. */
+function partiesFor(store: DemoStore, event: CachedCalendarEvent, input: PrepGenerateInput) {
+  const stored = store.prepInputs[event.id];
+  return demoWhosWho(store, event, {
+    target_company: input.target_company ?? stored?.target_company ?? null, company_website: input.company_website ?? stored?.company_website ?? null,
+    attendee_sides: input.attendee_sides ?? {},
+  });
+}
+
+function withParties(store: DemoStore, report: PrepReportV2 | undefined): PrepReportV2 | null {
+  if (!report) return null;
+  const event = store.events.find((item) => item.id === report.calendar_event_id);
+  if (report.whos_who || !event) return report;
+  return { ...report, whos_who: demoWhosWho(store, event, { target_company: report.target_company, company_website: report.company_website, attendee_sides: {} }) };
+}
+
+function saveIdentity(store: DemoStore, body: Record<string, unknown>): Response {
+  const domains: string[] = [];
+  for (const raw of strList(body.domains)) {
+    const domain = raw.trim().toLowerCase().replace(/^@/, "").replace(/^[a-z]+:\/\//, "").split(/[/?#:]/)[0].replace(/^www\./, "");
+    if (!DOMAIN.test(domain)) return problem(422, `“${raw}” is not a valid email domain, e.g. yourcompany.com`);
+    if (PERSONAL.has(domain)) return problem(422, `${domain} is a personal email provider; add your company's own domain`);
+    if (!domains.includes(domain)) domains.push(domain);
+  }
+  const name = str(body.company_name)?.trim() || null;
+  const aliases = [...new Map(strList(body.aliases).map((alias) => alias.trim()).filter((alias) => alias && alias.toLowerCase() !== name?.toLowerCase()).map((alias) => [alias.toLowerCase(), alias])).values()].slice(0, 20);
+  const saved: OrganizationIdentity = { ...demoIdentity(store), company_name: name, aliases, domains: domains.slice(0, 30), configured: true, can_edit: true, updated_at: new Date().toISOString() };
+  store.companyIdentity = saved;
+  return json(saved);
 }
 
 function usageFor(research: boolean): PrepUsageTotals {
@@ -34,10 +77,17 @@ function buildReport(store: DemoStore, eventId: string, input: PrepGenerateInput
   if (!event) return null;
   const usage = usageFor(input.research_enabled);
   const generatedAt = new Date().toISOString();
-  const report = generatedReport({ id: newId(7), event, input, startedAt: new Date(Date.now() - 8_000).toISOString(), generatedAt, usage });
+  const parties = partiesFor(store, event, input);
+  // Research the resolved client, never the sample company itself (a target that looked like us is dropped).
+  const safeInput: PrepGenerateInput = { ...input, target_company: parties.target.name ?? parties.target.domains[0] ?? null, company_website: parties.target.website };
+  const sideOf = new Map(parties.attendees.map((person) => [person.email?.toLowerCase() ?? person.name, person.side]));
+  const generated = generatedReport({ id: newId(7), event, input: safeInput, startedAt: new Date(Date.now() - 8_000).toISOString(), generatedAt, usage });
+  const report: PrepReportV2 = { ...generated, whos_who: parties, attendees: generated.attendees
+    .map((person) => ({ ...person, side: sideOf.get(person.email?.toLowerCase() ?? person.name) ?? "unknown" }))
+    .filter((person) => person.side !== "ours") as PrepReportV2["attendees"] };
   const known = store.reports[eventId]?.[0];
   // Known sample accounts keep their curated briefing content, refreshed with a new id and timestamp.
-  const next = known && (!input.target_company || known.target_company?.toLowerCase() === input.target_company.toLowerCase()) ? { ...known, id: report.id, generated_at: generatedAt, started_at: report.started_at, usage, public_research_performed: input.research_enabled } : report;
+  const next = known && !parties.warnings.length && (!input.target_company || known.target_company?.toLowerCase() === input.target_company.toLowerCase()) ? { ...known, id: report.id, generated_at: generatedAt, started_at: report.started_at, usage, public_research_performed: input.research_enabled, whos_who: parties } : report;
   store.reports = { ...store.reports, [eventId]: [next, ...(store.reports[eventId] ?? [])] };
   recordUsage(store, eventId, event.title, usage);
   return next;
@@ -70,7 +120,13 @@ function documents(store: DemoStore, scopeId: string | null): PrepDocument[] {
 
 export function registerPrep(router: DemoRouter): void {
   router
-    .on("GET", "/v1/calendar/events/:id/prep", withEvent((id, { store }) => json(store.reports[id]?.[0] ?? null)))
+    .on("GET", "/v1/calendar/events/:id/prep", withEvent((id, { store }) => json(withParties(store, store.reports[id]?.[0]))))
+    .on("POST", "/v1/calendar/events/:id/prep/whos-who", withEvent((id, { store, body }) => {
+      const event = store.events.find((item) => item.id === id)!;
+      return json(demoWhosWho(store, event, { target_company: str(body.target_company), company_website: str(body.company_website), attendee_sides: sidesOf(body.attendee_sides) }));
+    }))
+    .on("GET", "/v1/workspace/identity", ({ store }) => json(demoIdentity(store)))
+    .on("PUT", "/v1/workspace/identity", ({ store, body }) => saveIdentity(store, body))
     .on("POST", "/v1/calendar/events/:id/prep", withEvent(async (id, { store, body }) => {
       await wait(2_500);
       const report = buildReport(store, id, inputOf(body));

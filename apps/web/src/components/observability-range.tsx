@@ -2,6 +2,10 @@
 
 import type { UsageRange } from "@/lib/types";
 import { UiSelect } from "./ui-select";
+import { currentTimeSettings, todayKey } from "@/lib/time-store";
+import { addDaysToKey, wallTimeToDate } from "@/lib/time-format";
+
+const startOfDay = (key: string): Date | null => wallTimeToDate(`${key}T00:00`, currentTimeSettings().timeZone);
 
 export type RangePreset = "7" | "30" | "90" | "all" | "custom";
 export type RangeChoice = { preset: RangePreset; from: string; to: string };
@@ -14,21 +18,18 @@ const presets: Array<{ value: RangePreset; label: string }> = [
   { value: "custom", label: "Custom range" },
 ];
 
-const startOfLocalDay = (value: Date) => new Date(value.getFullYear(), value.getMonth(), value.getDate());
-
 /** Converts the picker choice to the API's half-open [since, until) window in UTC. */
 export function rangeFor(choice: RangeChoice): UsageRange {
   if (choice.preset === "all") return { since: null, until: null };
   if (choice.preset === "custom") {
-    const since = choice.from ? new Date(`${choice.from}T00:00:00`) : null;
-    const until = choice.to ? new Date(`${choice.to}T00:00:00`) : null;
-    if (until) until.setDate(until.getDate() + 1); // Include the whole "to" day.
+    // Dates are whole days in the person's time zone; "to" includes that whole day.
+    const since = choice.from ? startOfDay(choice.from) : null;
+    const until = choice.to ? startOfDay(addDaysToKey(choice.to, 1)) : null;
     if (since && until && since >= until) return { since: since.toISOString(), until: null };
     return { since: since?.toISOString() ?? null, until: until?.toISOString() ?? null };
   }
-  const since = startOfLocalDay(new Date());
-  since.setDate(since.getDate() - Number(choice.preset) + 1);
-  return { since: since.toISOString(), until: null };
+  const since = startOfDay(addDaysToKey(todayKey(), 1 - Number(choice.preset)));
+  return { since: since?.toISOString() ?? null, until: null };
 }
 
 export function RangePicker({ value, onChange }: { value: RangeChoice; onChange(value: RangeChoice): void }) {

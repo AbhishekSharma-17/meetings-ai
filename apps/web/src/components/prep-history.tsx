@@ -1,4 +1,5 @@
 import { History } from "lucide-react";
+import { formatDateTime } from "@/lib/time-preferences";
 import type { PrepHistory } from "@/lib/types";
 import { Badge, EmptyState } from "./ui/feedback";
 import { briefingTime, formatTokens, formatUsd } from "./prep-shared";
@@ -19,14 +20,14 @@ export function PrepHistoryList({ history, currentId }: { history: PrepHistory; 
         <thead><tr><th scope="col">Generated</th><th scope="col">Model</th><th scope="col">Research</th><th scope="col" className="num">Tokens</th><th scope="col" className="num">Est. cost</th></tr></thead>
         <tbody>
           {history.items.map((item) => <tr key={item.id}>
-            <td>
-              <time dateTime={item.generated_at}>{new Date(item.generated_at).toLocaleString(undefined, briefingTime)}</time>
+            <td data-label="Generated">
+              <time dateTime={item.generated_at}>{formatDateTime(item.generated_at, briefingTime)}</time>
               {item.id === currentId ? <> <Badge tone="brand">Current</Badge></> : null}
             </td>
-            <td className="prep-history-model">{item.provider} / {item.model}</td>
-            <td>{!item.public_research_performed ? "Context only" : item.report_version === 2 ? `${item.usage.exa_calls} searches` : "Public research"}</td>
-            <td className="num">{item.report_version === 2 ? (item.usage.input_tokens + item.usage.output_tokens).toLocaleString() : "—"}</td>
-            <td className="num">{item.report_version === 2 ? formatUsd(item.usage.estimated_usd) : "—"}</td>
+            <td className="prep-history-model" data-label="Model">{item.provider} / {item.model}</td>
+            <td data-label="Research">{!item.public_research_performed ? "Context only" : item.report_version === 2 ? `${item.usage.exa_calls} searches` : "Public research"}</td>
+            <td className="num" data-label="Tokens">{item.report_version === 2 ? (item.usage.input_tokens + item.usage.output_tokens).toLocaleString() : "—"}</td>
+            <td className="num" data-label="Est. cost">{item.report_version === 2 ? formatUsd(item.usage.estimated_usd) : "—"}</td>
           </tr>)}
         </tbody>
       </table>

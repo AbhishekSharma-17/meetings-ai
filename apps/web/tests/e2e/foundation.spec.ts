@@ -133,11 +133,16 @@ test("owner can change a member role and remove workspace access", async ({ page
   await page.goto("/");
   await page.getByRole("button", { name: /Workspace owner developer@genaiprotos.com/ }).click();
   await page.getByRole("button", { name: "Organization & people" }).click();
-  await page.getByRole("combobox", { name: "Role for Team Member" }).click();
+  await page.getByRole("button", { name: "Actions for Team Member" }).click();
+  await page.getByRole("menuitem", { name: "Change role" }).click();
+  const roleDialog = page.getByRole("dialog", { name: "Change role for Team Member" });
+  await roleDialog.getByRole("combobox", { name: "Role" }).click();
   await page.getByRole("option", { name: "Admin" }).click();
+  await roleDialog.getByRole("button", { name: "Save role" }).click();
   await expect(page.getByText("Member role updated.")).toBeVisible();
-  await page.getByRole("button", { name: "Remove", exact: true }).click();
-  await page.getByRole("button", { name: "Confirm remove" }).click();
+  await page.getByRole("button", { name: "Actions for Team Member" }).click();
+  await page.getByRole("menuitem", { name: "Remove from workspace" }).click();
+  await page.getByRole("dialog", { name: "Remove Team Member?" }).getByRole("button", { name: "Remove", exact: true }).click();
   await expect(page.getByText("Member access removed from this workspace.")).toBeVisible();
   await expect(page.getByText("Team Member", { exact: true })).toHaveCount(0);
 });
@@ -170,8 +175,9 @@ test("owner can invite a teammate and share a named knowledge base", async ({ pa
       members.push({ user_id: memberId, display_name: payload.display_name,
         email: payload.email, role: payload.role, status: "invited" });
       return route.fulfill({ status: 201, json: {
-        account: { ...members[1], organization_id: base.organization_id, must_change_password: true },
-        temporary_password: "one-time-test-password", note: "Email delivery is not configured.", email_sent: false,
+        account: { ...members[1], organization_id: base.organization_id, must_change_password: false },
+        temporary_password: null, note: "Email delivery isn't configured, so no invitation was sent.", email_sent: false,
+        accept_url: "http://localhost:3021/#accept=one-time-test-link-0123456789", link_expires_at: "2026-09-24T00:10:00Z",
       } });
     }
     return route.fallback();
@@ -191,10 +197,14 @@ test("owner can invite a teammate and share a named knowledge base", async ({ pa
   await page.goto("/");
   await page.getByRole("button", { name: /Workspace owner developer@genaiprotos.com/ }).click();
   await page.getByRole("button", { name: "Organization & people" }).click();
-  await page.getByLabel("Name", { exact: true }).fill("Team Member");
-  await page.getByLabel("Work email").fill("teammate@example.com");
-  await page.getByRole("button", { name: "Send invitation" }).click();
-  await expect(page.getByText("one-time-test-password")).toBeVisible();
+  await page.getByRole("button", { name: "Add people" }).click();
+  const addDialog = page.getByRole("dialog", { name: "Add people" });
+  await addDialog.getByLabel("Name", { exact: true }).fill("Team Member");
+  await addDialog.getByLabel("Work email").fill("teammate@example.com");
+  await addDialog.getByRole("button", { name: "Send invitation" }).click();
+  const created = page.getByRole("dialog", { name: "Invitation created" });
+  await expect(created.getByLabel("One-time link · shown once")).toHaveValue(/#accept=one-time-test-link/);
+  await created.getByRole("button", { name: "Done" }).click();
   await expect(page.getByText("Team Member", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "AI knowledge" }).click();
   await page.getByRole("button", { name: /Client account/ }).click();

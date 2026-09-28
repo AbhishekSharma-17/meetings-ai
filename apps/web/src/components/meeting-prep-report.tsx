@@ -1,4 +1,5 @@
 import { BriefcaseBusiness, CircleHelp, ExternalLink, Lightbulb, MessageSquareText, TriangleAlert, UserRoundSearch } from "lucide-react";
+import { formatDateTime } from "@/lib/time-preferences";
 import type { AnyPrepReport, PrepReport, PrepReportV2 } from "@/lib/types";
 import { Alert, Badge } from "./ui/feedback";
 import { briefingTime, Citations, hostname, ListSection, safeHref, SectionHeading } from "./prep-shared";
@@ -19,7 +20,7 @@ function LegacyPrepReport({ report }: { report: PrepReport }) {
   return <article className="card prep-report" aria-labelledby="prep-report-title">
     <div className="card-header">
       <div>
-        <div className="prep-report-meta"><Badge tone="success" dot>Saved briefing</Badge><small>{new Date(report.generated_at).toLocaleString(undefined, briefingTime)} · {report.provider} / {report.model}</small></div>
+        <div className="prep-report-meta"><Badge tone="success" dot>Saved briefing</Badge><small>{formatDateTime(report.generated_at, briefingTime)} · {report.provider} / {report.model}</small></div>
         <h2 id="prep-report-title">{report.target_company ? `Briefing: ${report.target_company}` : "Meeting briefing"}</h2>
       </div>
     </div>

@@ -293,7 +293,7 @@ def test_v23_database_upgrades_to_v24(tmp_path) -> None:
     database.migrate()
     with database.engine.connect() as connection:
         assert V24_TABLES <= set(inspect(connection).get_table_names())
-        assert max(connection.execute(select(SchemaVersionRow.version)).scalars().all()) == 24
+        assert max(connection.execute(select(SchemaVersionRow.version)).scalars().all()) == Database.SCHEMA_VERSION
         assert connection.execute(text("SELECT internal_recipients FROM meeting_delivery_settings")).scalar_one() == '["a@example.test"]'
         unique = {tuple(item["column_names"]) for item in inspect(connection).get_unique_constraints("recipient_groups")}
         assert ("organization_id", "name_key") in unique

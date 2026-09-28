@@ -2,6 +2,7 @@
 
 from fastapi.testclient import TestClient
 
+from account_links import accept_invite
 from app.database import KnowledgeBaseAccessRow
 from app.main import create_app
 
@@ -25,16 +26,12 @@ def test_role_changes_and_removal_apply_to_active_sessions(tmp_path, monkeypatch
         })
         assert invited.status_code == 201
         member_id = invited.json()["account"]["user_id"]
-        temporary = invited.json()["temporary_password"]
         base = owner.post("/v1/knowledge-bases", json={"name": "Restricted wiki"}).json()
         assert owner.put(f"/v1/knowledge-bases/{base['id']}/sharing", json={
             "visibility": "specific", "user_ids": [member_id],
         }).status_code == 200
 
-        _login(teammate, "teammate@example.test", temporary)
-        assert teammate.post("/v1/auth/change-password", json={
-            "current_password": temporary, "new_password": "teammate-new-password-for-test",
-        }).status_code == 200
+        accept_invite(teammate, invited.json(), "teammate-new-password-for-test")
         assert teammate.get("/v1/auth/me").json()["role"] == "member"
         assert teammate.patch("/v1/auth/me", json={"display_name": "Updated Teammate"}).json()["display_name"] == "Updated Teammate"
         assert teammate.get("/v1/auth/me").json()["display_name"] == "Updated Teammate"
@@ -77,11 +74,7 @@ def test_admin_cannot_escalate_and_last_owner_is_protected(tmp_path, monkeypatch
         member_id = owner.post("/v1/workspace/invite", json={
             "email": "member@example.test", "display_name": "Member User", "role": "member",
         }).json()["account"]["user_id"]
-        _login(admin, "admin@example.test", admin_invite["temporary_password"])
-        assert admin.post("/v1/auth/change-password", json={
-            "current_password": admin_invite["temporary_password"],
-            "new_password": "admin-new-password-for-test",
-        }).status_code == 200
+        accept_invite(admin, admin_invite, "admin-new-password-for-test")
         assert admin.patch(f"/v1/workspace/members/{member_id}/role", json={"role": "owner"}).status_code == 409
         assert admin.patch(f"/v1/workspace/members/{member_id}/role", json={"role": "admin"}).status_code == 409
         assert admin.post("/v1/workspace/invite", json={
@@ -89,7 +82,7 @@ def test_admin_cannot_escalate_and_last_owner_is_protected(tmp_path, monkeypatch
         }).status_code == 409
         assert admin.patch(f"/v1/workspace/members/{member_id}/role", json={"role": "viewer"}).status_code == 200
         assert admin.patch(f"/v1/workspace/members/{owner_id}/role", json={"role": "viewer"}).status_code == 409
-        assert admin.post(f"/v1/workspace/members/{owner_id}/temporary-password").status_code == 409
+        assert admin.post(f"/v1/workspace/members/{owner_id}/reset-access").status_code == 409
         assert admin.delete(f"/v1/workspace/members/{admin_id}").status_code == 409
         assert owner.patch(f"/v1/workspace/members/{member_id}/role", json={"role": "owner"}).status_code == 200
         assert owner.patch(f"/v1/workspace/members/{member_id}/role", json={"role": "viewer"}).status_code == 200

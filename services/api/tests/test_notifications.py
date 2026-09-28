@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import httpx
+from account_links import accept_invite
 from app.adapters.vexa import VexaCaptureAdapter
 from app.database import (
     LEGACY_ADMIN_USER_ID,
@@ -135,9 +136,7 @@ def test_members_and_viewers_reach_their_own_notifications(tmp_path, monkeypatch
         app.state.notifications.notify(owner["organization_id"], user_ids=[owner["user_id"]], kind="x", title="Owner only")
         app.state.notifications.notify(owner["organization_id"], user_ids=[viewer_id], kind="x", title="For the viewer")
         client.post("/v1/auth/logout")
-        client.post("/v1/auth/login", json={"email": "viewer@example.com", "password": invited["temporary_password"]})
-        client.post("/v1/auth/change-password", json={
-            "current_password": invited["temporary_password"], "new_password": "a-very-long-new-password"})
+        accept_invite(client, invited, "a-very-long-new-password")
         page = client.get("/v1/notifications")
         assert page.status_code == 200
         assert [item["title"] for item in page.json()["items"]] == ["For the viewer"]

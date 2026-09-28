@@ -2,6 +2,7 @@
 
 from sqlalchemy import event
 
+from account_links import activate
 from app.accounts import AccountService, InviteRequest, OrganizationCreateRequest
 from app.database import Database
 
@@ -39,9 +40,10 @@ def test_invite_new_member_with_foreign_keys_enforced(tmp_path) -> None:
     invited = accounts.invite(workspace_owner, InviteRequest(
         email="teammate@example.test", display_name="Team Member", role="admin",
     ))
-    assert invited.account.organization_id == workspace_owner.organization_id
-    assert invited.temporary_password
-    teammate = accounts.login("teammate@example.test", invited.temporary_password)
-    assert teammate.must_change_password
+    assert invited.result.account.organization_id == workspace_owner.organization_id
+    assert invited.result.temporary_password is None and invited.link is not None
+    activate(accounts, invited, "teammate-password-for-test")
+    teammate = accounts.login("teammate@example.test", "teammate-password-for-test")
+    assert not teammate.must_change_password
     assert {org.display_name for org in accounts.list_organizations(teammate)} == {"Novaala"}
     database.engine.dispose()

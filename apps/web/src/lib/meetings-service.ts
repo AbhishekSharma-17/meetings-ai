@@ -1,4 +1,5 @@
-import type { AuditEvent, BriefDocument, CalendarConnection, CalendarEvent, CalendarPeriod, CalendarSchedule, CalendarSnapshot, Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeTextProfile, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, MomGuidance, OrganizationBrief, PostMeetingJob, PrepReport, AiSettingsInput, AiSettingsView, CredentialTestResult, ModelCatalog, ModelCatalogQuery, ProfileKeyChoice, ProfileKind, ProviderProfile, ResendStatus, VaultCredential, VaultCredentialInput, VaultProviderType, RetentionPolicy, SpeakerIdentity, SpeakerSuggestion, Team, TeamInput, TextModelCatalog, TranscriptSegment, TranscriptionRoute, UsageSummary, Workspace, WorkspaceCalendarConnection, WorkspaceMember, WorkspaceOperations, WorkspaceOption } from "./types";
+import type { AccountLinkPreview, AuditEvent, BriefDocument, CalendarConnection, CalendarEvent, CalendarPeriod, CalendarSchedule, CalendarSnapshot, Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeTextProfile, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, MomGuidance, OrganizationBrief, PostMeetingJob, PrepReport, AiSettingsInput, AiSettingsView, CredentialTestResult, ModelCatalog, ModelCatalogQuery, ProfileKeyChoice, ProfileKind, ProviderProfile, ResendStatus, VaultCredential, VaultCredentialInput, VaultProviderType, RetentionPolicy, SpeakerIdentity, SpeakerSuggestion, Team, TeamInput, TextModelCatalog, TranscriptSegment, TranscriptionRoute, UsageSummary, Workspace, WorkspaceCalendarConnection, WorkspaceMember, WorkspaceOperations, WorkspaceOption } from "./types";
+import { formatDateTime } from "./time-store";
 
 export interface MeetingsService {
   getSession(): Promise<boolean>;
@@ -7,7 +8,11 @@ export interface MeetingsService {
   login(email: string, password: string): Promise<void>;
   changePassword(currentPassword: string, newPassword: string): Promise<void>;
   inviteMember(email: string, displayName: string, role: "admin" | "member" | "viewer"): Promise<InviteResult>;
-  resetMemberPassword(userId: string): Promise<InviteResult>;
+  resendInvite(userId: string): Promise<InviteResult>;
+  resetMemberAccess(userId: string): Promise<InviteResult>;
+  requestPasswordReset(email: string): Promise<void>;
+  inspectAccountLink(token: string): Promise<AccountLinkPreview>;
+  acceptAccountLink(token: string, password: string): Promise<CurrentAccount>;
   changeMemberRole(userId: string, role: CurrentAccount["role"]): Promise<CurrentAccount>;
   removeMember(userId: string): Promise<void>;
   logout(): Promise<void>;
@@ -317,7 +322,7 @@ function relativeTimestamp(value: string | null): string {
   if (!value) return "Not yet";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
-  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(parsed);
+  return formatDateTime(parsed);
 }
 
 function toMeetingDetail(meeting: BackendMeeting): MeetingDetail {
@@ -405,8 +410,24 @@ class HttpMeetingsService implements MeetingsService {
     });
   }
 
-  async resetMemberPassword(userId: string): Promise<InviteResult> {
-    return api<InviteResult>(`/v1/workspace/members/${userId}/temporary-password`, { method: "POST" });
+  async resendInvite(userId: string): Promise<InviteResult> {
+    return api<InviteResult>(`/v1/workspace/members/${userId}/resend-invite`, { method: "POST" });
+  }
+
+  async resetMemberAccess(userId: string): Promise<InviteResult> {
+    return api<InviteResult>(`/v1/workspace/members/${userId}/reset-access`, { method: "POST" });
+  }
+
+  async requestPasswordReset(email: string): Promise<void> {
+    await api("/v1/auth/password-reset", { method: "POST", body: JSON.stringify({ email }) });
+  }
+
+  async inspectAccountLink(token: string): Promise<AccountLinkPreview> {
+    return api<AccountLinkPreview>("/v1/auth/account-link", { method: "POST", body: JSON.stringify({ token }) });
+  }
+
+  async acceptAccountLink(token: string, password: string): Promise<CurrentAccount> {
+    return api<CurrentAccount>("/v1/auth/account-link/accept", { method: "POST", body: JSON.stringify({ token, password }) });
   }
 
   async changeMemberRole(userId: string, role: CurrentAccount["role"]): Promise<CurrentAccount> {
@@ -1010,6 +1031,25 @@ class HttpMeetingsService implements MeetingsService {
 
 export const meetingsService: MeetingsService = new HttpMeetingsService();
 
+/* ---------- Our company identity (who WE are; members read, owners/admins edit) ---------- */
+/** Rejects a response that is not an identity (e.g. an older API or proxy page) instead of crashing callers. */
+function asIdentity(value: unknown): import("./types").OrganizationIdentity {
+  const candidate = value as Partial<import("./types").OrganizationIdentity> | null;
+  if (!candidate || !Array.isArray(candidate.aliases) || !Array.isArray(candidate.domains)) {
+    throw new Error("The workspace identity response was not understood.");
+  }
+  return candidate as import("./types").OrganizationIdentity;
+}
+
+export const identityService = {
+  async get(): Promise<import("./types").OrganizationIdentity> {
+    return asIdentity(await api<unknown>("/v1/workspace/identity"));
+  },
+  async save(input: import("./types").OrganizationIdentityInput): Promise<import("./types").OrganizationIdentity> {
+    return asIdentity(await api<unknown>("/v1/workspace/identity", { method: "PUT", body: JSON.stringify(input) }));
+  },
+};
+
 /* ---------- Meeting prep v2: inputs, documents, streamed generation, history ---------- */
 type PrepInputsT = import("./types").PrepInputs;
 type PrepHistoryT = import("./types").PrepHistory;
@@ -1041,6 +1081,10 @@ export const prepService = {
   },
   getHistory(eventId: string): Promise<PrepHistoryT> {
     return api<PrepHistoryT>(`/v1/calendar/events/${eventId}/prep/history`);
+  },
+  /** Read-only preview of our company vs. the target and each attendee's side, with unsaved corrections. */
+  previewWhosWho(eventId: string, input: import("./types").WhosWhoInput): Promise<import("./types").WhosWho> {
+    return api<import("./types").WhosWho>(`/v1/calendar/events/${eventId}/prep/whos-who`, { method: "POST", body: JSON.stringify(input) });
   },
   generate(eventId: string, input: PrepGenerateInputT): Promise<AnyPrepReportT> {
     return api<AnyPrepReportT>(`/v1/calendar/events/${eventId}/prep`, { method: "POST", body: JSON.stringify(input) });
@@ -1193,5 +1237,21 @@ export const jobService = {
   },
   startReindex(baseId: string): Promise<BackgroundJobT> {
     return api<BackgroundJobT>(`/v1/knowledge-bases/${baseId}/reindex/jobs`, { method: "POST" });
+  },
+};
+
+type TimePreferencesPayloadT = import("./types").TimePreferencesPayload;
+
+export const preferencesService = {
+  get(): Promise<TimePreferencesPayloadT> {
+    return api<TimePreferencesPayloadT>("/v1/me/preferences");
+  },
+  /** Only the fields given change; `timezone: null` follows the browser again. */
+  update(patch: { timezone?: string | null; time_format?: TimePreferencesPayloadT["time_format"] }): Promise<TimePreferencesPayloadT> {
+    return api<TimePreferencesPayloadT>("/v1/me/preferences", { method: "PUT", body: JSON.stringify(patch) });
+  },
+  /** Reports this browser's zone (idempotent) and returns the saved preferences. */
+  reportDetected(timezone: string): Promise<TimePreferencesPayloadT> {
+    return api<TimePreferencesPayloadT>("/v1/me/preferences/detected", { method: "POST", body: JSON.stringify({ timezone }) });
   },
 };

@@ -13,7 +13,8 @@ import { SettingsToast, type SettingsNotice } from "./settings-toast";
 import { useCalendarConnect } from "./use-calendar-connect";
 import { findEntry, mergeCalendarEvents, type CalendarEntry } from "./calendar-events";
 import { DayAgenda, EventDetail, MonthGrid, dayKey, eventDay } from "./calendar-month";
-import { browserTimeZone, calendarProviderNames } from "./calendar-providers";
+import { calendarProviderNames } from "./calendar-providers";
+import { formatDateTime, formatDayHeading, todayKey, useTimePreferences } from "@/lib/time-preferences";
 import { Alert } from "./ui/feedback";
 import { PageHeader } from "./ui/page-header";
 import { UiSelect } from "./ui-select";
@@ -35,7 +36,7 @@ function initialPreferences(storageKey: string): CalendarPreferences {
   const first = currentMonth();
   const fallback: CalendarPreferences = {
     startDate: dayKey(first), endDate: dayKey(new Date(first.getFullYear(), first.getMonth() + 1, 0)),
-    selectedDay: dayKey(new Date()), month: dayKey(first), accountFilter: "all", tab: "calendar", selectedEventId: null,
+    selectedDay: todayKey(), month: dayKey(first), accountFilter: "all", tab: "calendar", selectedEventId: null,
   };
   if (typeof window === "undefined") return fallback;
   try {
@@ -60,10 +61,11 @@ function coveredBySync(startDate: string, endDate: string, timezone: string, ran
   return startDate >= first && endDate <= last;
 }
 
-function currentMonth(): Date { const now = new Date(); return new Date(now.getFullYear(), now.getMonth(), 1); }
+/** The first of this month, in the person's time zone (as a civil date). */
+function currentMonth(): Date { const [year, month] = todayKey().split("-").map(Number); return new Date(year, month - 1, 1); }
 
 function formatDay(key: string): string {
-  return validDate(key) ? new Date(`${key}T12:00:00`).toLocaleDateString(undefined, shortDate) : "—";
+  return validDate(key) ? formatDayHeading(key, shortDate) : "—";
 }
 
 export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onPreferredConnectionApplied, canSchedule = true, onChoose, onPrepare, onNewMeeting }: {
@@ -83,7 +85,8 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
   const [startDate, setStartDate] = useState(initial.startDate);
   const [endDate, setEndDate] = useState(initial.endDate);
   const [selectedDay, setSelectedDay] = useState(initial.selectedDay);
-  const [timezone] = useState(browserTimeZone);
+  // Windows, "today" and day placement follow the person's effective zone (manual choice, else browser).
+  const { timeZone: timezone } = useTimePreferences();
   const [connections, setConnections] = useState<CalendarConnection[]>([]);
   const [schedules, setSchedules] = useState<CalendarSchedule[]>([]);
   const [snapshot, setSnapshot] = useState<CalendarSnapshot>({ events: [], syncs: [] });
@@ -194,7 +197,7 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
     const next = currentMonth();
     setMonth(next); setStartDate(dayKey(next));
     setEndDate(dayKey(new Date(next.getFullYear(), next.getMonth() + 1, 0)));
-    setSelectedDay(dayKey(new Date())); setSelectedEvent(null);
+    setSelectedDay(todayKey()); setSelectedEvent(null);
   }
 
   function applySync(next: CalendarSnapshot) {
@@ -293,11 +296,11 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
           <div className="calendar-month-nav">
             <button type="button" className="button secondary icon sm" aria-label="Previous month" onClick={() => changeMonth(-1)}><ChevronLeft aria-hidden="true" /></button>
             <button type="button" className="button secondary icon sm" aria-label="Next month" onClick={() => changeMonth(1)}><ChevronRight aria-hidden="true" /></button>
-            <h2>{month.toLocaleString(undefined, { month: "long", year: "numeric" })}</h2>
+            <h2>{formatDayHeading(dayKey(month), { month: "long", year: "numeric" })}</h2>
             <button type="button" className="button ghost sm" onClick={goToToday}>Today</button>
           </div>
           <div className="calendar-toolbar-end">
-            {lastSynced ? <span className="calendar-sync-status">{accountFilter === "all" && active.length > 1 ? `${active.length} accounts · ` : ""}Synced {new Date(lastSynced).toLocaleString(undefined, { ...shortDate, hour: "numeric", minute: "2-digit" })}</span> : null}
+            {lastSynced ? <span className="calendar-sync-status">{accountFilter === "all" && active.length > 1 ? `${active.length} accounts · ` : ""}Synced {formatDateTime(lastSynced)}</span> : null}
             <RangePicker startDate={startDate} endDate={endDate} timezone={timezone} onStartChange={(value) => { setStartDate(value); setSelectedEvent(null); }} onEndChange={(value) => { setEndDate(value); setSelectedEvent(null); }} />
             <UiSelect id="calendar-account-filter" label="Account" hideLabel size="sm" className="calendar-account-select" value={accountFilter} onChange={setAccountFilter} options={accountOptions} disabled={!active.length} />
           </div>

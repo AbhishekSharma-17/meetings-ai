@@ -33,7 +33,7 @@ def test_legacy_workspace_is_private_editable_and_persistent(tmp_path, monkeypat
         assert client.get("/v1/workspace/members").json() == [{
             "user_id": "00000000-0000-4000-8000-000000000002",
             "display_name": "Workspace owner", "email": "developer@genaiprotos.com",
-            "role": "owner", "status": "active", "photo_url": None,
+            "role": "owner", "status": "active", "photo_url": None, "invite_expires_at": None,
         }]
         assert client.patch("/v1/workspace", json={
             "display_name": " ",

@@ -7,6 +7,7 @@ import { Avatar } from "./ui/avatar";
 export const personaLabels: Record<PrepPersona, string> = {
   technical: "Technical", business: "Business", sales: "Sales", executive: "Executive", unknown: "Role unknown",
 };
+const sideLabels: Record<string, string> = { other_external: "Third party", unknown: "Unclassified" };
 const matchCopy: Record<PrepMatchConfidence, { label: string; tone: "success" | "info" | "neutral" }> = {
   confirmed: { label: "Profile confirmed", tone: "success" },
   likely: { label: "Likely profile", tone: "info" },
@@ -28,10 +29,11 @@ function PersonCard({ person, sources }: { person: PrepAttendee; sources: Map<st
       <Avatar name={person.name} fallback={person.name.trim() ? undefined : "?"} />
       <div className="prep-person-id">
         <p className="prep-person-name">{person.name}</p>
-        <p className="prep-person-title">{person.title || person.email || "Title not confirmed"}</p>
+        <p className="prep-person-title" title={person.title || person.email || undefined}>{person.title || person.email || "Title not confirmed"}</p>
       </div>
     </header>
     <div className="prep-person-badges">
+      {person.side && sideLabels[person.side] ? <Badge tone="neutral">{sideLabels[person.side]}</Badge> : null}
       <Badge tone="brand">{personaLabels[person.persona] ?? person.persona}</Badge>
       <Badge tone={match.tone} dot>{match.label}</Badge>
       {profile ? <a className="prep-person-link" href={profile} target="_blank" rel="noreferrer noopener" aria-label={`Public profile for ${person.name}`}>Profile <ExternalLink aria-hidden="true" /></a> : null}

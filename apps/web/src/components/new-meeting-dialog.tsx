@@ -11,6 +11,8 @@ import { DeliveryOptions, KnowledgeOptions, MinutesOptions, SourcePreview, type 
 import { readSetupDefaults, saveSetupDefaults } from "./new-meeting-defaults";
 import { chipProblem } from "./ui/chip-input";
 import { Alert } from "./ui/feedback";
+import { formatDateTime, useTimePreferences } from "@/lib/time-preferences";
+import { WEEKDAY_DATE_TIME, wallTimeToDate, zoneAbbreviation } from "@/lib/time-format";
 
 const SUPPORTED_PLATFORMS = "Google Meet, Zoom, Microsoft Teams or Jitsi";
 
@@ -46,6 +48,8 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
   const [scheduledStart, setScheduledStart] = useState("");
   const [linkValue, setLinkValue] = useState("");
   const [linkError, setLinkError] = useState<string | null>(null);
+  // Scheduled start times are entered and shown in the person's effective zone, not the machine's.
+  const { timeZone } = useTimePreferences();
   useEffect(() => {
     if (!open) return;
     let active = true;
@@ -125,7 +129,7 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
       }
       let scheduledStartIso: string | null = null;
       if (!calendarSelection && joinTiming === "scheduled") {
-        const scheduledTime = new Date(scheduledStart).getTime();
+        const scheduledTime = wallTimeToDate(scheduledStart, timeZone)?.getTime() ?? Number.NaN;
         if (!scheduledStart || !Number.isFinite(scheduledTime) || scheduledTime <= Date.now() + 60_000) {
           throw new Error("Choose a start time at least one minute from now, or select Join now.");
         }
@@ -193,9 +197,9 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
   const platform = detectPlatform(link);
   const willSchedule = calendarSelection?.willSchedule || joinTiming === "scheduled";
   const description = source
-    ? `From ${calendarProviderNames[source.provider]} · ${new Date(source.starts_at).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}. Future meetings are scheduled; meetings starting now join right away.`
+    ? `From ${calendarProviderNames[source.provider]} · ${formatDateTime(source.starts_at, WEEKDAY_DATE_TIME)}. Future meetings are scheduled; meetings starting now join right away.`
     : "Paste a meeting link. You review the transcript and minutes before anything is emailed.";
-  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const scheduledPreview = scheduledStart ? wallTimeToDate(scheduledStart, timeZone) : null;
 
   return <Dialog.Root open={open} onOpenChange={(next) => { if (!next && !joining) close(); }}>
     <Dialog.Portal>
@@ -242,7 +246,7 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
           {joinTiming === "scheduled" ? <div className="field nm-schedule-field">
             <label htmlFor="scheduled-start">Meeting start</label>
             <input id="scheduled-start" type="datetime-local" value={scheduledStart} onChange={(event) => setScheduledStart(event.target.value)} required disabled={joining} />
-            <p className="field-hint">Your time zone: {timeZone}. The assistant leaves once the meeting goes quiet.</p>
+            <p className="field-hint">{scheduledPreview ? <><span className="nm-schedule-preview">Joins {formatDateTime(scheduledPreview, WEEKDAY_DATE_TIME)}</span> · </> : null}Times are in {timeZone} ({zoneAbbreviation(timeZone)}). The assistant leaves once the meeting goes quiet.</p>
           </div> : null}
         </fieldset> : null}
 

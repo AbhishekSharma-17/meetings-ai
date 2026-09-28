@@ -2,30 +2,28 @@
 
 import { CalendarDays, ChevronRight, Clock, NotebookPen } from "lucide-react";
 import type { CalendarConnection } from "@/lib/types";
+import { dayKeyIn } from "@/lib/time-format";
 import { Avatar } from "./ui/avatar";
 import { CalendarBrandIcon } from "./brand-icons";
 import { CalendlyPill, PlatformMark, PlatformPill, SourceStack, entryOrigin, uniqueByAccount } from "./calendar-event-marks";
 import { meetingPlatform, viaCalendly, type CalendarEntry } from "./calendar-events";
 import { calendarProviderNames, platformLabel } from "./calendar-providers";
 import { Badge, EmptyState } from "./ui/feedback";
+import { formatDate, formatDateTime, formatDayHeading, formatTime, todayKey } from "@/lib/time-preferences";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const CHIPS_PER_DAY = 2;
-const timeFormat: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit" };
 
 export function dayKey(value: Date): string {
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 }
 
+/** The day ("YYYY-MM-DD") an event starts on in the given zone. */
 export function eventDay(value: string, timezone: string): string {
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(value));
-  const get = (type: string) => parts.find((item) => item.type === type)?.value ?? "";
-  return `${get("year")}-${get("month")}-${get("day")}`;
+  return dayKeyIn(value, timezone);
 }
 
-function eventTime(value: string): string {
-  return new Date(value).toLocaleTimeString([], timeFormat);
-}
+const eventTime = (value: string): string => formatTime(value);
 
 function dayLabel(day: Date, entries: CalendarEntry[]): string {
   const accounts = uniqueByAccount(entries.flatMap((entry) => entry.sources)).length;
@@ -41,7 +39,8 @@ export function MonthGrid({ month, days, selectedDay, entriesByDay, connections,
   connections: CalendarConnection[];
   onSelectDay(key: string): void;
 }) {
-  const today = dayKey(new Date());
+  // "Today" is the date in the person's chosen zone, not the machine's.
+  const today = todayKey();
   return <div className="card calendar-month" role="group" aria-label="Month view">
     <div className="calendar-weekdays" aria-hidden="true">{WEEKDAYS.map((day) => <span key={day}>{day}</span>)}</div>
     <div className="calendar-days">
@@ -82,7 +81,7 @@ export function DayAgenda({ selectedDay, dayEntries, rangeEntries, selectedEvent
   onSelectEntry(entry: CalendarEntry): void;
   onJumpToEntry(entry: CalendarEntry): void;
 }) {
-  const title = new Date(`${selectedDay}T12:00:00`).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
+  const title = formatDayHeading(selectedDay);
   const isSelected = (entry: CalendarEntry) => entry.sources.some((source) => source.id === selectedEventId);
   return <section className="card calendar-agenda" aria-labelledby="calendar-agenda-title">
     <div className="card-header">
@@ -115,7 +114,7 @@ export function DayAgenda({ selectedDay, dayEntries, rangeEntries, selectedEvent
       <h3>Other meetings in range</h3>
       <ul>{rangeEntries.slice(0, 10).map((entry) => <li key={entry.id}>
         <button type="button" onClick={() => onJumpToEntry(entry)}>
-          <span className="calendar-other-date">{new Date(entry.event.starts_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
+          <span className="calendar-other-date">{formatDate(entry.event.starts_at, { month: "short", day: "numeric" })}</span>
           <span className="calendar-other-title">{entry.event.title}</span>
           <span className="calendar-other-source"><SourceStack sources={entry.sources} connections={connections} /><PlatformMark event={entry.event} /></span>
         </button>
@@ -147,7 +146,7 @@ export function EventDetail({ entry, connections, canSchedule, alreadyScheduled,
       {viaCalendly(entry) ? <CalendlyPill /> : null}
     </div>
     <h2>{event.title}</h2>
-    <p className="calendar-detail-time"><Clock aria-hidden="true" />{starts.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}, {starts.toLocaleTimeString([], timeFormat)} – {eventTime(event.ends_at)}</p>
+    <p className="calendar-detail-time"><Clock aria-hidden="true" />{formatDate(starts, { weekday: "short", month: "short", day: "numeric" })}, {formatTime(starts)} – {eventTime(event.ends_at)}</p>
     <dl className="calendar-detail-meta">
       <dt>{accounts.length > 1 ? "Calendars" : "Calendar"}</dt>
       <dd><ul className="calendar-detail-sources">{accounts.map((source) => {
@@ -176,6 +175,6 @@ export function EventDetail({ entry, connections, canSchedule, alreadyScheduled,
         : <button type="button" className="button secondary" onClick={onSchedule}>Set up assistant</button> : null}
       <button type="button" className="button primary" onClick={onPrepare}><NotebookPen aria-hidden="true" /> Prepare for meeting</button>
     </div>
-    <small className="calendar-sync-meta">Last synced {new Date(lastSynced).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</small>
+    <small className="calendar-sync-meta">Last synced {formatDateTime(lastSynced)}</small>
   </aside>;
 }

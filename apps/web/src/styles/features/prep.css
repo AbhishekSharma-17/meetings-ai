@@ -1,0 +1,89 @@
+/* Meeting prep: who's who (our side vs. the client), the company identity in the Organization brief,
+   and responsive fixes for the prep page. Layout only, built from tokens. */
+
+/* ---------- Who's who ---------- */
+.prep-whos-who { display:grid; gap:12px; min-width:0; padding:14px; border:1px solid var(--border); border-radius:var(--radius); }
+.prep-whos-who-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+.prep-whos-who-head h3 { font-size:13.5px; font-weight:600; }
+.prep-whos-who-head .field-hint { max-width:72ch; margin-top:2px; }
+.prep-whos-who-head .spinner { flex:none; margin-top:2px; }
+.prep-whos-who-body { display:grid; gap:12px; min-width:0; }
+.prep-side-warnings { display:grid; gap:8px; }
+.prep-sides { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.prep-side { display:grid; align-content:start; gap:10px; min-width:0; padding:12px; border:1px solid var(--border); border-radius:var(--radius); background:var(--card); }
+.prep-side[data-side=theirs] { border-color:var(--brand-border); }
+.prep-side-head { display:flex; align-items:flex-start; gap:10px; min-width:0; }
+.prep-side-icon { display:grid; place-items:center; flex:none; width:28px; height:28px; border-radius:var(--radius-sm); background:var(--muted); color:var(--text-secondary); }
+.prep-side[data-side=theirs] .prep-side-icon { background:var(--brand-subtle); color:var(--brand); }
+.prep-side-icon .lucide { width:15px; height:15px; }
+.prep-side-id { display:grid; gap:1px; min-width:0; }
+.prep-whos-who-body h4.prep-side-label { color:var(--text-tertiary); font-size:11.5px; font-weight:600; }
+.prep-side-company { font-size:14px; font-weight:600; line-height:1.35; overflow-wrap:anywhere; }
+.prep-side-company[data-unknown] { color:var(--text-tertiary); font-weight:500; }
+.prep-side-source { color:var(--text-secondary); font-size:12px; overflow-wrap:anywhere; }
+.prep-whos-who-body ul { list-style:none; padding-left:0; }
+.prep-whos-who-body li { line-height:inherit; }
+.prep-whos-who-body ul.prep-side-domains { display:flex; flex-wrap:wrap; gap:4px; min-width:0; }
+.prep-side-domains .tag { max-width:100%; overflow:hidden; font-size:12px; text-overflow:ellipsis; white-space:nowrap; }
+.prep-whos-who-body ul.prep-side-people { display:grid; gap:0; min-width:0; }
+.prep-whos-who-body li.prep-side-person { font-size:13px; }
+.prep-side-person { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px 10px; min-width:0; padding:8px 0; border-top:1px solid var(--border); }
+.prep-side-person-copy { display:grid; gap:1px; flex:1 1 170px; min-width:0; }
+.prep-side-person-name { display:flex; flex-wrap:wrap; align-items:center; gap:4px 6px; font-size:13px; font-weight:500; overflow-wrap:anywhere; }
+.prep-side-person-email { overflow:hidden; color:var(--text-secondary); font-size:12px; text-overflow:ellipsis; white-space:nowrap; }
+.prep-side-person-reason { color:var(--text-tertiary); font-size:11.5px; line-height:1.45; }
+.prep-side-actions { display:inline-flex; align-items:center; gap:6px; flex:none; }
+.prep-side-toggle { padding:2px; }
+.prep-side-toggle > button { height:24px; padding:0 10px; font-size:12px; }
+.prep-side-toggle > button:disabled { cursor:not-allowed; opacity:.6; }
+.prep-side-empty { color:var(--text-tertiary); font-size:12.5px; }
+.prep-side-others { display:grid; gap:2px; min-width:0; }
+.prep-whos-who-body h4.prep-side-subhead { display:flex; align-items:center; gap:6px; color:var(--text-secondary); font-size:12px; font-weight:600; }
+.prep-side-subhead .lucide { width:14px; height:14px; }
+.prep-side-ignored { margin:0; }
+
+/* ---------- Organization brief: our company ---------- */
+.brief-identity { display:grid; gap:12px; min-width:0; margin:0; padding:14px; border:1px solid var(--border); border-radius:var(--radius); }
+.brief-identity legend { padding:0 6px; font-size:13.5px; font-weight:600; }
+.brief-identity > .field-hint { margin-top:-4px; }
+
+/* ---------- Responsive: prep page ---------- */
+.prep-event-list { grid-template-columns:minmax(0,1fr); }
+.prep-event-list > li { min-width:0; }
+.prep-main, .prep-panel, .prep-tab-panel, .meeting-prep-panel, .prep-report { min-width:0; }
+.prep-tabs { max-width:100%; overflow-x:auto; scrollbar-width:none; }
+.prep-summary-agenda { overflow-wrap:anywhere; }
+.prep-report-lead, .prep-paragraph, .prep-report-section li, .prep-person-text, .prep-person-angle, .prep-timeline-title, .prep-timeline-summary { overflow-wrap:anywhere; }
+.prep-report-meta small { overflow-wrap:anywhere; }
+.prep-link-chips .email-chip { max-width:100%; }
+.prep-link-chips .email-chip-text { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.prep-history .table-wrap { overflow-x:auto; }
+.prep-document-copy b { max-width:100%; }
+
+@media (max-width: 1100px) {
+  .prep-sides { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
+}
+@media (max-width: 900px) {
+  .prep-sides { grid-template-columns:minmax(0,1fr); }
+}
+@media (max-width: 640px) {
+  .prep-whos-who { padding:12px; }
+  .prep-side { padding:10px; }
+  .meeting-prep-panel .card-header .prep-saved { white-space:normal; }
+  .prep-report .card-header, .prep-report-body { padding-left:16px; padding-right:16px; }
+  .prep-report-body { gap:20px; }
+  .prep-snapshot-facts { grid-template-columns:minmax(0,1fr); }
+  .prep-claims-grid, .prep-source-groups { grid-template-columns:minmax(0,1fr); }
+  .meeting-prep-panel .button-group { flex-wrap:wrap; }
+  .meeting-prep-panel .button-group .button { flex:1 1 auto; }
+  .prep-background-hint { flex-wrap:wrap; }
+  /* History: each briefing becomes a labelled card instead of a sideways-scrolling table. */
+  .prep-history-table thead { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
+  .prep-history-table, .prep-history-table tbody, .prep-history-table tr, .prep-history-table td { display:block; width:100%; }
+  .prep-history-table tr { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 12px; padding:12px 16px; border-top:1px solid var(--border); }
+  .prep-history-table tr:first-child { border-top:0; }
+  .prep-history-table td { padding:0; border:0; white-space:normal; text-align:left; overflow-wrap:anywhere; }
+  .prep-history-table td::before { content:attr(data-label); display:block; color:var(--text-tertiary); font-size:11.5px; font-weight:500; }
+  .prep-history-table td.num { text-align:left; }
+  .prep-history-table td:first-child, .prep-history-table td.prep-history-model { grid-column:1 / -1; }
+}

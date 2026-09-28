@@ -8,7 +8,9 @@ import type { CalendarConnection, CalendarEvent, CalendarPeriod, CalendarSchedul
 import { AccountRow, CalendarAliasDialog, ProviderGrid } from "./calendar-connections";
 import { CalendarConnectWaiting } from "./calendar-connect-waiting";
 import { useCalendarConnect } from "./use-calendar-connect";
-import { browserTimeZone, calendarProviderNames, platformLabel } from "./calendar-providers";
+import { calendarProviderNames, platformLabel } from "./calendar-providers";
+import { formatDateTime, useTimePreferences } from "@/lib/time-preferences";
+import { WEEKDAY_DATE_TIME } from "@/lib/time-format";
 import { PageHeader } from "./ui/page-header";
 import { Alert, Badge, EmptyState } from "./ui/feedback";
 import { UiSelect } from "./ui-select";
@@ -29,7 +31,7 @@ export function CalendarImportDialog({ open, preferredConnectionId, onClose, onC
   const [schedules, setSchedules] = useState<CalendarSchedule[]>([]);
   const [connectionId, setConnectionId] = useState("");
   const [period, setPeriod] = useState<CalendarPeriod>("today");
-  const [timezone] = useState(browserTimeZone);
+  const { timeZone: timezone } = useTimePreferences();
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -114,7 +116,7 @@ export function CalendarImportDialog({ open, preferredConnectionId, onClose, onC
         return <li className="list-row calendar-import-event" key={`${event.connection_id}:${event.event_id}:${event.starts_at}`}>
           <div className="calendar-import-event-copy">
             <b>{event.title}</b>
-            <small>{new Date(event.starts_at).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} · {platformLabel(event.platform)} · {event.invitees?.length ?? 0} invited</small>
+            <small>{formatDateTime(event.starts_at, WEEKDAY_DATE_TIME)} · {platformLabel(event.platform)} · {event.invitees?.length ?? 0} invited</small>
             {event.agenda ? <small className="calendar-import-agenda">{event.agenda}</small> : null}
           </div>
           {scheduled

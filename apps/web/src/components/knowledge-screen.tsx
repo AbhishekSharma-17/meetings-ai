@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { formatDate, formatDateTime } from "@/lib/time-preferences";
 import { Popover } from "@base-ui/react/popover";
 import { BookOpenText, Building2, Database, Download, Ellipsis, Library, Lock, MessageSquare, Plus, Search, ShieldCheck, Trash2, Users } from "lucide-react";
 import { jobService, meetingsService, serviceErrorStatus } from "@/lib/meetings-service";
@@ -70,7 +71,7 @@ function relativeDay(value: string): string {
   if (days < 1) return "Today";
   if (days < 2) return "Yesterday";
   if (days < 7) return `${days}d ago`;
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return formatDate(date, { month: "short", day: "numeric" });
 }
 
 export function KnowledgeScreen({ identity, onOpenSource, onOpenProviders, account }: {
@@ -400,7 +401,7 @@ export function KnowledgeScreen({ identity, onOpenSource, onOpenProviders, accou
         {selectedBase ? <div className="kl-index" role="group" aria-label="Semantic index">
           <div className="kl-index-head"><Database aria-hidden="true" /><b>Semantic index</b>{canManageBase ? <button type="button" className="text-button" disabled={indexing || reindexJob.running} onClick={() => void reindexBase()}>{indexing || reindexJob.running ? "Indexing…" : "Reindex now"}</button> : null}</div>
           <small>{indexed ? `${plural(indexed, "source")} indexed · ${indexStatus?.model ?? "embedding model"}` : "No sources indexed yet"}</small>
-          {indexStatus?.job_status && indexStatus.job_status !== "succeeded" ? <small role="status">Background index: {indexStatus.job_status}{indexStatus.next_retry_at ? ` · retry ${new Date(indexStatus.next_retry_at).toLocaleString()}` : ""}</small> : null}
+          {indexStatus?.job_status && indexStatus.job_status !== "succeeded" ? <small role="status">Background index: {indexStatus.job_status}{indexStatus.next_retry_at ? ` · retry ${formatDateTime(indexStatus.next_retry_at)}` : ""}</small> : null}
           {indexStatus?.last_error ? <small className="inline-error" role="alert">{indexStatus.last_error}</small> : null}
         </div> : null}
       </aside>

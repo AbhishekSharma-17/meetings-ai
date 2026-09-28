@@ -105,12 +105,35 @@ class ModelCatalogService:
                     return item.input_per_million_usd, item.output_per_million_usd
         if not _is_openrouter_profile(profile):
             return None
-        # The public OpenRouter catalog browsed on the AI providers page prices any profile on it.
+        return self.cached_openrouter_text_price(model_id)
+
+    def cached_openrouter_text_price(self, model_id: str) -> tuple[float, float] | None:
+        """OpenRouter's public list price (USD per 1M input, output tokens), when its catalog is cached."""
         for item in openrouter_models(self.browser.cached_rows(OPENROUTER_LLM_URL) or [], "text_generation"):
             if item.id == model_id and item.input_per_million_usd is not None \
                     and item.output_per_million_usd is not None:
                 return item.input_per_million_usd, item.output_per_million_usd
         return None
+
+    def cached_openrouter_embedding_price(self, model_id: str) -> float | None:
+        """OpenRouter's public embeddings list price (USD per 1M input tokens), when cached."""
+        for item in openrouter_models(self.browser.cached_rows(OPENROUTER_EMBEDDINGS_URL) or [], "embeddings"):
+            if item.id == model_id:
+                return item.input_per_million_usd
+        return None
+
+    def cached_openrouter_stt_price(self, model_id: str) -> float | None:
+        """OpenRouter's public speech-to-text list price (USD per audio minute), when cached."""
+        for item in openrouter_models(self.browser.cached_rows(OPENROUTER_STT_URL) or [], "transcription"):
+            if item.id == model_id:
+                return item.usd_per_minute
+        return None
+
+    async def warm_openrouter_prices(self) -> None:
+        """Load OpenRouter's public (keyless) LLM, embeddings and speech-to-text price lists."""
+        source = CatalogSource(provider="openrouter", base_url=OPENROUTER_BASE_URL)
+        for capability in ("text_generation", "embeddings", "transcription"):
+            await self.browser.browse(source, capability)
 
     async def list_for(self, profile: ProviderProfile) -> TextModelCatalog:
         configured = profile.models.get(Capability.TEXT_GENERATION)

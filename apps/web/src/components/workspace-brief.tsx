@@ -1,10 +1,12 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { formatDate } from "@/lib/time-preferences";
 import { FileText, Upload } from "lucide-react";
-import { meetingsService } from "@/lib/meetings-service";
-import type { BriefDocument, OrganizationBrief } from "@/lib/types";
+import { identityService, meetingsService, serviceErrorStatus } from "@/lib/meetings-service";
+import type { BriefDocument, OrganizationBrief, OrganizationIdentity } from "@/lib/types";
 import { Skeleton } from "./ui/feedback";
+import { domainProblem, identityInput, WorkspaceIdentityFields } from "./workspace-identity-fields";
 
 /** Company context the meeting-prep assistant reads. Members can read it; admins can edit it. */
 export function WorkspaceBrief({ workspaceId, canManage }: { workspaceId: string; canManage: boolean }) {
@@ -13,19 +15,34 @@ export function WorkspaceBrief({ workspaceId, canManage }: { workspaceId: string
   const [briefBusy, setBriefBusy] = useState(false);
   const [briefError, setBriefError] = useState<string | null>(null);
   const [briefMessage, setBriefMessage] = useState<string | null>(null);
+  // Who WE are (name, aliases, domains); null until loaded or on an API without identity.
+  const [identity, setIdentity] = useState<OrganizationIdentity | null>(null);
   const locked = !canManage || briefBusy;
 
   useEffect(() => {
     void Promise.all([meetingsService.getOrganizationBrief(), meetingsService.listBriefDocuments()])
       .then(([nextBrief, nextDocuments]) => { setBrief(nextBrief); setBriefDocuments(nextDocuments); })
       .catch(() => setBriefError("Could not load the organization briefing profile."));
+    void identityService.get().then(setIdentity).catch((cause: unknown) => {
+      setIdentity(null);
+      if (serviceErrorStatus(cause) !== 404) setBriefError("Could not load your company name and domains.");
+    });
   }, [workspaceId]);
 
   async function saveBrief(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!brief) return;
+    const invalidDomain = identity?.domains.find((domain) => domainProblem(domain));
+    if (invalidDomain) { setBriefError(`“${invalidDomain}” ${domainProblem(invalidDomain)}.`); return; }
     setBriefBusy(true); setBriefError(null); setBriefMessage(null);
-    try { setBrief(await meetingsService.saveOrganizationBrief(brief)); setBriefMessage("Company context saved for meeting prep."); }
+    try {
+      const [savedBrief, savedIdentity] = await Promise.all([
+        meetingsService.saveOrganizationBrief(brief),
+        identity && identity.can_edit ? identityService.save(identityInput(identity)) : Promise.resolve(identity),
+      ]);
+      setBrief(savedBrief); setIdentity(savedIdentity);
+      setBriefMessage("Company context saved for meeting prep.");
+    }
     catch (cause) { setBriefError(cause instanceof Error ? cause.message : "Could not save company context."); }
     finally { setBriefBusy(false); }
   }
@@ -56,6 +73,7 @@ export function WorkspaceBrief({ workspaceId, canManage }: { workspaceId: string
       {briefError ? <p className="form-error" role="alert">{briefError}</p> : null}
       {briefMessage ? <p className="form-success" role="status">{briefMessage}</p> : null}
       {brief ? <form id="organization-brief-form" className="form-stack" onSubmit={(event) => void saveBrief(event)}>
+        {identity ? <WorkspaceIdentityFields value={identity} onChange={setIdentity} disabled={locked || !identity.can_edit} /> : null}
         <div className="field"><label htmlFor="brief-website">Company website</label><input id="brief-website" type="url" value={brief.website ?? ""} onChange={(event) => setBrief({ ...brief, website: event.target.value || null })} placeholder="https://yourcompany.com" disabled={locked} /></div>
         <div className="field"><label htmlFor="brief-overview">What your company does</label><textarea id="brief-overview" rows={3} value={brief.overview} onChange={(event) => setBrief({ ...brief, overview: event.target.value })} placeholder="Who you serve, the problems you solve, and how you work." disabled={locked} /></div>
         <div className="field-row">
@@ -74,7 +92,7 @@ export function WorkspaceBrief({ workspaceId, canManage }: { workspaceId: string
         </div>
         {briefDocuments.length ? <ul className="list-card brief-document-list">{briefDocuments.map((item) => <li key={item.id} className="list-row">
           <span className="settings-icon" aria-hidden="true"><FileText /></span>
-          <span className="brief-document-copy"><b>{item.filename}</b><small>{item.character_count.toLocaleString()} readable characters · {new Date(item.uploaded_at).toLocaleDateString()}</small></span>
+          <span className="brief-document-copy"><b>{item.filename}</b><small>{item.character_count.toLocaleString()} readable characters · {formatDate(item.uploaded_at)}</small></span>
           {canManage ? <button type="button" className="text-button destructive" disabled={briefBusy} aria-label={`Remove ${item.filename}`} onClick={() => void deleteBriefDocument(item.id)}>Remove</button> : null}
         </li>)}</ul> : <p className="field-hint">No company documents uploaded yet.</p>}
       </div>

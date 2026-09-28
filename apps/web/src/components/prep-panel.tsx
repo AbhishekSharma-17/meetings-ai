@@ -1,15 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { formatDateTime } from "@/lib/time-preferences";
 import { Tabs } from "@base-ui/react/tabs";
 import { FileSearch, History, KeyRound, NotebookPen, SlidersHorizontal } from "lucide-react";
 import { jobService, meetingsService, prepService, serviceErrorStatus } from "@/lib/meetings-service";
-import type { AnyPrepReport, BackgroundJob, CachedCalendarEvent, KnowledgeTextProfile, PrepGenerateInput, PrepHistory, PrepStage } from "@/lib/types";
-import { PrepReportView } from "./meeting-prep-report";
+import type { AnyPrepReport, AttendeeSides, BackgroundJob, CachedCalendarEvent, KnowledgeTextProfile, PrepGenerateInput, PrepHistory, PrepStage } from "@/lib/types";
+import { isReportV2, PrepReportView } from "./meeting-prep-report";
 import { PrepDocuments } from "./prep-documents";
 import { PrepHistoryList } from "./prep-history";
 import { isHttpsLink, PrepLinkChips } from "./prep-link-chips";
 import { PrepProgress } from "./prep-progress";
+import { PrepWhosWho, sidesFromReport } from "./prep-whos-who";
 import { Alert, EmptyState, Skeleton } from "./ui/feedback";
 import { SwitchField } from "./ui/switch";
 import { UiSelect } from "./ui-select";
@@ -38,11 +40,13 @@ function websiteError(value: string): string | null {
   } catch { return "Enter a full website address, e.g. https://company.com"; }
 }
 
-export function MeetingPrepPanel({ event, canEdit = true, onOpenProviders }: {
+export function MeetingPrepPanel({ event, canEdit = true, onOpenProviders, onOpenOrganization }: {
   event: CachedCalendarEvent;
   canEdit?: boolean;
   /** Shown on setup errors (e.g. no Exa key). Pass only for owners/admins. */
   onOpenProviders?(): void;
+  /** Opens the company profile when our own identity is missing. */
+  onOpenOrganization?(): void;
 }) {
   const [report, setReport] = useState<AnyPrepReport | null>(null);
   const [loadingReport, setLoadingReport] = useState(true);
@@ -54,6 +58,8 @@ export function MeetingPrepPanel({ event, canEdit = true, onOpenProviders }: {
   const [researchEnabled, setResearchEnabled] = useState(true);
   const [textProfiles, setTextProfiles] = useState<KnowledgeTextProfile[]>([]);
   const [textProfileId, setTextProfileId] = useState("");
+  // Who's-who corrections (attendee key → ours/theirs); sent with the briefing and kept in it.
+  const [sides, setSides] = useState<AttendeeSides>({});
   const [history, setHistory] = useState<PrepHistory | null>(null);
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState<PrepStage | null>(null);
@@ -72,7 +78,11 @@ export function MeetingPrepPanel({ event, canEdit = true, onOpenProviders }: {
 
   useEffect(() => {
     void prepService.getLatest(event.id)
-      .then((saved) => { setReport(saved); if (saved) setTab("briefing"); })
+      .then((saved) => {
+        setReport(saved);
+        if (saved) setTab("briefing");
+        if (saved && isReportV2(saved)) setSides(sidesFromReport(saved.whos_who));
+      })
       .catch(() => setLoadError("A previous briefing could not be loaded. You can generate a new one."))
       .finally(() => setLoadingReport(false));
     void prepService.getInputs(event.id).then((inputs) => {
@@ -134,6 +144,7 @@ export function MeetingPrepPanel({ event, canEdit = true, onOpenProviders }: {
     const input: PrepGenerateInput = {
       context, target_company: targetCompany.trim() || null, company_website: website.trim() || null,
       profile_urls: links.filter(isHttpsLink), text_profile_id: textProfileId || null, research_enabled: researchEnabled,
+      attendee_sides: sides,
     };
     let background = false;
     try {
@@ -179,13 +190,13 @@ export function MeetingPrepPanel({ event, canEdit = true, onOpenProviders }: {
       <section className="card meeting-prep-panel" aria-label="Meeting preparation">
         <div className="card-header">
           <div><h2>{report ? "Refresh your briefing" : "Build your briefing"}</h2><p>Your company profile, these inputs and, if allowed, cited public research.</p></div>
-          {savedAt ? <small className="prep-saved">Saved {new Date(savedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</small> : null}
+          {savedAt ? <small className="prep-saved">Saved {formatDateTime(savedAt)}</small> : null}
         </div>
         <div className="card-body form-stack">
           <div className="field-row">
             <div className="field">
               <label htmlFor="prep-company">Target company</label>
-              <input id="prep-company" value={targetCompany} disabled={!canEdit} onChange={(change) => setTargetCompany(change.target.value)} placeholder="Inferred from invitee domains if blank" maxLength={200} />
+              <input id="prep-company" value={targetCompany} disabled={!canEdit} onChange={(change) => setTargetCompany(change.target.value)} placeholder="Inferred from attendees or the title if blank" maxLength={200} />
             </div>
             <div className="field">
               <label htmlFor="prep-website">Company website</label>
@@ -193,6 +204,8 @@ export function MeetingPrepPanel({ event, canEdit = true, onOpenProviders }: {
               {websiteProblem ? <p id="prep-website-error" className="inline-error">{websiteProblem}</p> : null}
             </div>
           </div>
+          <PrepWhosWho eventId={event.id} targetCompany={targetCompany} website={websiteProblem ? "" : website}
+            sides={sides} onSidesChange={setSides} canEdit={canEdit} disabled={busy} onOpenOrganization={onOpenOrganization} />
           <div className="field">
             <label htmlFor="prep-context">What you already know or want to learn</label>
             <textarea id="prep-context" rows={3} value={context} disabled={!canEdit} maxLength={8000} onChange={(change) => setContext(change.target.value)} placeholder="Meeting goal, relationship history, questions — e.g. their AI roadmap, recent deals, end clients" />

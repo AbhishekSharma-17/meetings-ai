@@ -1,134 +1,148 @@
 "use client";
 
-import { FormEvent, useState } from "react";
-import { Check, Copy, UserPlus } from "lucide-react";
-import { Avatar } from "./ui/avatar";
+import { useEffect, useState } from "react";
+import { UserPlus } from "lucide-react";
+import { meetingsService } from "@/lib/meetings-service";
 import type { CurrentAccount, InviteResult, WorkspaceMember } from "@/lib/types";
-import { UiSelect } from "./ui-select";
-import { Alert, Badge, type Tone } from "./ui/feedback";
+import { Alert, LoadingRow } from "./ui/feedback";
 import { FilterInput, matchesQuery, NoMatches, ScrollPanel } from "./scroll-panel";
+import { AddPeopleDialog } from "./add-people-dialog";
+import { AccessResultDialog, ConfirmMemberDialog, MemberRoleDialog } from "./member-dialogs";
+import { MemberRow, type MemberAction } from "./member-row";
+import { memberPermissions, memberState, roleLabel, roleOptions, type InviteRole, type MemberRole } from "./member-access";
+
+export { roleLabel, type InviteRole } from "./member-access";
 
 /** Above this many people the list gets a search box; it always scrolls inside the card. */
 const SEARCH_THRESHOLD = 6;
+/** Pending/expired invite chips are recomputed on this cadence. */
+const CLOCK_TICK_MS = 30_000;
 
-export type InviteRole = "admin" | "member" | "viewer";
+type Dialog =
+  | { kind: "add" }
+  | { kind: "role" | "reset" | "remove"; member: WorkspaceMember }
+  | { kind: "result"; title: string; sentTitle: string; result: InviteResult };
 
-export const roleLabel: Record<WorkspaceMember["role"], string> = { owner: "Owner", admin: "Admin", member: "Member", viewer: "Viewer" };
+const message = (cause: unknown, fallback: string) => cause instanceof Error ? cause.message : fallback;
 
-function statusTone(status: string): Tone {
-  if (status === "active") return "success";
-  if (status === "invited") return "info";
-  return "neutral";
+function useNow(): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), CLOCK_TICK_MS);
+    return () => window.clearInterval(timer);
+  }, []);
+  return now;
 }
-const statusLabel = (status: string) => status ? `${status[0].toUpperCase()}${status.slice(1)}` : "Unknown";
 
-const ownerRoleOptions = [{ value: "owner", label: "Owner" }, { value: "admin", label: "Admin" }, { value: "member", label: "Member" }, { value: "viewer", label: "Viewer" }];
-const adminRoleOptions = [{ value: "member", label: "Member" }, { value: "viewer", label: "Viewer" }];
-const ownerInviteOptions = [{ value: "member", label: "Member" }, { value: "admin", label: "Admin" }, { value: "viewer", label: "Viewer" }];
-const adminInviteOptions = [{ value: "member", label: "Member" }, { value: "viewer", label: "Viewer" }];
-const ROLE_HINT = "Admins run meetings and manage the workspace. Members use shared knowledge; viewers can’t create knowledge bases.";
-
-export function WorkspacePeople({ members, account, canManage, memberBusy, pendingRemovalId, inviteResult, inviting, onChangeRole, onReset, onRequestRemoval, onCancelRemoval, onRemove, onInvite, onCopyFailed }: {
+/** People & access: a list of members with a row menu, and "Add people" in a dialog. */
+export function WorkspacePeople({ members, loading, loadError, account, canManage, workspaceName, onMembersChange, onNotice, onRetry }: {
   members: WorkspaceMember[];
+  loading: boolean;
+  loadError: string | null;
   account: CurrentAccount | null;
   canManage: boolean;
-  memberBusy: string | null;
-  pendingRemovalId: string | null;
-  inviteResult: InviteResult | null;
-  inviting: boolean;
-  onChangeRole(userId: string, role: WorkspaceMember["role"]): void;
-  onReset(userId: string): void;
-  onRequestRemoval(userId: string): void;
-  onCancelRemoval(): void;
-  onRemove(userId: string): void;
-  onInvite(email: string, name: string, role: InviteRole): Promise<boolean>;
-  onCopyFailed(): void;
+  workspaceName: string;
+  onMembersChange(members: WorkspaceMember[]): void;
+  onNotice(text: string): void;
+  onRetry(): void;
 }) {
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteName, setInviteName] = useState("");
-  const [inviteRole, setInviteRole] = useState<InviteRole>("member");
   const [query, setQuery] = useState("");
+  const [dialog, setDialog] = useState<Dialog | null>(null);
+  const [dialogBusy, setDialogBusy] = useState(false);
+  const [dialogError, setDialogError] = useState<string | null>(null);
+  const [rowBusy, setRowBusy] = useState<string | null>(null);
+  const [rowError, setRowError] = useState<string | null>(null);
+  const now = useNow();
   const ownerCount = members.filter((member) => member.role === "owner").length;
   const isOwner = account?.role === "owner";
 
-  async function submitInvite(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const invited = await onInvite(inviteEmail.trim(), inviteName.trim(), inviteRole);
-    if (invited) { setInviteEmail(""); setInviteName(""); }
+  const refresh = () => meetingsService.listWorkspaceMembers().then(onMembersChange).catch(() => undefined);
+  const open = (next: Dialog | null) => { setDialogError(null); setDialog(next); };
+
+  async function invite(email: string, name: string, role: InviteRole): Promise<InviteResult> {
+    const result = await meetingsService.inviteMember(email, name, role);
+    await refresh();
+    return result;
+  }
+
+  async function runDialog(work: () => Promise<void>, fallback: string) {
+    setDialogBusy(true); setDialogError(null);
+    try { await work(); }
+    catch (cause) { setDialogError(message(cause, fallback)); }
+    finally { setDialogBusy(false); }
+  }
+
+  const changeRole = (member: WorkspaceMember, role: MemberRole) => runDialog(async () => {
+    await meetingsService.changeMemberRole(member.user_id, role);
+    await refresh();
+    open(null);
+    onNotice("Member role updated.");
+  }, "Could not change the role.");
+
+  const resetAccess = (member: WorkspaceMember) => runDialog(async () => {
+    const result = await meetingsService.resetMemberAccess(member.user_id);
+    await refresh();
+    open({ kind: "result", title: `Access reset for ${member.display_name}`, sentTitle: "Reset link emailed", result });
+  }, "Could not reset access.");
+
+  const remove = (member: WorkspaceMember) => runDialog(async () => {
+    await meetingsService.removeMember(member.user_id);
+    await refresh();
+    open(null);
+    onNotice("Member access removed from this workspace.");
+  }, "Could not remove this person.");
+
+  async function resend(member: WorkspaceMember) {
+    setRowBusy(member.user_id); setRowError(null);
+    try {
+      const result = await meetingsService.resendInvite(member.user_id);
+      await refresh();
+      open({ kind: "result", title: `Invitation resent to ${member.display_name}`, sentTitle: "New invitation sent", result });
+    } catch (cause) { setRowError(message(cause, "Could not resend the invitation.")); }
+    finally { setRowBusy(null); }
+  }
+
+  function act(member: WorkspaceMember, action: MemberAction) {
+    setRowError(null);
+    if (action === "resend") void resend(member);
+    else open({ kind: action, member });
   }
 
   const searchable = members.length > SEARCH_THRESHOLD;
-  const visible = searchable ? members.filter((member) => matchesQuery(query, [member.display_name, member.email, roleLabel[member.role], member.status])) : members;
+  const visible = searchable ? members.filter((member) => matchesQuery(query, [member.display_name, member.email, roleLabel[member.role], memberState(member, now).label])) : members;
+  const pending = members.filter((member) => member.status === "invited").length;
 
   return <section className="card settings-section" id="settings-people" aria-labelledby="workspace-members-title">
     <div className="card-header">
       <div><h2 id="workspace-members-title">People & access</h2><p>Who can open this workspace and what they can change.</p></div>
-      <span className="section-count">{members.length} {members.length === 1 ? "person" : "people"}</span>
+      <div className="people-header-actions">
+        <span className="section-count">{members.length} {members.length === 1 ? "person" : "people"}{pending ? ` · ${pending} invited` : ""}</span>
+        {canManage ? <button type="button" className="button secondary sm" onClick={() => open({ kind: "add" })}><UserPlus aria-hidden="true" /><span>Add people</span></button> : null}
+      </div>
     </div>
     {searchable ? <div className="card-toolbar">
-      <FilterInput id="member-search" label="Search people" value={query} onChange={setQuery} placeholder="Search by name, email or role" />
+      <FilterInput id="member-search" label="Search people" value={query} onChange={setQuery} placeholder="Search by name, email, role or status" />
     </div> : null}
-    {visible.length ? <ScrollPanel label="Member list" className="member-scroll"><ul className="member-list">
-      {visible.map((member) => {
-        const isSelf = account?.user_id === member.user_id;
-        const canEdit = canManage && !isSelf && (isOwner || member.role === "member" || member.role === "viewer");
-        const ownerProtected = member.role === "owner" && ownerCount <= 1;
-        const busy = memberBusy === member.user_id;
-        return <li key={member.user_id} className="member-row">
-          <Avatar name={member.display_name} photoUrl={member.photo_url} />
-          <span className="member-identity">
-            <span className="member-name"><b>{member.display_name}</b>{isSelf ? <span className="tag">You</span> : null}</span>
-            <small>{member.email ?? "Local password sign-in"}</small>
-          </span>
-          <span className="member-role">
-            {canEdit && !ownerProtected
-              ? <UiSelect id={`role-${member.user_id}`} label={`Role for ${member.display_name}`} hideLabel size="sm" value={member.role} disabled={busy} onChange={(role) => onChangeRole(member.user_id, role as WorkspaceMember["role"])} options={isOwner ? ownerRoleOptions : adminRoleOptions} />
-              : <span className="member-role-text">{roleLabel[member.role]}</span>}
-          </span>
-          <span className="member-status"><Badge tone={statusTone(member.status)} dot>{statusLabel(member.status)}</Badge></span>
-          <span className="member-actions">
-            {canEdit && !ownerProtected ? pendingRemovalId === member.user_id
-              ? <>
-                <button className="button danger sm" type="button" disabled={busy} onClick={() => onRemove(member.user_id)}>Confirm remove</button>
-                <button className="button ghost sm" type="button" onClick={onCancelRemoval}>Cancel</button>
-              </>
-              : <>
-                {member.role !== "owner" ? <button className="button ghost sm" type="button" disabled={busy} onClick={() => onReset(member.user_id)}>Reset access</button> : null}
-                <button className="text-button destructive" type="button" onClick={() => onRequestRemoval(member.user_id)}>Remove</button>
-              </> : null}
-          </span>
-        </li>;
-      })}
-    </ul></ScrollPanel> : members.length ? <NoMatches query={query} noun="people" onClear={() => setQuery("")} /> : null}
-    {canManage ? <div className="invite-panel">
-      <form className="form-stack" onSubmit={(event) => void submitInvite(event)}>
-        <div className="invite-heading"><span className="settings-icon" aria-hidden="true"><UserPlus /></span><div><h3>Invite a teammate</h3><p className="field-hint">They get a temporary password and must change it on first sign-in.</p></div></div>
-        <div className="field-row three">
-          <div className="field"><label htmlFor="invite-name">Name</label><input id="invite-name" value={inviteName} onChange={(event) => setInviteName(event.target.value)} minLength={2} maxLength={120} required /></div>
-          <div className="field"><label htmlFor="invite-email">Work email</label><input id="invite-email" type="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} required /></div>
-          <UiSelect id="invite-role" label="Role" value={inviteRole} onChange={(role) => setInviteRole(role as InviteRole)} options={isOwner ? ownerInviteOptions : adminInviteOptions} />
-        </div>
-        <div className="invite-footer">
-          <p className="field-hint">{ROLE_HINT}</p>
-          <button className="button primary" disabled={inviting}>{inviting ? "Sending invitation…" : "Send invitation"}</button>
-        </div>
-      </form>
-      {inviteResult ? <InviteOutcome result={inviteResult} onCopyFailed={onCopyFailed} /> : null}
-    </div> : null}
+    {rowError ? <div className="card-body people-error"><Alert tone="danger">{rowError}</Alert></div> : null}
+    {loadError ? <div className="card-body"><Alert tone="danger" actions={<button type="button" className="button secondary sm" onClick={onRetry}>Retry</button>}>{loadError}</Alert></div>
+      : loading && !members.length ? <div className="card-body"><LoadingRow>Loading people…</LoadingRow></div>
+      : visible.length ? <ScrollPanel label="Member list" className="member-scroll"><ul className="people-list">
+        {visible.map((member) => <MemberRow key={member.user_id} member={member} state={memberState(member, now)}
+          isSelf={account?.user_id === member.user_id} permissions={memberPermissions(member, account, ownerCount)}
+          busy={rowBusy === member.user_id} onAction={(action) => act(member, action)} />)}
+      </ul></ScrollPanel>
+      : members.length ? <NoMatches query={query} noun="people" onClear={() => setQuery("")} /> : null}
+    <AddPeopleDialog open={dialog?.kind === "add"} isOwner={isOwner} workspaceName={workspaceName} onClose={() => open(null)} onInvite={invite} />
+    {dialog?.kind === "role" ? <MemberRoleDialog member={dialog.member} options={roleOptions(isOwner)} busy={dialogBusy} error={dialogError}
+      onSave={(role) => void changeRole(dialog.member, role)} onClose={() => open(null)} /> : null}
+    {dialog?.kind === "reset" ? <ConfirmMemberDialog title={`Reset access for ${dialog.member.display_name}?`}
+      description={<>Their current password and every open session stop working now. We’ll email <b>{dialog.member.email}</b> a link to set a new password; it works once and expires in 10 minutes.</>}
+      confirmLabel="Reset access" busyLabel="Resetting…" busy={dialogBusy} error={dialogError}
+      onConfirm={() => void resetAccess(dialog.member)} onClose={() => open(null)} /> : null}
+    {dialog?.kind === "remove" ? <ConfirmMemberDialog title={`Remove ${dialog.member.display_name}?`}
+      description={dialog.member.status === "invited" ? "Their pending invitation stops working and they lose access to this workspace." : "They lose access to this workspace, its meetings and its shared knowledge. Their account and other workspaces are not affected."}
+      confirmLabel="Remove" busyLabel="Removing…" busy={dialogBusy} error={dialogError}
+      onConfirm={() => void remove(dialog.member)} onClose={() => open(null)} /> : null}
+    {dialog?.kind === "result" ? <AccessResultDialog title={dialog.title} sentTitle={dialog.sentTitle} result={dialog.result} onClose={() => open(null)} /> : null}
   </section>;
-}
-
-function InviteOutcome({ result, onCopyFailed }: { result: InviteResult; onCopyFailed(): void }) {
-  const [copied, setCopied] = useState(false);
-  const showPassword = Boolean(result.temporary_password) && !result.email_sent;
-  function copy() {
-    void navigator.clipboard.writeText(result.temporary_password ?? "").then(() => setCopied(true)).catch(onCopyFailed);
-  }
-  return <Alert tone={result.email_sent ? "success" : "warning"} title={result.email_sent ? "Invitation email sent" : "Teammate added — email not sent"}>
-    <p>{result.note}</p>
-    <dl className="invite-secret">
-      <div><dt>Account</dt><dd><code>{result.account.email}</code></dd></div>
-      {showPassword ? <div><dt>Temporary password · shown once</dt><dd><code>{result.temporary_password}</code><button type="button" className="button secondary sm" onClick={copy} aria-label="Copy temporary password">{copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}{copied ? "Copied" : "Copy"}</button></dd></div> : null}
-    </dl>
-  </Alert>;
 }

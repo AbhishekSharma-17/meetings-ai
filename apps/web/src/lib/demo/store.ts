@@ -1,6 +1,6 @@
 import type {
   AuditEvent, BriefDocument, CachedCalendarEvent, CalendarConnection, CalendarSchedule, CalendarSyncState, KnowledgeBase, KnowledgeConversation,
-  MeetingDeliverySettings, MeetingMinutes, MomGuidance, OrganizationBrief, PostMeetingJob, PrepDocument, PrepInputs, PrepReportV2, RetentionPolicy,
+  MeetingDeliverySettings, MeetingMinutes, MomGuidance, OrganizationBrief, OrganizationIdentity, PostMeetingJob, PrepDocument, PrepInputs, PrepReportV2, RetentionPolicy,
   SpeakerIdentity, StorageCategoryKey, StorageItem, UsageEvent, VaultCredential, Workspace, WorkspaceMember,
 } from "../types";
 import { DEMO_CALENDARS_KEY, DEMO_WORKSPACE_KEY } from "../demo-mode";
@@ -18,6 +18,8 @@ import { generateLedger } from "./fixtures/usage";
 export type DemoStore = {
   clock: Clock; orgId: string; displayName: string; photoUrl: string | null; defaultWorkspaceId: string | null;
   workspace: Workspace; members: WorkspaceMember[]; brief: OrganizationBrief; briefDocuments: BriefDocument[]; retention: RetentionPolicy;
+  /** Saved "our company" identity; null until the visitor saves it (suggestions are shown instead). */
+  companyIdentity: OrganizationIdentity | null;
   seeds: MeetingSeed[]; minutes: Record<string, MeetingMinutes | null>; guidance: Record<string, MomGuidance>;
   delivery: Record<string, MeetingDeliverySettings>; jobs: Record<string, PostMeetingJob>; identities: Record<string, SpeakerIdentity[]>;
   /** When the visitor sent the assistant to a meeting (ms), so its status can advance over time. */
@@ -128,6 +130,7 @@ export function createStore(): DemoStore {
   return {
     clock, orgId, displayName: "Alex Morgan", photoUrl: team[0].photo, defaultWorkspaceId: ORG_MAIN,
     workspace: workspaceRecord(clock, orgId), members: memberRecords(orgId), brief: organizationBrief(clock), briefDocuments: briefDocuments(clock), retention: defaultRetention,
+    companyIdentity: null,
     seeds, minutes, guidance, delivery, jobs, identities, joinRequests: {},
     connections, events, syncs: calendarSyncs(clock, [CAL_GOOGLE, CAL_OUTLOOK, CAL_CALENDLY]), schedules: calendarSchedules(seeds, events),
     reports: prep.reports, prepInputs: prep.inputs, prepDocuments: prep.documents,

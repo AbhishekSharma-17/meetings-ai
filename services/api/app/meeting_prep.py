@@ -12,7 +12,7 @@ import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
@@ -24,18 +24,22 @@ from .accounts import Actor
 from .calendar_cache import CalendarCacheService
 from .database import (
     Database, KnowledgeDocumentRow, MeetingPrepInputRow, MeetingPrepRow, OrganizationBriefDocumentRow,
-    OrganizationBriefRow, OrganizationMembershipRow, OrganizationRow, UsageEventRow, UserRow,
+    OrganizationBriefRow, UsageEventRow,
 )
 from .exa_client import ExaClient, UsageContext
+from .organization_identity import OrganizationIdentityService
+from .prep_parties import OurIdentity, PartyInputs, WhosWho, resolve_parties
 from .prep_report import PrepReportV2, PrepUsageTotals, compat_projection
 from .prep_research import (
-    FREE_MAIL_DOMAINS, OurDocument, PrepBusyError, PrepConfigError, PrepError, PrepPermissionError, PrepResearchPipeline,
+    OurDocument, PrepBusyError, PrepConfigError, PrepError, PrepPermissionError, PrepResearchPipeline,
     ResearchInputs, resolve_exa_key,
 )
 from .service import ProviderProfileService
 
 logger = logging.getLogger(__name__)
 MAX_PREP_LINKS = 12
+MAX_ATTENDEE_SIDES = 100
+AttendeeSides = dict[str, Literal["ours", "theirs"]]
 __all__ = ["PrepBusyError", "PrepConfigError", "PrepError", "PrepPermissionError"]
 
 
@@ -108,6 +112,19 @@ class PrepInputs(BaseModel):
         return list(dict.fromkeys(_public_url(value, https_only=True) for value in values if value.strip()))
 
 
+def _clean_sides(values: dict[str, str]) -> dict[str, str]:
+    """Attendee key (lowercased email, or ``name:<words>``) → ours | theirs, bounded."""
+    if len(values) > MAX_ATTENDEE_SIDES:
+        raise ValueError(f"at most {MAX_ATTENDEE_SIDES} attendee corrections")
+    cleaned: dict[str, str] = {}
+    for key, side in values.items():
+        key = key.strip().lower()
+        if not key or len(key) > 320:
+            raise ValueError("attendee keys must be an email address or a name key")
+        cleaned[key] = side
+    return cleaned
+
+
 class PrepRequest(BaseModel):
     """Generate a briefing. Stored inputs are used; inline fields (legacy client) override them."""
 
@@ -117,6 +134,13 @@ class PrepRequest(BaseModel):
     profile_urls: list[str] = Field(default_factory=list, max_length=MAX_PREP_LINKS)
     text_profile_id: UUID | None = None
     research_enabled: bool = True
+    # Organizer corrections from the who's-who panel (kept with the saved briefing).
+    attendee_sides: AttendeeSides = Field(default_factory=dict)
+
+    @field_validator("attendee_sides")
+    @classmethod
+    def sides(cls, values: dict[str, str]) -> dict[str, str]:
+        return _clean_sides(values)
 
     @field_validator("company_website")
     @classmethod
@@ -127,6 +151,30 @@ class PrepRequest(BaseModel):
     @classmethod
     def public_urls(cls, values: list[str]) -> list[str]:
         return list(dict.fromkeys(_public_url(value, https_only=True) for value in values if value.strip()))
+
+
+class WhosWhoRequest(BaseModel):
+    """Preview the who's-who with the organizer's current (unsaved) inputs and corrections."""
+
+    target_company: str | None = Field(default=None, max_length=200)
+    company_website: str | None = Field(default=None, max_length=500)
+    attendee_sides: AttendeeSides = Field(default_factory=dict)
+
+    @field_validator("company_website")
+    @classmethod
+    def website(cls, value: str | None) -> str | None:
+        """A half-typed website is ignored in a preview instead of failing it."""
+        if not value or not value.strip():
+            return None
+        try:
+            return _public_url(value, https_only=False)
+        except ValueError:
+            return None
+
+    @field_validator("attendee_sides")
+    @classmethod
+    def sides(cls, values: dict[str, str]) -> dict[str, str]:
+        return _clean_sides(values)
 
 
 class PrepSource(BaseModel):
@@ -303,8 +351,10 @@ class MeetingPrepService:
                  providers: ProviderProfileService, *, usage: Any | None = None, vault: Any | None = None,
                  ai_settings: Any | None = None, retriever: Any | None = None,
                  exa_transport: httpx.AsyncBaseTransport | None = None, environ: dict[str, str] | None = None,
-                 exa_sleep: Callable[[float], Awaitable[None]] | None = None) -> None:
+                 exa_sleep: Callable[[float], Awaitable[None]] | None = None,
+                 identities: OrganizationIdentityService | None = None) -> None:
         self.database, self.cache, self.briefs, self.providers = database, cache, briefs, providers
+        self.identities = identities or OrganizationIdentityService(database)
         self.usage = usage if usage is not None else getattr(providers, "usage", None)
         self.vault, self.ai_settings, self.retriever = vault, ai_settings, retriever
         self.exa_transport, self.environ, self.exa_sleep = exa_transport, environ, exa_sleep
@@ -375,6 +425,19 @@ class MeetingPrepService:
             row.updated_at = now
         return inputs.model_copy(update={"updated_at": now})
 
+    # ----- who's who -----------------------------------------------------------------------
+    def whos_who(self, actor: Actor, event_id: UUID, request: WhosWhoRequest) -> WhosWho:
+        """Our company vs. the target and each attendee's side, as the next briefing would see them."""
+        event = self.cache.get_event(actor, event_id)
+        brief = self.briefs.get(actor)
+        return self._parties(actor, event, brief, PartyInputs(request.target_company, request.company_website,
+                                                               dict(request.attendee_sides)))[1]
+
+    def _parties(self, actor: Actor, event: Any, brief: OrganizationBrief,
+                 inputs: PartyInputs) -> tuple[OurIdentity, WhosWho]:
+        identity = self.identities.our_identity(actor, brief_website=brief.website)
+        return identity, resolve_parties(identity, inputs, event.invitees, title=event.title, agenda=event.agenda)
+
     # ----- generation ----------------------------------------------------------------------
     async def generate(self, actor: Actor, event_id: UUID, request: PrepRequest,
                        progress: ProgressCallback | None = None) -> PrepReportV2:
@@ -403,12 +466,14 @@ class MeetingPrepService:
         exa_key = resolve_exa_key(actor.organization_id, vault=self.vault, ai_settings=self.ai_settings,
                                   environ=self.environ) if inputs.research_enabled else None
         brief, _ = self.briefs.context(actor)
+        identity, parties = self._parties(actor, event, brief, PartyInputs(
+            inputs.target_company, inputs.company_website, dict(request.attendee_sides)))
         profile_id, model_override = self._research_model(actor, request)
         started = datetime.now(UTC)
         documents = await self._our_documents(actor, event_id, brief, inputs)
         pipeline = PrepResearchPipeline(self.providers)
         run_args = dict(organization_id=actor.organization_id, actor_user_id=actor.user_id, event=event,
-                        inputs=inputs, brief=brief, our_documents=documents, own_domains=self._own_domains(actor, brief),
+                        inputs=inputs, brief=brief, our_documents=documents, identity=identity, parties=parties,
                         profile_id=profile_id, model_override=model_override, progress=emit)
         if exa_key:
             client_args: dict[str, Any] = {"ledger": self.usage, "transport": self.exa_transport, "usage": UsageContext(
@@ -429,7 +494,7 @@ class MeetingPrepService:
                 target_company=outcome.target.name or outcome.target.domain, company_website=outcome.target.website,
                 sources=outcome.sources, public_research_performed=outcome.exa_calls > 0,
                 research_steps=outcome.steps, usage=usage, started_at=started, generated_at=generated,
-                provider=outcome.provider, model=outcome.model,
+                provider=outcome.provider, model=outcome.model, whos_who=parties,
             )
             session.add(MeetingPrepRow(id=str(report_id), organization_id=str(actor.organization_id),
                 user_id=str(actor.user_id), calendar_event_id=str(event_id), context=inputs.notes,
@@ -502,17 +567,6 @@ class MeetingPrepService:
                              for row in legacy)
         return found
 
-    def _own_domains(self, actor: Actor, brief: OrganizationBrief) -> set[str]:
-        domains = {_email_domain(actor.email), (urlsplit(brief.website or "").hostname or "").removeprefix("www.")}
-        with self.database.session_factory() as session:
-            organization = session.get(OrganizationRow, str(actor.organization_id))
-            domains.add(_email_domain(organization.contact_email if organization else None))
-            emails = session.execute(select(UserRow.email).join(
-                OrganizationMembershipRow, OrganizationMembershipRow.user_id == UserRow.id,
-            ).where(OrganizationMembershipRow.organization_id == str(actor.organization_id)).limit(500)).scalars().all()
-            domains.update(_email_domain(email) for email in emails)
-        return {domain for domain in domains if domain and domain not in FREE_MAIL_DOMAINS}
-
     @staticmethod
     def _usage_totals(session: Any, actor: Actor, event_id: UUID, start: datetime | None,
                       end: datetime | None) -> PrepUsageTotals:
@@ -540,10 +594,6 @@ class MeetingPrepService:
 def _require_contributor(actor: Actor) -> None:
     if actor.role == "viewer":
         raise PrepPermissionError("viewers cannot prepare meeting briefings")
-
-
-def _email_domain(email: str | None) -> str | None:
-    return email.rsplit("@", 1)[1].strip().lower() if email and "@" in email else None
 
 
 def _parse_time(value: Any) -> datetime | None:

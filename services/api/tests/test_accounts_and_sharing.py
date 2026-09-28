@@ -1,10 +1,11 @@
 from fastapi.testclient import TestClient
 
+from account_links import accept_invite
 from app.main import create_app
 from meetings_contracts import MeetingStatus, MeetingTranscriptSegment
 
 
-def test_invite_requires_password_change_and_sharing_limits_member_access(tmp_path, monkeypatch) -> None:
+def test_invite_link_and_sharing_limits_member_access(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("MEETINGS_AI_ADMIN_PASSWORD", "owner-password-for-test")
     monkeypatch.setenv("MEETINGS_AI_SESSION_SECRET", "owner-session-signing-test-secret")
     monkeypatch.setenv("MEETINGS_AI_ADMIN_EMAIL", "developer@genaiprotos.com")
@@ -38,19 +39,13 @@ def test_invite_requires_password_change_and_sharing_limits_member_access(tmp_pa
         })
         assert invited.status_code == 201
         member_id = invited.json()["account"]["user_id"]
-        temporary = invited.json()["temporary_password"]
-        assert len(temporary) >= 20
+        assert invited.json()["temporary_password"] is None
         client.post("/v1/auth/logout")
 
         assert client.post("/v1/auth/login", json={
-            "email": "teammate@example.com", "password": temporary,
-        }).status_code == 200
-        assert client.get("/v1/auth/me").json()["must_change_password"] is True
-        assert client.get("/v1/knowledge-bases").status_code == 403
-        changed = client.post("/v1/auth/change-password", json={
-            "current_password": temporary, "new_password": "a-very-long-new-password",
-        })
-        assert changed.status_code == 200
+            "email": "teammate@example.com", "password": "a-very-long-new-password",
+        }).status_code == 401  # no password until the invitation is accepted
+        accept_invite(client, invited.json(), "a-very-long-new-password")
         assert client.get("/v1/auth/me").json()["must_change_password"] is False
         assert client.get("/v1/knowledge-bases").json() == []
         assert client.get(f"/v1/knowledge-bases/{private_base['id']}/map").status_code == 404
@@ -102,15 +97,12 @@ def test_invite_requires_password_change_and_sharing_limits_member_access(tmp_pa
         client.post("/v1/auth/login", json={
             "email": "developer@genaiprotos.com", "password": "owner-password-for-test",
         })
-        reset = client.post(f"/v1/workspace/members/{member_id}/temporary-password")
+        reset = client.post(f"/v1/workspace/members/{member_id}/reset-access")
         assert reset.status_code == 200
-        second_temporary = reset.json()["temporary_password"]
-        assert second_temporary != temporary
+        assert reset.json()["temporary_password"] is None
         client.post("/v1/auth/logout")
         assert client.post("/v1/auth/login", json={
             "email": "teammate@example.com", "password": "a-very-long-new-password",
         }).status_code == 401
-        assert client.post("/v1/auth/login", json={
-            "email": "teammate@example.com", "password": second_temporary,
-        }).status_code == 200
-        assert client.get("/v1/auth/me").json()["must_change_password"] is True
+        accept_invite(client, reset.json(), "a-second-long-new-password")
+        assert client.get("/v1/auth/me").json()["email"] == "teammate@example.com"

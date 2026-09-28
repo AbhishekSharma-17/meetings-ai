@@ -6,6 +6,7 @@ import httpx
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
+from account_links import accept_invite
 from app.database import (
     LEGACY_ORGANIZATION_ID, KnowledgeChunkRow, KnowledgeDocumentRow,
     OrganizationBriefDocumentRow, UsageEventRow,
@@ -184,10 +185,7 @@ def test_roles_per_scope(tmp_path, monkeypatch) -> None:
                 "email": f"{role}@example.com", "display_name": f"Team {role}", "role": role,
             }).json()
             accounts[role] = invited["account"]["user_id"]
-            login(client, f"{role}@example.com", invited["temporary_password"])
-            assert client.post("/v1/auth/change-password", json={
-                "current_password": invited["temporary_password"], "new_password": f"{role}-long-new-password",
-            }).status_code == 200
+            accept_invite(client, invited, f"{role}-long-new-password")
             login(client, "developer@genaiprotos.com", "owner-password-for-test")
         org_doc = _upload(client, "organization", MARKDOWN, "offer.md").json()
         owner_base = client.post("/v1/knowledge-bases", json={"name": "Owner private"}).json()

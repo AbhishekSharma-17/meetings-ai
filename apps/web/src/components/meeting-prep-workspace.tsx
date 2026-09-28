@@ -12,12 +12,10 @@ import { calendarProviderNames } from "./calendar-providers";
 import { MeetingPrepPanel } from "./prep-panel";
 import { PageHeader } from "./ui/page-header";
 import { EmptyState, LoadingRow, Skeleton } from "./ui/feedback";
+import { currentTimeSettings, formatDateTime, todayKey } from "@/lib/time-preferences";
+import { addDaysToKey } from "@/lib/time-format";
 
 export { MeetingPrepPanel } from "./prep-panel";
-
-function dateKey(value: Date): string {
-  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
-}
 
 const listDate: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" };
 
@@ -35,9 +33,9 @@ export function MeetingPrepWorkspace({ identity, initialEvent, onOpenCalendar, o
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [range] = useState(() => {
-    const first = new Date();
-    const last = new Date(first); last.setDate(first.getDate() + 89);
-    return { first: dateKey(first), last: dateKey(last), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" };
+    // The next 90 days in the person's effective time zone.
+    const first = todayKey();
+    return { first, last: addDaysToKey(first, 89), timezone: currentTimeSettings().timeZone };
   });
 
   useEffect(() => { if (initialEvent) setSelectedId(initialEvent.id); }, [initialEvent, setSelectedId]);
@@ -101,7 +99,7 @@ export function MeetingPrepWorkspace({ identity, initialEvent, onOpenCalendar, o
       <div className="prep-main">
         {selectedEvent ? <>
           <EventSummary entry={selectedEntry ?? { id: selectedEvent.id, event: selectedEvent, sources: [selectedEvent] }} />
-          <MeetingPrepPanel key={selectedEvent.id} event={selectedEvent} onOpenProviders={onOpenProviders} />
+          <MeetingPrepPanel key={selectedEvent.id} event={selectedEvent} onOpenProviders={onOpenProviders} onOpenOrganization={onOpenOrganization} />
         </> : loading ? <div className="card card-body"><Skeleton lines={4} /></div> : <div className="card"><EmptyState plain icon={<NotebookPen />} title="Select a meeting">Its details and saved briefing appear here.</EmptyState></div>}
       </div>
     </div>}
@@ -113,7 +111,7 @@ function PrepEventRow({ entry, selected, onSelect }: { entry: CalendarEntry; sel
     <SourceStack sources={entry.sources} connections={[]} size="sm" />
     <span className="prep-event-copy">
       <b>{entry.event.title}</b>
-      <small><time dateTime={entry.event.starts_at}>{new Date(entry.event.starts_at).toLocaleString(undefined, listDate)}</time><PlatformMark event={entry.event} /></small>
+      <small><time dateTime={entry.event.starts_at}>{formatDateTime(entry.event.starts_at, listDate)}</time><PlatformMark event={entry.event} /></small>
     </span>
   </button>;
 }
@@ -132,7 +130,7 @@ function EventSummary({ entry }: { entry: CalendarEntry }) {
     </div>
     <h2>{event.title}</h2>
     <ul className="prep-summary-facts">
-      <li><Clock aria-hidden="true" />{starts.toLocaleString(undefined, { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })}</li>
+      <li><Clock aria-hidden="true" />{formatDateTime(starts, { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })}</li>
       <li><Users aria-hidden="true" />{invitees} invited {invitees === 1 ? "person" : "people"}</li>
     </ul>
     {event.agenda ? <p className="prep-summary-agenda"><b>Agenda</b>{event.agenda}</p> : null}

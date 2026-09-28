@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import base64
 import logging
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import Literal, TypeAlias
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel
@@ -29,6 +29,8 @@ from .database import (
     NotificationRow,
     OrganizationMembershipRow,
 )
+from .time_display import TimePreferences
+from .user_preferences import load_time_preferences
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,9 @@ MAX_PAGE = 100
 RETENTION_DAYS = 90
 TITLE_LIMIT = 300
 BODY_LIMIT = 2000
+
+# Text that mentions a time is rendered per reader, in their own zone and clock format.
+PersonalText: TypeAlias = str | Callable[[TimePreferences], str]
 
 
 class NotificationPublic(BaseModel):
@@ -102,8 +107,8 @@ class NotificationService:
     # ----- emitting ------------------------------------------------------------------------
     def notify(
         self, organization_id: UUID | str, *, user_ids: Iterable[UUID | str | None] = (),
-        roles: Iterable[str] = (), kind: str, severity: Severity = "info", title: str,
-        body: str | None = None, link_view: str | None = None, link_id: UUID | str | None = None,
+        roles: Iterable[str] = (), kind: str, severity: Severity = "info", title: PersonalText,
+        body: PersonalText | None = None, link_view: str | None = None, link_id: UUID | str | None = None,
         meeting_id: UUID | str | None = None, dedupe_key: str | None = None,
     ) -> int:
         """Create one notification per recipient; returns how many were created. Never raises."""
@@ -118,7 +123,7 @@ class NotificationService:
             return 0
 
     def _notify(self, organization_id: str, *, user_ids: Iterable[UUID | str | None], roles: Iterable[str],
-                kind: str, severity: str, title: str, body: str | None, link_view: str | None,
+                kind: str, severity: str, title: PersonalText, body: PersonalText | None, link_view: str | None,
                 link_id: UUID | str | None, meeting_id: UUID | str | None, dedupe_key: str | None) -> int:
         if severity not in SEVERITIES:
             severity = "info"
@@ -133,11 +138,15 @@ class NotificationService:
                 )).scalars().all())
             recipients = [user_id for user_id in recipients if user_id not in existing]
         created = 0
+        readers = load_time_preferences(self.database, recipients) if callable(title) or callable(body) else {}
         for user_id in recipients:
+            reader = readers.get(user_id, TimePreferences())
+            text = title(reader) if callable(title) else title
+            detail = body(reader) if callable(body) else body
             row = NotificationRow(
                 id=str(uuid4()), organization_id=organization_id, user_id=user_id, kind=kind[:60],
-                severity=severity, title=title.strip()[:TITLE_LIMIT] or kind,
-                body=(body.strip()[:BODY_LIMIT] or None) if body else None,
+                severity=severity, title=text.strip()[:TITLE_LIMIT] or kind,
+                body=(detail.strip()[:BODY_LIMIT] or None) if detail else None,
                 link_view=link_view[:40] if link_view else None,
                 link_id=str(link_id)[:120] if link_id else None,
                 meeting_id=str(meeting_id) if meeting_id else None,
@@ -184,7 +193,8 @@ class NotificationService:
         return self.recipients(organization_id, user_ids=[creator], roles=ADMIN_ROLES)
 
     def notify_meeting(self, organization_id: UUID | str, meeting_id: UUID | str, *, kind: str,
-                       severity: Severity, title: str, body: str | None = None, dedupe_key: str | None = None) -> int:
+                       severity: Severity, title: PersonalText, body: PersonalText | None = None,
+                       dedupe_key: str | None = None) -> int:
         """Notify the meeting audience with a link to the meeting detail screen."""
         try:
             audience = self.meeting_audience(organization_id, meeting_id)

@@ -800,6 +800,53 @@ class BackgroundJobRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class AccountTokenRow(Base):
+    """A single-use, short-lived link credential (invite acceptance or password reset).
+
+    Only a SHA-256 of the token is stored; the raw token exists only in the emailed link.
+    """
+
+    __tablename__ = "account_tokens"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    purpose: Mapped[str] = mapped_column(String(20), nullable=False)  # invite | password_reset
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    # The workspace the invite is for; NULL for a self-service password reset.
+    organization_id: Mapped[str | None] = mapped_column(String(36))
+    created_by: Mapped[str | None] = mapped_column(String(36))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class UserPreferenceRow(Base):
+    """Per-person display preferences: time zone (IANA name) and 12/24-hour clock."""
+
+    __tablename__ = "user_preferences"
+
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), primary_key=True)
+    # NULL timezone means "follow the browser"; detected_timezone is the last one the browser reported.
+    timezone: Mapped[str | None] = mapped_column(String(64))
+    detected_timezone: Mapped[str | None] = mapped_column(String(64))
+    time_format: Mapped[str] = mapped_column(String(8), nullable=False)  # auto | 12h | 24h
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class OrganizationIdentityRow(Base):
+    """Who WE are, so meeting prep never mistakes our own company for the client."""
+
+    __tablename__ = "organization_identities"
+
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), primary_key=True)
+    company_name: Mapped[str | None] = mapped_column(String(200))
+    aliases: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    domains: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    updated_by: Mapped[str | None] = mapped_column(String(36))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class SchemaVersionRow(Base):
     __tablename__ = "schema_version"
 
@@ -850,6 +897,7 @@ SCHEMA_TABLES_BY_VERSION: dict[int, tuple[str, ...]] = {
         "recipient_groups", "recipient_group_members", "meeting_delivery_groups",
         "email_delivery_groups", "notifications", "background_jobs",
     ),
+    25: ("account_tokens", "user_preferences", "organization_identities"),
 }
 
 SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
@@ -911,6 +959,9 @@ SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
     "email_delivery_groups": ("delivery_id", "group_id", "meeting_id", "group_name", "member_count"),
     "notifications": ("id", "organization_id", "user_id", "kind", "severity", "title", "body", "link_view", "link_id", "meeting_id", "dedupe_key", "created_at", "read_at"),
     "background_jobs": ("id", "organization_id", "user_id", "kind", "subject_id", "status", "stage", "message", "payload", "result", "error", "attempts", "created_at", "started_at", "finished_at", "updated_at"),
+    "account_tokens": ("id", "token_hash", "purpose", "user_id", "organization_id", "created_by", "created_at", "expires_at", "used_at", "revoked_at"),
+    "user_preferences": ("user_id", "timezone", "detected_timezone", "time_format", "updated_at"),
+    "organization_identities": ("organization_id", "company_name", "aliases", "domains", "updated_by", "updated_at"),
 }
 
 
@@ -993,7 +1044,7 @@ def _migrate_to_v22(connection) -> None:
 class Database:
     """Upgrades known schemas and rejects unknown or incomplete ones."""
 
-    SCHEMA_VERSION = 24
+    SCHEMA_VERSION = 25
 
     def __init__(self, url: str) -> None:
         engine_options: dict[str, object] = {"pool_pre_ping": True}

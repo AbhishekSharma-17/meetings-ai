@@ -369,8 +369,10 @@ test("workspace creation lives in Organization & people, not the profile menu", 
   await expect(page.getByPlaceholder("New workspace name")).toHaveCount(0);
   await page.getByRole("button", { name: "Organization & people" }).click();
   await expect(page.getByRole("heading", { name: "Your workspaces" })).toBeVisible();
-  await page.getByLabel("New workspace name").fill("Novaala");
-  await page.getByRole("button", { name: "Create workspace" }).click();
+  await page.getByRole("button", { name: "New workspace" }).click();
+  const dialog = page.getByRole("dialog", { name: "New workspace" });
+  await dialog.getByLabel("Workspace name").fill("Novaala");
+  await dialog.getByRole("button", { name: "Create workspace" }).click();
   await expect.poll(() => createdName).toBe("Novaala");
 });
 

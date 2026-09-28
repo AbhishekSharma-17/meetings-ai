@@ -19,6 +19,8 @@ from typing import Annotated
 
 from pydantic import BaseModel, BeforeValidator, Field
 
+from .prep_parties import WhosWho
+
 SourceOrigin = Literal["web", "provided_link", "our_documents", "prep_upload", "organization_brief"]
 DevelopmentType = Literal["deal", "mou", "partnership", "funding", "product", "hiring", "news"]
 Persona = Literal["technical", "business", "sales", "executive", "unknown"]
@@ -95,6 +97,8 @@ class AttendeeBrief(BaseModel):
     persona: Persona = "unknown"
     angle: str = ""
     source_ids: list[str] = Field(default_factory=list)
+    # Set by our resolver (never the model): theirs | other_external | unknown.
+    side: Literal["theirs", "other_external", "unknown"] | None = None
 
 
 class PersonaFocus(BaseModel):
@@ -161,6 +165,8 @@ class PrepReportV2(SynthesisOutput):
     generated_at: datetime
     provider: str
     model: str
+    # Who's who used for this briefing (our company vs. the target, attendee sides, warnings).
+    whos_who: WhosWho | None = None
     # v1-compatible projections so clients written for v1 keep rendering.
     findings: list[PrepFindingCompat] = Field(default_factory=list)
     relevant_offerings: list[str] = Field(default_factory=list)

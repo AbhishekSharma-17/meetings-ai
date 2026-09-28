@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { formatFullDateTime } from "@/lib/time-preferences";
 import type { ReactNode } from "react";
 import { Dialog } from "@base-ui/react/dialog";
 import { Download, Maximize2, MessageSquareText, X } from "lucide-react";
@@ -97,7 +98,7 @@ export function MeetingTranscript({ meetingTitle, assistantName, segments, focus
     </>;
     const review = <button className="text-button neutral" type="button" onClick={() => { setEditingSpeakerId(segment.segmentId); setSpeakerName(segment.speaker === UNIDENTIFIED_SPEAKER ? "" : segment.speaker); setApplyToSameLabel(false); }}>Review speaker</button>;
     return <TranscriptTurn key={segment.id} id={`transcript-${encodeURIComponent(segment.segmentId)}`} segment={segment} focused={focusSegmentId === segment.segmentId} assistantName={assistantName}
-      time={relativeTime(at - firstSegmentAt)} timeTitle={at > 1_000_000_000 ? new Date(at * 1000).toLocaleString() : "Elapsed from first captured turn"} flags={flags} actions={review}>
+      time={relativeTime(at - firstSegmentAt)} timeTitle={at > 1_000_000_000 ? formatFullDateTime(at * 1000) : "Elapsed from first captured turn"} flags={flags} actions={review}>
       {editingSpeakerId === segment.segmentId ? <div className="turn-review-form">
         {segment.rawSpeaker ? <p className="field-hint">Capture label: {segment.rawSpeaker}</p> : null}
         <label className="field">Correct speaker name<input value={speakerName} onChange={(event) => setSpeakerName(event.target.value)} placeholder="Leave blank to mark unidentified" autoFocus /></label>

@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowUpRight, CircleCheck, FileText, GitBranch, ListChecks, Quote, ShieldCheck } from "lucide-react";
+import { formatDate } from "@/lib/time-preferences";
 import type { KnowledgeMap, KnowledgeSource, KnowledgeWikiOverview } from "@/lib/types";
 import { Avatar, DEFAULT_ASSISTANT_NAME, isAssistantName } from "./ui/avatar";
 import { EmptyState } from "./ui/feedback";
@@ -18,7 +19,7 @@ export function formatOffset(seconds: number): string {
 function sourceDate(source: KnowledgeSource): string {
   const value = source.meeting_joined_at ?? source.meeting_created_at;
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" }).format(date);
+  return Number.isNaN(date.getTime()) ? value : formatDate(date);
 }
 
 /** One cited piece of evidence: what was said, by whom, when, and a link to the exact turn. */
@@ -51,7 +52,7 @@ export function WikiOverview({ overview, onOpenMeeting }: { overview: KnowledgeW
     <div className="section-heading"><div><h2 id="wiki-meetings-title"><GitBranch aria-hidden="true" /> Connected meetings</h2><p>{overview.meetings.length} completed meeting{overview.meetings.length === 1 ? "" : "s"}. Summaries come from approved minutes.</p></div></div>
     {overview.meetings.length ? <div className="wiki-meeting-grid">{overview.meetings.map((meeting) => <article className="card wiki-meeting" key={meeting.id}>
       <div className="wiki-meeting-body">
-        <time className="wiki-meeting-date">{new Date(meeting.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</time>
+        <time className="wiki-meeting-date">{formatDate(meeting.created_at)}</time>
         <h3>{meeting.title}</h3>
         {meeting.summary ? <p className="wiki-summary">{meeting.summary}</p> : <p className="wiki-summary muted-copy">Approved minutes are not available yet.</p>}
         {meeting.decisions.length ? <div className="wiki-facts"><b><CircleCheck aria-hidden="true" /> Decisions</b><ul>{meeting.decisions.slice(0, 3).map((decision, index) => <li key={index}>{decision}</li>)}</ul></div> : null}

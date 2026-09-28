@@ -1,5 +1,6 @@
 /** Plain-language names and number formats for usage, cost and storage records (keys come from the API). */
 import type { Tone } from "./ui/feedback";
+import { formatDate as formatZonedDate, formatDateTime } from "@/lib/time-preferences";
 
 const purposeNames: Record<string, string> = {
   mom_generation: "Minutes drafting",
@@ -113,12 +114,12 @@ export function formatBytes(bytes: number | null): string {
 
 export function formatWhen(value: string | null): string {
   if (!value) return "—";
-  return new Date(value).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  return formatDateTime(value);
 }
 
 export function formatDate(value: string | null): string {
   if (!value) return "—";
-  return new Date(value).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  return formatZonedDate(value);
 }
 
 /** Deletion counters in the purge result use table-ish keys; show them as words. */

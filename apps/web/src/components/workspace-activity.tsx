@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { formatFullDateTime, formatTime } from "@/lib/time-preferences";
 import { History, RefreshCw } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
 import type { AuditEvent, WorkspaceMember } from "@/lib/types";
@@ -102,7 +103,7 @@ function ActivityFeed({ entries, faces }: { entries: ActivityEntry[]; faces: Rea
 function ActivityRow({ entry, face }: { entry: ActivityEntry; face?: ActorFace }) {
   const Icon = entry.icon;
   const category = activityCategories[entry.category];
-  const time = entry.at.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const time = formatTime(entry.at);
   return <li className="activity-row" data-failed={entry.failed || undefined}>
     <span className="activity-icon" aria-hidden="true"><Icon /></span>
     <div className="activity-copy">
@@ -117,6 +118,6 @@ function ActivityRow({ entry, face }: { entry: ActivityEntry; face?: ActorFace }
         {entry.failed ? <Badge tone="danger">Failed</Badge> : null}
       </p>
     </div>
-    <time className="activity-time" dateTime={entry.at.toISOString()} title={entry.at.toLocaleString()}>{time}</time>
+    <time className="activity-time" dateTime={entry.at.toISOString()} title={formatFullDateTime(entry.at)}>{time}</time>
   </li>;
 }

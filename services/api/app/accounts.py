@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, func, select
 
+from .account_tokens import IssuedLink, has_usable_password, issue_link, revoke_links, unusable_password_hash
 from .database import (
     Database, KnowledgeBaseAccessRow, KnowledgeBaseRow, LEGACY_ADMIN_USER_ID, LEGACY_ORGANIZATION_ID,
     OrganizationMembershipRow, OrganizationRow, UserCredentialRow, UserRow,
@@ -82,10 +83,29 @@ class InviteRequest(BaseModel):
 
 
 class InviteResult(BaseModel):
+    """Result of an invite, resend, or access reset.
+
+    ``temporary_password`` is kept for older clients and is always null: people set their own
+    password from a single-use link. ``accept_url`` carries that link only when it could not be
+    emailed; it is a credential, shown to the admin once and never stored in plain text.
+    """
+
     account: AccountPublic
-    temporary_password: str | None
-    note: str = "Shown once. Share it privately; the recipient must change it on first sign-in."
+    temporary_password: str | None = None
+    note: str = ""
     email_sent: bool = False
+    accept_url: str | None = None
+    link_expires_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class InviteOutcome:
+    result: InviteResult
+    workspace_name: str
+    # Set when the person has no password yet and must accept through a link.
+    link: IssuedLink | None
+    # Copy-link fallback is only safe when this workspace is the account's only one.
+    single_workspace: bool
 
 
 class ChangePasswordRequest(BaseModel):
@@ -270,87 +290,68 @@ class AccountService:
             ))
         return self.select_organization(actor, organization_id)
 
-    def invite(self, requester: Actor, data: InviteRequest) -> InviteResult:
+    def invite(self, requester: Actor, data: InviteRequest) -> InviteOutcome:
         if not requester.is_admin:
             raise AccountError("only admins can invite people")
         if data.role == "admin" and requester.role != "owner":
             raise AccountError("only an owner can assign an admin role")
         now = datetime.now(UTC)
+        organization_id = str(requester.organization_id)
         with self.database.session_factory.begin() as session:
             existing = session.execute(select(UserRow).where(func.lower(UserRow.email) == data.email)).scalar_one_or_none()
             if existing:
-                if existing.status not in {"active", "invited"}:
-                    raise AccountError("this account is not active")
-                if session.get(OrganizationMembershipRow, (str(requester.organization_id), existing.id)):
-                    raise AccountError("this account already belongs to this workspace")
-                user_id = existing.id
-                display_name = existing.display_name
-                credential = session.get(UserCredentialRow, user_id)
-                if credential is None:
-                    raise AccountError("this account has no local sign-in method")
-                temporary = None
-                must_change_password = credential.must_change_password
-                note = "Existing account added. They can switch workspaces after signing in with their current password."
+                user_id, display_name, needs_link = self._existing_invitee(session, existing, organization_id)
             else:
-                user_id = str(uuid4())
-                display_name = data.display_name
-                temporary = secrets.token_urlsafe(24)
-                must_change_password = True
-                note = "Shown once. Share it privately; the recipient must change it on first sign-in."
-                session.add(UserRow(
-                    id=user_id, email=data.email, display_name=data.display_name,
-                    auth_subject=f"local:{user_id}", status="invited",
-                    created_at=now, updated_at=now,
-                ))
-                # The credential and membership both reference users.id. With
-                # no ORM relationships SQLAlchemy may flush the membership
-                # first; PostgreSQL rejects that immediate foreign key.
-                session.flush()
-                session.add(UserCredentialRow(
-                    user_id=user_id, password_hash=_hash_password(temporary),
-                    must_change_password=True, session_version=1,
-                    created_at=now, updated_at=now,
-                ))
+                user_id, display_name, needs_link = self._create_invitee(session, data, now), data.display_name, True
             session.add(OrganizationMembershipRow(
-                organization_id=str(requester.organization_id), user_id=user_id,
-                role=data.role, created_at=now,
+                organization_id=organization_id, user_id=user_id, role=data.role, created_at=now,
             ))
-            return InviteResult(account=AccountPublic(
+            session.flush()  # autoflush is off; membership_count below must see this row
+            link = issue_link(session, purpose="invite", user_id=user_id, organization_id=organization_id,
+                              created_by=str(requester.user_id), now=now) if needs_link else None
+            workspace = session.get(OrganizationRow, organization_id)
+            result = InviteResult(account=AccountPublic(
                 user_id=UUID(user_id), organization_id=requester.organization_id,
-                email=data.email, display_name=display_name,
-                role=data.role, must_change_password=must_change_password,
-            ), temporary_password=temporary, note=note)
+                email=data.email, display_name=display_name, role=data.role, must_change_password=False,
+            ), link_expires_at=link.expires_at if link else None)
+            return InviteOutcome(result=result, workspace_name=workspace.display_name if workspace else "your workspace",
+                                 link=link, single_workspace=self.membership_count(session, user_id) == 1)
 
-    def reset_temporary_password(self, requester: Actor, user_id: UUID) -> InviteResult:
-        if not requester.is_admin:
-            raise AccountError("only admins can reset access")
-        if user_id == LEGACY_ADMIN_USER_ID:
-            raise AccountError("the owner password cannot be reset here")
-        temporary = secrets.token_urlsafe(24)
-        with self.database.session_factory.begin() as session:
-            user = session.get(UserRow, str(user_id))
-            membership = session.get(OrganizationMembershipRow, (str(requester.organization_id), str(user_id)))
-            credential = session.get(UserCredentialRow, str(user_id))
-            if user is None or membership is None or credential is None:
-                raise AccountError("member not found")
-            if membership.role == "owner" or (membership.role == "admin" and requester.role != "owner"):
-                raise AccountError("you cannot reset this member's password")
-            membership_count = session.execute(select(func.count()).select_from(OrganizationMembershipRow).where(
-                OrganizationMembershipRow.user_id == str(user_id)
-            )).scalar_one()
-            if membership_count != 1:
-                raise AccountError("password reset is unavailable for accounts in multiple workspaces")
-            credential.password_hash = _hash_password(temporary)
-            credential.must_change_password = True
-            credential.session_version += 1
-            credential.updated_at = datetime.now(UTC)
-            user.status = "invited"
-            user.updated_at = credential.updated_at
-            return InviteResult(account=AccountPublic(
-                user_id=user_id, organization_id=requester.organization_id,
-                email=user.email, display_name=user.display_name,
-                role=membership.role, must_change_password=True,
-            ), temporary_password=temporary)
+    @staticmethod
+    def _existing_invitee(session, existing: UserRow, organization_id: str) -> tuple[str, str, bool]:
+        if existing.status not in {"active", "invited"}:
+            raise AccountError("this account is not active")
+        if session.get(OrganizationMembershipRow, (organization_id, existing.id)):
+            raise AccountError("this account already belongs to this workspace")
+        credential = session.get(UserCredentialRow, existing.id)
+        if credential is None:
+            raise AccountError("this account has no local sign-in method")
+        # Someone still pending elsewhere has no password yet, so they need an accept link too.
+        return existing.id, existing.display_name, not has_usable_password(credential.password_hash)
+
+    @staticmethod
+    def _create_invitee(session, data: InviteRequest, now: datetime) -> str:
+        user_id = str(uuid4())
+        session.add(UserRow(
+            id=user_id, email=data.email, display_name=data.display_name,
+            auth_subject=f"local:{user_id}", status="invited", created_at=now, updated_at=now,
+        ))
+        # The credential and membership both reference users.id. With no ORM
+        # relationships SQLAlchemy may flush the membership first; PostgreSQL
+        # rejects that immediate foreign key.
+        session.flush()
+        # No usable password until the invite is accepted through its link.
+        session.add(UserCredentialRow(
+            user_id=user_id, password_hash=unusable_password_hash(),
+            must_change_password=False, session_version=1, created_at=now, updated_at=now,
+        ))
+        return user_id
+
+    @staticmethod
+    def membership_count(session, user_id: str) -> int:
+        return session.execute(select(func.count()).select_from(OrganizationMembershipRow).where(
+            OrganizationMembershipRow.user_id == user_id
+        )).scalar_one()
 
     def change_password(self, actor: Actor, current: str, new: str) -> Actor:
         if len(new) < 12 or len(new) > 200:
@@ -406,6 +407,8 @@ class AccountService:
                 ),
             ))
             forget_organization(session, str(user_id), str(requester.organization_id))
+            revoke_links(session, user_id=str(user_id), organization_id=str(requester.organization_id),
+                         now=datetime.now(UTC))
             session.delete(membership)
 
     @staticmethod

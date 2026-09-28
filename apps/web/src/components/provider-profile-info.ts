@@ -1,4 +1,5 @@
 import { AudioLines, Database, FileText, type LucideIcon } from "lucide-react";
+import { formatDate } from "@/lib/time-preferences";
 import type { Capability, CatalogCapability, CatalogProviderType, ConnectionState, ProfileKind, ProviderProfile, VaultCredential, VaultProviderType } from "@/lib/types";
 import type { Tone } from "./ui/feedback";
 
@@ -112,7 +113,7 @@ export function lastUsedText(value: string | null): string {
   const hours = Math.round(minutes / 60);
   if (hours < 24) return `Used ${hours} h ago`;
   const days = Math.round(hours / 24);
-  return days < 30 ? `Used ${days} d ago` : `Used ${new Date(value).toLocaleDateString()}`;
+  return days < 30 ? `Used ${days} d ago` : `Used ${formatDate(value)}`;
 }
 
 export function usageText(credential: VaultCredential): string {

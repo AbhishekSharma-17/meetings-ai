@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { formatFullDateTime } from "@/lib/time-preferences";
 import { Popover } from "@base-ui/react/popover";
 import {
   Bell, BellOff, BookCheck, BrainCircuit, CalendarClock, CheckCheck, CircleAlert, CircleCheck, Clock, DoorOpen, FileCheck2,
@@ -92,7 +93,7 @@ function NotificationRow({ item, onOpen, onDismiss }: { item: AppNotification; o
       <span className="notification-copy">
         <span className="notification-title">{item.title}</span>
         {item.body ? <span className="notification-body">{item.body}</span> : null}
-        <time dateTime={item.created_at} title={new Date(item.created_at).toLocaleString()}>{relativeTime(item.created_at)}</time>
+        <time dateTime={item.created_at} title={formatFullDateTime(item.created_at)}>{relativeTime(item.created_at)}</time>
       </span>
       {unread ? <span className="notification-dot"><span className="sr-only">Unread</span></span> : null}
     </button>

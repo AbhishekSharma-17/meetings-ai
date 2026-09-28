@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { formatFullDateTime } from "@/lib/time-preferences";
 import { ArrowRight, CalendarClock, Mic, Plus, Search, SearchX } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
 import { useUiPreference } from "@/lib/ui-preferences";
@@ -41,7 +42,7 @@ function countFilters(meetings: Meeting[], byId: Map<string, CalendarSchedule>):
 
 function formatWhen(value: string): string {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
+  return Number.isNaN(date.getTime()) ? value : formatFullDateTime(date);
 }
 
 export function MeetingsLibrary({ identity, meetings, onOpen, onNew, onCalendar }: { identity: string; meetings: Meeting[]; onOpen(id: string): void; onNew(): void; onCalendar(): void }) {

@@ -28,6 +28,7 @@ from .database import (
 )
 from .notifications import NotificationService
 from .tenant import current_organization_id
+from .time_display import TimePreferences, format_datetime, format_time
 
 logger = logging.getLogger(__name__)
 REMINDER_LEAD = timedelta(minutes=10)
@@ -72,8 +73,13 @@ def _utc(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=UTC)
 
 
-def _clock(value: datetime) -> str:
-    return _utc(value).astimezone(UTC).strftime("%a %b %d, %H:%M UTC").replace(" 0", " ")
+def _joins_on(starts_at: datetime) -> Callable[[TimePreferences], str]:
+    """Rendered per reader: their zone and 12/24-hour clock, with the zone named."""
+    return lambda reader: f"It joins automatically on {format_datetime(starts_at, reader)}."
+
+
+def _joins_at(starts_at: datetime) -> Callable[[TimePreferences], str]:
+    return lambda reader: f"The assistant joins automatically at {format_time(starts_at, reader)}."
 
 
 class NotificationEvents:
@@ -132,7 +138,7 @@ class NotificationEvents:
                          starts_at: datetime) -> None:
         self.notifications.notify_meeting(
             organization_id, meeting_id, kind="assistant.scheduled", severity="info",
-            title=f"Assistant scheduled for {_title(title)}", body=f"It joins automatically on {_clock(starts_at)}.",
+            title=f"Assistant scheduled for {_title(title)}", body=_joins_on(starts_at),
             dedupe_key=f"schedule:{meeting_id}:created",
         )
 
@@ -172,7 +178,7 @@ class NotificationEvents:
             sent += self.notifications.notify_meeting(
                 organization_id, meeting_id, kind="meeting.reminder", severity="info",
                 title=f"{_title(title) if title else 'Your meeting'} starts in {minutes} min",
-                body=f"The assistant joins automatically at {_clock(starts_at)}.",
+                body=_joins_at(starts_at),
                 dedupe_key=f"schedule:{meeting_id}:{_utc(starts_at).isoformat()}:reminder",
             )
         return sent

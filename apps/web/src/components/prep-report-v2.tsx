@@ -1,10 +1,12 @@
 import type { ReactNode } from "react";
-import { BrainCircuit, Building2, CircleHelp, Compass, ExternalLink, Handshake, MessageSquareText, Newspaper, TriangleAlert, Users } from "lucide-react";
+import { formatDateTime } from "@/lib/time-preferences";
+import { BrainCircuit, Building2, CircleHelp, Compass, ExternalLink, Handshake, MessageSquareText, Newspaper, Scale, TriangleAlert, Users } from "lucide-react";
 import type { PrepCitedClaim, PrepDevelopmentType, PrepReportV2, PrepSourceV2 } from "@/lib/types";
 import { Alert, Badge } from "./ui/feedback";
 import { briefingTime, Citations, formatTokens, formatUsd, ListSection, safeHref, SectionHeading } from "./prep-shared";
 import { PrepAttendees, personaLabels } from "./prep-attendees";
 import { PrepSources } from "./prep-sources";
+import { WhosWhoView } from "./prep-whos-who-view";
 
 const developmentLabels: Record<PrepDevelopmentType, string> = {
   deal: "Deal", mou: "MOU", partnership: "Partnership", funding: "Funding", product: "Product", hiring: "Hiring", news: "News",
@@ -25,7 +27,7 @@ export function PrepReportV2View({ report }: { report: PrepReportV2 }) {
       <div>
         <div className="prep-report-meta">
           <Badge tone="success" dot>Saved briefing</Badge>
-          <small>{new Date(report.generated_at).toLocaleString(undefined, briefingTime)} · {report.provider} / {report.model}</small>
+          <small>{formatDateTime(report.generated_at, briefingTime)} · {report.provider} / {report.model}</small>
           <small className="prep-report-usage">{formatTokens(usage.input_tokens, usage.output_tokens)} · {usage.exa_calls} searches · est. {formatUsd(usage.estimated_usd)}{usage.unpriced_calls ? " + unpriced" : ""}</small>
         </div>
         <h2 id="prep-report-title">{title ? `Briefing: ${title}` : "Meeting briefing"}</h2>
@@ -34,6 +36,10 @@ export function PrepReportV2View({ report }: { report: PrepReportV2 }) {
     <div className="card-body prep-report-body">
       <p className="prep-report-lead">{report.executive_brief}</p>
       {!report.public_research_performed ? <Alert tone="neutral" role="note">Context only. No public web research was run.</Alert> : null}
+      {report.whos_who ? <section className="prep-report-section" aria-labelledby="prep-whos-who-report-title">
+        <h3 id="prep-whos-who-report-title"><span className="prep-section-icon" aria-hidden="true"><Scale /></span>Who’s who</h3>
+        <WhosWhoView value={report.whos_who} />
+      </section> : null}
       <CompanySnapshot report={report} sources={sources} />
       <Developments report={report} sources={sources} />
       <AiLandscape report={report} sources={sources} />

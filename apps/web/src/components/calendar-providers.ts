@@ -32,8 +32,5 @@ export function platformLabel(platform: string): string {
   return platformNames[platform] ?? platform.replaceAll("_", " ");
 }
 
-/** The browser time zone, with the legacy Calcutta alias normalised for the API. */
-export function browserTimeZone(): string {
-  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  return zone === "Asia/Calcutta" ? "Asia/Kolkata" : zone;
-}
+/** The browser's own zone. Screens should use the person's effective zone from `useTimePreferences()`. */
+export { detectBrowserZone as browserTimeZone } from "@/lib/time-format";

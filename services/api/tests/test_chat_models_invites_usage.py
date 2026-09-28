@@ -42,11 +42,11 @@ async def test_catalog_lists_models_without_exposing_credentials() -> None:
     assert len(requests) == 1
 
 
-def test_invitation_sends_temporary_password_and_sign_in_link(tmp_path) -> None:
+def test_invitation_emails_single_use_accept_link(tmp_path) -> None:
     sent = []
 
     def respond(request: httpx.Request) -> httpx.Response:
-        sent.append(json.loads(request.content))
+        sent.append((json.loads(request.content), request.headers.get("Idempotency-Key")))
         return httpx.Response(200, json={"id": "email_test"})
 
     app = create_app(
@@ -56,17 +56,19 @@ def test_invitation_sends_temporary_password_and_sign_in_link(tmp_path) -> None:
     )
     with TestClient(app) as client:
         response = client.post("/v1/workspace/invite", json={
-            "email": "teammate@example.com", "display_name": "Test Teammate", "role": "member",
+            "email": "teammate@example.com", "display_name": "Test <Teammate>", "role": "member",
         })
         assert response.status_code == 201
         body = response.json()
         assert body["email_sent"] is True
-        assert body["temporary_password"] is None
+        assert body["temporary_password"] is None and body["accept_url"] is None
         assert len(sent) == 1
-        assert "Temporary password:" in sent[0]["text"]
-        assert "http://localhost:3020/?invite=teammate%40example.com" in sent[0]["text"]
-        assert "Change your temporary password" not in sent[0]["text"]  # exact UI copy is not needed
-        assert "new password" in sent[0]["text"]
+        message, idempotency_key = sent[0]
+        assert "Temporary password" not in message["text"]
+        assert "http://localhost:3020/#accept=" in message["text"]
+        assert "Accept invite" in message["html"] and "10 minutes" in message["text"]
+        assert "Test &lt;Teammate&gt;" in message["html"] and "<Teammate>" not in message["html"]
+        assert idempotency_key and idempotency_key.startswith("account-link-")
 
 
 def test_usage_ledger_records_reported_tokens_and_marks_unknown_price(tmp_path) -> None:

@@ -1,0 +1,45 @@
+/* Time zone and clock: sidebar indicator, its settings popover, the searchable zone list. */
+.tz-indicator { position:relative; display:flex; align-items:center; gap:8px; width:100%; min-height:32px; margin-bottom:4px; padding:0 8px; border:1px solid transparent; border-radius:var(--radius); background:transparent; color:var(--text-secondary); font-size:12.5px; text-align:left; transition:background var(--duration-fast) ease, color var(--duration-fast) ease; }
+.tz-indicator:hover, .tz-indicator[data-popup-open] { background:var(--sidebar-hover); color:var(--foreground); }
+.tz-indicator > .lucide { flex:none; width:15px; height:15px; color:var(--text-tertiary); }
+.tz-indicator-copy { display:flex; align-items:baseline; gap:6px; min-width:0; flex:1; white-space:nowrap; }
+.tz-indicator-copy b { color:var(--foreground); font-weight:600; font-variant-numeric:tabular-nums; }
+.tz-indicator-sep { color:var(--text-tertiary); }
+.tz-indicator-zone { overflow:hidden; text-overflow:ellipsis; }
+.tz-indicator-dot { flex:none; width:7px; height:7px; border-radius:50%; background:var(--warning); }
+
+.tz-popover { width:min(360px, calc(100vw - 24px)); max-height:min(600px, var(--available-height)); overflow-y:auto; overscroll-behavior:contain; padding:14px; }
+.tz-popover-title { margin:0; font-size:14px; font-weight:600; }
+.tz-popover-intro { margin:4px 0 14px; color:var(--text-secondary); font-size:12.5px; line-height:1.45; }
+
+.tz-panel { display:grid; gap:14px; }
+.tz-panel-section { display:grid; gap:8px; }
+.tz-panel-label { display:flex; align-items:baseline; justify-content:space-between; gap:8px; font-size:13px; font-weight:500; }
+.tz-panel-label small { color:var(--text-tertiary); font-size:12px; font-weight:400; font-variant-numeric:tabular-nums; }
+.tz-clock { width:100%; }
+.tz-clock > button { flex:1; justify-content:center; }
+.tz-panel-status:empty { display:none; }
+.tz-panel-status { margin:-6px 0 0; color:var(--text-tertiary); font-size:12px; }
+.tz-panel-error { margin:0; }
+.tz-mismatch { margin:-4px 0 0; padding:8px 10px; border:1px solid var(--warning-border); border-radius:var(--radius); background:var(--warning-subtle); color:var(--foreground); font-size:12.5px; line-height:1.45; }
+
+.tz-picker { display:grid; gap:6px; min-width:0; }
+.tz-picker-search input { width:100%; }
+.tz-picker-list { max-height:232px; overflow-y:auto; overscroll-behavior:contain; margin:0; padding:4px; list-style:none; border:1px solid var(--border); border-radius:var(--radius); background:var(--card); }
+.tz-picker-option { display:grid; grid-template-columns:76px minmax(0,1fr) 16px; align-items:center; column-gap:10px; min-height:40px; padding:5px 8px; border-radius:var(--radius-sm); cursor:pointer; }
+.tz-picker-option[data-active] { background:var(--muted); }
+.tz-picker-option[aria-selected=true] .tz-picker-copy b { color:var(--brand); }
+.tz-picker-option[aria-disabled=true] { cursor:not-allowed; opacity:.6; }
+.tz-picker-offset { color:var(--text-secondary); font-size:12px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.tz-picker-copy { display:grid; min-width:0; }
+.tz-picker-copy b, .tz-picker-copy small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tz-picker-copy b { font-size:13px; font-weight:500; }
+.tz-picker-copy small { color:var(--text-tertiary); font-size:12px; }
+.tz-picker-check { width:15px; height:15px; color:var(--brand); }
+.tz-picker-status:empty { display:none; }
+.tz-picker-status { margin:0; color:var(--text-secondary); font-size:12px; }
+.nm-schedule-preview { color:var(--foreground); font-weight:500; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tz-indicator { transition:none; }
+}

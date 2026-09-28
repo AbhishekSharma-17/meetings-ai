@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from .database import Database
 from .usage import UsageLedger, UsageSummary, usage_request_scope
@@ -20,6 +23,9 @@ from .usage_events import (
 )
 
 _NAME = r"^[A-Za-z0-9_.:/@+-]{1,200}$"
+# Loading OpenRouter's public price list must never make the cost page slow or fail.
+PRICE_WARM_TIMEOUT_SECONDS = 4.0
+logger = logging.getLogger(__name__)
 
 
 def require_workspace_admin(request: Request) -> object:
@@ -57,15 +63,25 @@ def register_usage_routes(app: FastAPI, *, usage: UsageLedger, database: Databas
         return UsageEventFilter(kind=kind, purpose=purpose, provider=provider, model=model, status=status,
                                 meeting_id=meeting_id, since=start, until=end, q=(q or "").strip() or None)
 
+    async def refresh_prices(organization_id: UUID) -> None:
+        """Price rows recorded while no list price was cached (e.g. right after a restart)."""
+        if await run_in_threadpool(usage.has_unpriced_openrouter_rows, organization_id):
+            try:
+                await asyncio.wait_for(usage.catalog.warm_openrouter_prices(), PRICE_WARM_TIMEOUT_SECONDS)
+            except Exception:  # noqa: BLE001 - best effort; rows simply stay unpriced
+                logger.warning("could not load OpenRouter price list for usage backfill")
+        await run_in_threadpool(usage.reprice_unpriced, organization_id)
+
     @app.get("/v1/workspace/usage", response_model=UsageSummary)
-    def get_workspace_usage(request: Request, since: datetime | None = None,
-                            until: datetime | None = None) -> UsageSummary:
+    async def get_workspace_usage(request: Request, since: datetime | None = None,
+                                  until: datetime | None = None) -> UsageSummary:
         actor = require_workspace_admin(request)
         start, end = _window(since, until)
-        return usage.summary(actor.organization_id, since=start, until=end)
+        await refresh_prices(actor.organization_id)
+        return await run_in_threadpool(usage.summary, actor.organization_id, since=start, until=end)
 
     @app.get("/v1/workspace/usage/events", response_model=UsageEventPage)
-    def get_workspace_usage_events(
+    async def get_workspace_usage_events(
         request: Request,
         kind: Annotated[str | None, Query(pattern=r"^[a-z_]{1,30}$")] = None,
         purpose: Annotated[str | None, Query(pattern=r"^[A-Za-z0-9_.:-]{1,60}$")] = None,
@@ -81,8 +97,10 @@ def register_usage_routes(app: FastAPI, *, usage: UsageLedger, database: Databas
     ) -> UsageEventPage:
         actor = require_workspace_admin(request)
         flt = event_filter(kind, purpose, provider, model, status, meeting_id, since, until, q)
+        await refresh_prices(actor.organization_id)
         try:
-            return list_usage_events(database, actor.organization_id, flt, limit=limit, cursor=cursor)
+            return await run_in_threadpool(list_usage_events, database, actor.organization_id, flt,
+                                           limit=limit, cursor=cursor)
         except UsageCursorError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

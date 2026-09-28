@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi.testclient import TestClient
 
+from account_links import accept_invite
 from app.accounts import _hash_password
 from app.database import (
     OrganizationMembershipRow, OrganizationRow, UserCredentialRow, UserRow,
@@ -162,7 +163,10 @@ def test_owner_can_create_and_switch_workspace_without_data_leaking(tmp_path, mo
             "email": "teammate@example.test", "display_name": "Team Mate", "role": "member",
         })
         assert teammate.status_code == 201
-        assert teammate.json()["temporary_password"]
+        assert teammate.json()["temporary_password"] is None
+        assert teammate.json()["accept_url"]  # email is not configured, so the admin gets the link once
+        with TestClient(app) as accepting:
+            accept_invite(accepting, teammate.json(), "replacement-password-for-test")
         profile = client.post("/v1/provider-profiles", json=_profile("First organization provider")).json()
         base = client.post("/v1/knowledge-bases", json={"name": "First organization wiki"}).json()
 
@@ -189,8 +193,9 @@ def test_owner_can_create_and_switch_workspace_without_data_leaking(tmp_path, mo
         })
         assert added.status_code == 201
         assert added.json()["temporary_password"] is None
+        assert added.json()["accept_url"] is None  # existing accounts keep their password; no link
         assert added.json()["account"]["user_id"] == teammate.json()["account"]["user_id"]
-        assert client.post(f"/v1/workspace/members/{teammate.json()['account']['user_id']}/temporary-password").status_code == 409
+        assert client.post(f"/v1/workspace/members/{teammate.json()['account']['user_id']}/reset-access").status_code == 409
         assert client.post("/v1/workspace/invite", json={
             "email": "teammate@example.test", "display_name": "Team Mate", "role": "viewer",
         }).status_code == 409
@@ -203,11 +208,7 @@ def test_owner_can_create_and_switch_workspace_without_data_leaking(tmp_path, mo
         assert client.post(f"/v1/workspaces/{uuid4()}/switch").status_code == 404
         with TestClient(app) as member:
             assert member.post("/v1/auth/login", json={
-                "email": "teammate@example.test", "password": teammate.json()["temporary_password"],
-            }).status_code == 200
-            assert member.post("/v1/auth/change-password", json={
-                "current_password": teammate.json()["temporary_password"],
-                "new_password": "replacement-password-for-test",
+                "email": "teammate@example.test", "password": "replacement-password-for-test",
             }).status_code == 200
             options = member.get("/v1/workspaces").json()
             assert {item["id"] for item in options} == {original, second}

@@ -1,11 +1,11 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import { meetingsService } from "@/lib/meetings-service";
-import type { CurrentAccount, InviteResult, Workspace, WorkspaceMember, WorkspaceOption } from "@/lib/types";
+import type { CurrentAccount, Workspace, WorkspaceMember, WorkspaceOption } from "@/lib/types";
 import { PageHeader } from "./ui/page-header";
 import { SettingsToast } from "./settings-toast";
-import { WorkspacePeople, type InviteRole } from "./workspace-people";
+import { WorkspacePeople } from "./workspace-people";
 import { WorkspaceDirectory } from "./workspace-directory";
 import { WorkspaceBrief } from "./workspace-brief";
 import { OperationsCard, RetentionCard } from "./workspace-admin-cards";
@@ -36,23 +36,22 @@ export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceC
   const [name, setName] = useState(workspace.display_name);
   const [contactEmail, setContactEmail] = useState(workspace.contact_email ?? "");
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
+  const [membersLoading, setMembersLoading] = useState(true);
+  const [membersError, setMembersError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [inviteResult, setInviteResult] = useState<InviteResult | null>(null);
-  const [inviting, setInviting] = useState(false);
-  const [memberBusy, setMemberBusy] = useState<string | null>(null);
-  const [pendingRemovalId, setPendingRemovalId] = useState<string | null>(null);
   const [meetingTitles, setMeetingTitles] = useState<ReadonlyMap<string, string>>(new Map());
   const [baseNames, setBaseNames] = useState<ReadonlyMap<string, string>>(new Map());
   const [teamNames, setTeamNames] = useState<ReadonlyMap<string, string>>(new Map());
   const canManage = account?.role === "owner" || account?.role === "admin";
 
-  useEffect(() => {
-    void meetingsService.listWorkspaceMembers().then(setMembers).catch(() => {
-      setError("Could not load workspace members.");
-    });
-  }, []);
+  const loadMembers = useCallback(() => meetingsService.listWorkspaceMembers()
+    .then((next) => { setMembers(next); setMembersError(null); })
+    .catch(() => setMembersError("Could not load workspace members."))
+    .finally(() => setMembersLoading(false)), []);
+
+  useEffect(() => { void loadMembers(); }, [loadMembers]);
 
   // Admin cards name meetings and knowledge bases instead of showing record ids. Best effort only.
   useEffect(() => {
@@ -81,52 +80,6 @@ export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceC
     }
   }
 
-  async function invite(email: string, displayName: string, role: InviteRole): Promise<boolean> {
-    setInviting(true); setError(null); setInviteResult(null);
-    try {
-      const result = await meetingsService.inviteMember(email, displayName, role);
-      setInviteResult(result);
-      setMembers(await meetingsService.listWorkspaceMembers());
-      return true;
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not create invitation.");
-      return false;
-    } finally { setInviting(false); }
-  }
-
-  async function resetMember(userId: string) {
-    setError(null); setInviteResult(null); setMemberBusy(userId);
-    try {
-      setInviteResult(await meetingsService.resetMemberPassword(userId));
-      setMembers(await meetingsService.listWorkspaceMembers());
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not reset member access.");
-    } finally { setMemberBusy(null); }
-  }
-
-  async function changeRole(userId: string, role: WorkspaceMember["role"]) {
-    setError(null); setMessage(null); setMemberBusy(userId);
-    try {
-      await meetingsService.changeMemberRole(userId, role);
-      setMembers(await meetingsService.listWorkspaceMembers());
-      setMessage("Member role updated.");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not change member role.");
-    } finally { setMemberBusy(null); }
-  }
-
-  async function removeMember(userId: string) {
-    setError(null); setMessage(null); setMemberBusy(userId);
-    try {
-      await meetingsService.removeMember(userId);
-      setMembers(await meetingsService.listWorkspaceMembers());
-      setPendingRemovalId(null);
-      setMessage("Member access removed from this workspace.");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not remove member.");
-    } finally { setMemberBusy(null); }
-  }
-
   const notice = error ? { tone: "danger" as const, text: error } : message ? { tone: "success" as const, text: message } : null;
   const links = sectionLinks.filter((link) => canManage || !link.adminOnly);
 
@@ -138,9 +91,8 @@ export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceC
       </nav>
       <div className="settings-sections">
         {canManage ? <OrganizationProfileForm slug={workspace.slug} name={name} contactEmail={contactEmail} saving={saving} onName={setName} onContactEmail={setContactEmail} onSubmit={save} /> : <OrganizationSummary workspace={workspace} />}
-        <WorkspacePeople members={members} account={account} canManage={canManage} memberBusy={memberBusy} pendingRemovalId={pendingRemovalId} inviteResult={inviteResult} inviting={inviting}
-          onChangeRole={(userId, role) => void changeRole(userId, role)} onReset={(userId) => void resetMember(userId)} onRequestRemoval={setPendingRemovalId} onCancelRemoval={() => setPendingRemovalId(null)}
-          onRemove={(userId) => void removeMember(userId)} onInvite={invite} onCopyFailed={() => setError("Could not copy the password. Select it and copy it manually.")} />
+        <WorkspacePeople members={members} loading={membersLoading} loadError={membersError} account={account} canManage={canManage} workspaceName={workspace.display_name}
+          onMembersChange={setMembers} onNotice={(text) => { setError(null); setMessage(text); }} onRetry={() => { setMembersLoading(true); void loadMembers(); }} />
         <WorkspaceTeams members={members} canManage={canManage} onMessage={(text) => { setError(null); setMessage(text); }}
           onTeamsChange={(teams) => setTeamNames(new Map(teams.map((team) => [team.id, team.name])))} />
         <WorkspaceDirectory workspaces={workspaces} account={account} canManage={canManage} onSwitchWorkspace={onSwitchWorkspace} onCreateWorkspace={onCreateWorkspace} onWorkspacesChange={onWorkspacesChange} />

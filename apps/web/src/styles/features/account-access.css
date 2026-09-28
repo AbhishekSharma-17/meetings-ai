@@ -1,0 +1,16 @@
+/* Sign-in extras: forgot password, and accepting an invite or reset link. */
+.login-label-row { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
+.login-label-row label { font-size:13px; font-weight:500; color:var(--foreground); }
+.login-label-row .text-button { font-size:12.5px; }
+.login-card .back-button { justify-self:start; margin-bottom:0; }
+.set-password-form { display:grid; gap:16px; }
+.password-input { position:relative; display:flex; align-items:center; }
+.password-input input { flex:1 1 auto; min-width:0; padding-right:40px; }
+.password-input .icon-button { position:absolute; right:3px; }
+.account-link-identity { display:grid; gap:10px; padding:12px 14px; border:1px solid var(--border); border-radius:var(--radius); background:var(--muted); }
+.account-link-identity dt { color:var(--text-tertiary); font-size:12px; }
+.account-link-identity dd { font-weight:500; overflow-wrap:anywhere; }
+.account-link-problem { justify-items:start; }
+.account-link-icon { display:grid; place-items:center; width:40px; height:40px; border-radius:var(--radius); background:var(--muted); color:var(--text-secondary); border:1px solid var(--border); }
+.account-link-actions { display:grid; gap:8px; width:100%; }
+.account-link-problem .button.block { width:100%; }

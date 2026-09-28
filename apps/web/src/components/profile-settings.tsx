@@ -8,6 +8,7 @@ import { Avatar } from "./ui/avatar";
 import { PageHeader } from "./ui/page-header";
 import { Badge } from "./ui/feedback";
 import { SettingsToast } from "./settings-toast";
+import { TimePreferencesCard } from "./time-preferences-control";
 
 const roleLabel: Record<CurrentAccount["role"], string> = { owner: "Owner", admin: "Admin", member: "Member", viewer: "Viewer" };
 const PHOTO_TYPES = ["image/png", "image/jpeg", "image/webp"];
@@ -116,6 +117,7 @@ export function ProfileSettings({ account, workspace, onAccountChange }: { accou
           </div>
         </form>
       </section>
+      <TimePreferencesCard />
       <section className="card" aria-labelledby="password-title">
         <div className="card-header"><div><h2 id="password-title">Change password</h2><p>Use at least 12 characters. Changing it signs you out everywhere else.</p></div></div>
         <form onSubmit={(event) => void changePassword(event)}>

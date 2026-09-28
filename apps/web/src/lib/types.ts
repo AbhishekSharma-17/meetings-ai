@@ -61,6 +61,8 @@ export type WorkspaceMember = {
   status: string;
   /** Versioned, same-origin API path to the member's profile photo, or null. */
   photo_url?: string | null;
+  /** When the latest invitation link expires; null when none is outstanding. */
+  invite_expires_at?: string | null;
 };
 
 export type AuditEvent = {
@@ -118,9 +120,25 @@ export type CurrentAccount = {
 
 export type InviteResult = {
   account: CurrentAccount;
+  /** Always null: people set their own password from a single-use link. Kept for older APIs. */
   temporary_password: string | null;
   note: string;
   email_sent: boolean;
+  /** The one-time link, only when it could not be emailed. A credential: show once, never store. */
+  accept_url?: string | null;
+  link_expires_at?: string | null;
+};
+
+export type AccountLinkPurpose = "invite" | "password_reset";
+export type AccountLinkState = "valid" | "expired" | "used" | "revoked" | "invalid";
+
+export type AccountLinkPreview = {
+  state: AccountLinkState;
+  purpose: AccountLinkPurpose | null;
+  email: string | null;
+  display_name: string | null;
+  workspace_name: string | null;
+  expires_at: string | null;
 };
 
 export type KnowledgeSource = {
@@ -561,7 +579,24 @@ export type PrepUsageTotals = { exa_calls: number; llm_calls: number; input_toke
 export type PrepAttendee = {
   name: string; email: string | null; title: string | null; linkedin_url: string | null; match_confidence: PrepMatchConfidence;
   background: string; likely_interests: string[]; persona: PrepPersona; angle: string; source_ids: string[];
+  /** Set by the API's who's-who resolver (older reports omit it). */
+  side?: Exclude<PartySide, "ours"> | null;
 };
+/* Who's who: our company vs. the target, and which side each attendee is on. */
+export type PartySide = "ours" | "theirs" | "other_external" | "unknown";
+export type PartyCompany = { name: string | null; aliases: string[]; domains: string[]; website: string | null; source: "identity" | "workspace" | "inputs" | "email_domain" | "event_title" | "none" | string; reason: string };
+export type PartyPerson = { key: string; name: string; email: string | null; side: PartySide; reason: string; overridden: boolean };
+export type PartyWarning = { code: "target_is_us" | "no_target" | "identity_missing"; message: string };
+export type WhosWho = { our_company: PartyCompany; target: PartyCompany; attendees: PartyPerson[]; ignored: string[]; warnings: PartyWarning[] };
+/** Organizer corrections: attendee key (lowercased email or `name:<words>`) → side. */
+export type AttendeeSides = Record<string, "ours" | "theirs">;
+export type WhosWhoInput = { target_company: string | null; company_website: string | null; attendee_sides: AttendeeSides };
+/** GET/PUT /v1/workspace/identity — who WE are, so prep never mistakes us for the client. */
+export type OrganizationIdentity = {
+  company_name: string | null; aliases: string[]; domains: string[]; configured: boolean; can_edit: boolean; updated_at: string | null;
+  suggestions: { company_name: string | null; domains: string[] };
+};
+export type OrganizationIdentityInput = { company_name: string | null; aliases: string[]; domains: string[] };
 export type PrepReportV2 = {
   report_version: 2; id: string; calendar_event_id: string; target_company: string | null; company_website: string | null;
   executive_brief: string;
@@ -576,6 +611,7 @@ export type PrepReportV2 = {
   research_steps: { stage: string; purpose: string; query: string | null; category: string | null; results: number; status: "succeeded" | "failed" | "skipped" }[];
   usage: PrepUsageTotals; started_at: string | null; generated_at: string; provider: string; model: string;
   findings: PrepCitedClaim[]; relevant_offerings: string[]; people_notes: string[];
+  whos_who?: WhosWho | null;
 };
 /** GET /prep returns either shape; v1 rows have no report_version. */
 export type AnyPrepReport = PrepReport | PrepReportV2;
@@ -583,7 +619,7 @@ export type PrepInputs = { target_company: string | null; company_website: strin
 export type PrepHistoryItem = { id: string; report_version: number; target_company: string | null; generated_at: string; provider: string; model: string; public_research_performed: boolean; usage: PrepUsageTotals };
 export type PrepHistory = { calendar_event_id: string; items: PrepHistoryItem[]; totals: PrepUsageTotals };
 export type PrepStage = "queued" | "planning" | "searching" | "reading" | "writing" | "done";
-export type PrepGenerateInput = { context: string; target_company: string | null; company_website: string | null; profile_urls: string[]; text_profile_id: string | null; research_enabled: boolean };
+export type PrepGenerateInput = { context: string; target_company: string | null; company_website: string | null; profile_urls: string[]; text_profile_id: string | null; research_enabled: boolean; attendee_sides?: AttendeeSides };
 /** A document uploaded for one meeting's prep (POST /v1/documents, scope=prep). */
 export type PrepDocument = {
   id: string; scope: string; scope_id: string | null; filename: string; content_type: string; source_url: string | null;
@@ -697,4 +733,12 @@ export type BackgroundJob = {
   started_at: string | null;
   finished_at: string | null;
   updated_at: string;
+};
+
+/** Personal time zone and clock (`/v1/me/preferences`). `timezone` is the effective IANA zone. */
+export type TimePreferencesPayload = {
+  timezone: string;
+  timezone_source: "browser" | "manual";
+  detected_timezone: string | null;
+  time_format: "auto" | "12h" | "24h";
 };

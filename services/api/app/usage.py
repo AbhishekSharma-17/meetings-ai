@@ -23,6 +23,7 @@ from meetings_contracts import (
     TextGenerationRequest,
     TextGenerationResult,
 )
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from .database import Database, UsageEventRow
@@ -70,6 +71,11 @@ OPENAI_TEXT_FALLBACK_PRICES: dict[str, tuple[float, float]] = {
     "gpt-6-astra": (10.00, 50.00),
 }
 OPENAI_API_HOST = "api.openai.com"
+OPENROUTER_API_HOST = "openrouter.ai"
+# Rows the ledger can price after the fact from their token counts or audio seconds
+# (web research is priced per request when recorded).
+REPRICEABLE_KINDS = ("llm", "vision", "embedding", "transcription")
+REPRICE_BATCH = 500
 
 # The HTTP request state (carrying ``actor``) for the call being served, so ledger rows
 # written deep inside services still name the signed-in person who triggered them.
@@ -144,19 +150,19 @@ class UsageLedger:
         *, duration_ms: int | None = None, details: dict[str, Any] | None = None,
     ) -> None:
         metadata = request.metadata
-        price = self.catalog.cached_price(profile, result.model)
         # Current published list rate; estimates exclude provider taxes, routing,
         # discounts and cache pricing. Unknown models stay unpriced.
-        if price is None and result.provider == "openai":
-            price = OPENAI_TEXT_FALLBACK_PRICES.get(result.model)
-        estimated = None
-        if price and result.input_tokens is not None and result.output_tokens is not None:
-            estimated = round((result.input_tokens * price[0] + result.output_tokens * price[1]) / 1_000_000, 8)
+        catalog_price = self.catalog.cached_price(profile, result.model)
+        priced = (catalog_price, "catalog_list_price") if catalog_price else self.text_price(
+            result.provider, _profile_details(profile)["endpoint_host"], result.model)
+        estimated, source = None, None
+        if priced and result.input_tokens is not None and result.output_tokens is not None:
+            estimated, source = _text_cost(priced[0], result.input_tokens, result.output_tokens), priced[1]
         self.record_event(
             kind=str(metadata.get("usage_kind") or "llm"), purpose=str(metadata.get("purpose") or "mom_generation"),
             provider=result.provider, model=result.model, input_tokens=result.input_tokens,
             output_tokens=result.output_tokens, estimated_usd=estimated,
-            price_source="catalog_list_price" if estimated is not None else None, duration_ms=duration_ms,
+            price_source=source, duration_ms=duration_ms,
             meeting_id=metadata.get("meeting_id"), knowledge_base_id=metadata.get("knowledge_base_id"),
             prep_event_id=metadata.get("prep_event_id"), actor_user_id=metadata.get("actor_user_id"),
             details={**_profile_details(profile), "request_type": "text_generation", **(details or {})},
@@ -166,18 +172,102 @@ class UsageLedger:
         self, profile: ProviderProfile, request: EmbeddingRequest, result: EmbeddingResult,
         *, duration_ms: int | None = None,
     ) -> None:
-        price = OPENAI_EMBEDDING_USD_PER_MILLION.get(result.model) if result.provider == "openai" else None
-        estimated = round(result.input_tokens * price / 1_000_000, 8) if price is not None and result.input_tokens is not None else None
+        priced = self.embedding_price(result.provider, _profile_details(profile)["endpoint_host"], result.model)
+        estimated, source = None, None
+        if priced is not None and result.input_tokens is not None:
+            estimated, source = _embedding_cost(priced[0], result.input_tokens), priced[1]
         self.record_event(
             kind="embedding", purpose=str(request.metadata.get("purpose") or "knowledge_embedding"),
             provider=result.provider, model=result.model, input_tokens=result.input_tokens, output_tokens=0,
-            estimated_usd=estimated, price_source="published_list_price" if estimated is not None else None,
+            estimated_usd=estimated, price_source=source,
             duration_ms=duration_ms, meeting_id=request.metadata.get("meeting_id"),
             knowledge_base_id=request.metadata.get("knowledge_base_id"),
             prep_event_id=request.metadata.get("prep_event_id"), actor_user_id=request.metadata.get("actor_user_id"),
             details={**_profile_details(profile), "request_type": "embedding",
                      "inputs": len(request.inputs), "dimensions": result.dimensions},
         )
+
+    def text_price(self, provider: str, endpoint_host: str | None,
+                   model: str) -> tuple[tuple[float, float], str] | None:
+        """(USD per 1M input, output tokens) and its source, or None when no list price is known."""
+        if endpoint_host == OPENROUTER_API_HOST:
+            cached = self.catalog.cached_openrouter_text_price(model)
+            if cached:
+                return cached, "catalog_list_price"
+        key = openai_list_model(provider, endpoint_host, model)
+        fallback = OPENAI_TEXT_FALLBACK_PRICES.get(key) if key else None
+        return (fallback, "published_list_price") if fallback else None
+
+    def embedding_price(self, provider: str, endpoint_host: str | None, model: str) -> tuple[float, str] | None:
+        """USD per 1M input tokens and its source, or None when no list price is known."""
+        if endpoint_host == OPENROUTER_API_HOST:
+            cached = self.catalog.cached_openrouter_embedding_price(model)
+            if cached is not None:
+                return cached, "catalog_list_price"
+        key = openai_list_model(provider, endpoint_host, model)
+        fallback = OPENAI_EMBEDDING_USD_PER_MILLION.get(key) if key else None
+        return (fallback, "published_list_price") if fallback is not None else None
+
+    def stt_price(self, provider: str, endpoint_host: str | None, model: str) -> tuple[float, str] | None:
+        """USD per audio minute and its source, or None when no list price is known."""
+        if endpoint_host == OPENROUTER_API_HOST:
+            cached = self.catalog.cached_openrouter_stt_price(model)
+            if cached is not None:
+                return cached, "catalog_stt_list_price"
+        key = openai_list_model(provider, endpoint_host, model)
+        rate = OPENAI_TRANSCRIPTION_USD_PER_MINUTE.get(key) if key else None
+        return (rate, "openai_stt_list_price") if rate is not None else None
+
+    def reprice_unpriced(self, organization_id: UUID) -> int:
+        """Price successful token-metered rows recorded while no list price was cached.
+
+        Rows keep their token counts, so a price that becomes known later (the OpenRouter
+        catalog loads lazily and is lost on restart) can still be applied. Returns rows priced.
+        """
+        priced = 0
+        try:
+            with self.database.session_factory.begin() as session:
+                rows = session.execute(select(UsageEventRow).where(
+                    UsageEventRow.organization_id == str(organization_id),
+                    UsageEventRow.estimated_usd.is_(None), UsageEventRow.status == "succeeded",
+                    UsageEventRow.kind.in_(REPRICEABLE_KINDS),
+                    or_(UsageEventRow.input_tokens.is_not(None), UsageEventRow.units.is_not(None)),
+                ).limit(REPRICE_BATCH)).scalars().all()
+                for row in rows:
+                    cost = self._backfill_cost(row)
+                    if cost is not None:
+                        row.estimated_usd, row.price_source = cost
+                        priced += 1
+        except SQLAlchemyError:
+            logger.exception("could not reprice usage events")
+            return 0
+        return priced
+
+    def _backfill_cost(self, row: UsageEventRow) -> tuple[float, str] | None:
+        host = (row.details or {}).get("endpoint_host")
+        if row.kind == "transcription":
+            rate = self.stt_price(row.provider, host, row.model)
+            if rate is None or row.units is None or row.unit_type != "audio_seconds":
+                return None
+            return round(row.units / 60 * rate[0], 8), f"{rate[1]}_x_span"
+        if row.input_tokens is None:
+            return None
+        if row.kind == "embedding":
+            price = self.embedding_price(row.provider, host, row.model)
+            return (_embedding_cost(price[0], row.input_tokens), price[1]) if price else None
+        text = self.text_price(row.provider, host, row.model)
+        if text is None or row.output_tokens is None:
+            return None
+        return _text_cost(text[0], row.input_tokens, row.output_tokens), text[1]
+
+    def has_unpriced_openrouter_rows(self, organization_id: UUID) -> bool:
+        with self.database.session_factory() as session:
+            rows = session.execute(select(UsageEventRow.details).where(
+                UsageEventRow.organization_id == str(organization_id),
+                UsageEventRow.estimated_usd.is_(None), UsageEventRow.status == "succeeded",
+                UsageEventRow.kind.in_(REPRICEABLE_KINDS),
+            ).limit(REPRICE_BATCH)).scalars().all()
+        return any((details or {}).get("endpoint_host") == OPENROUTER_API_HOST for details in rows)
 
     def record_failure(
         self, profile: ProviderProfile, metadata: dict[str, Any], *, kind: str, model: str | None,
@@ -210,14 +300,13 @@ class UsageLedger:
             provider = str(route.get("provider_type")) if route else "vexa"
             model = str(route.get("model")) if route else "unknown"
             host = str(route.get("endpoint_host")) if route else None
-            rate = OPENAI_TRANSCRIPTION_USD_PER_MINUTE.get(model) \
-                if provider == "openai" and host == OPENAI_API_HOST else None
-            estimated = round(seconds / 60 * rate, 8) if rate is not None and seconds is not None else None
+            rate = self.stt_price(provider, host, model)
+            estimated = round(seconds / 60 * rate[0], 8) if rate is not None and seconds is not None else None
             window = _window_ms(joined_at, stopped_at)
             row = self._row(
                 kind="transcription", purpose="meeting_transcription", provider=provider, model=model,
                 units=round(seconds, 3) if seconds is not None else None, unit_type="audio_seconds",
-                estimated_usd=estimated, price_source="openai_stt_list_price_x_span" if estimated is not None else None,
+                estimated_usd=estimated, price_source=f"{rate[1]}_x_span" if estimated is not None else None,
                 duration_ms=window, meeting_id=meeting_id, organization_id=organization_id,
                 details={
                     "request_type": "vexa_bot_stt", "measure": measure,
@@ -287,6 +376,26 @@ def _window_ms(joined_at: datetime | None, stopped_at: datetime | None) -> int |
     start = joined_at if joined_at.tzinfo else joined_at.replace(tzinfo=UTC)
     end = stopped_at if stopped_at.tzinfo else stopped_at.replace(tzinfo=UTC)
     return max(int((end - start).total_seconds() * 1000), 0)
+
+
+def openai_list_model(provider: str, endpoint_host: str | None, model: str) -> str | None:
+    """The OpenAI model id whose published list price applies, for direct or OpenRouter calls.
+
+    OpenRouter passes OpenAI models through at OpenAI's list price under an ``openai/`` prefix.
+    """
+    if provider == "openai" or endpoint_host == OPENAI_API_HOST:
+        return model
+    if endpoint_host == OPENROUTER_API_HOST and model.startswith("openai/"):
+        return model.removeprefix("openai/")
+    return None
+
+
+def _text_cost(price: tuple[float, float], input_tokens: int, output_tokens: int) -> float:
+    return round((input_tokens * price[0] + output_tokens * price[1]) / 1_000_000, 8)
+
+
+def _embedding_cost(price_per_million: float, input_tokens: int) -> float:
+    return round(input_tokens * price_per_million / 1_000_000, 8)
 
 
 def _profile_details(profile: ProviderProfile) -> dict[str, Any]:

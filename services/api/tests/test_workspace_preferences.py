@@ -6,12 +6,14 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
+from account_links import accept_invite, activate
 from app.accounts import AccountError, AccountService, InviteRequest, OrganizationCreateRequest
 from app.database import Database, OrganizationRow, UserWorkspacePreferenceRow
 from app.main import create_app
 
 OWNER_EMAIL = "owner@example.test"
 OWNER_PASSWORD = "owner-password-for-test"
+MATE_PASSWORD = "mate-password-for-test"
 
 
 @pytest.fixture()
@@ -74,15 +76,17 @@ def test_removed_membership_never_selected_and_is_forgotten(accounts) -> None:
     legacy_owner = owner
     second_owner = accounts.create_organization(owner, OrganizationCreateRequest(display_name="Novaala"))
     invited = accounts.invite(legacy_owner, InviteRequest(email="mate@example.test", display_name="Team Mate"))
-    accounts.invite(second_owner, InviteRequest(email="mate@example.test", display_name="Team Mate"))
-    mate = accounts.login("mate@example.test", invited.temporary_password)
+    activate(accounts, invited, MATE_PASSWORD)
+    added = accounts.invite(second_owner, InviteRequest(email="mate@example.test", display_name="Team Mate"))
+    assert added.link is None  # an existing account keeps its password
+    mate = accounts.login("mate@example.test", MATE_PASSWORD)
     assert mate.organization_id == legacy_owner.organization_id  # oldest membership
     accounts.set_default_organization(mate, second_owner.organization_id)
     accounts.select_organization(mate, second_owner.organization_id)
-    assert accounts.login("mate@example.test", invited.temporary_password).organization_id == second_owner.organization_id
+    assert accounts.login("mate@example.test", MATE_PASSWORD).organization_id == second_owner.organization_id
 
     accounts.remove_member(second_owner, mate.user_id)
-    landed = accounts.login("mate@example.test", invited.temporary_password)
+    landed = accounts.login("mate@example.test", MATE_PASSWORD)
     assert landed.organization_id == legacy_owner.organization_id
     with accounts.database.session_factory() as session:
         preference = session.get(UserWorkspacePreferenceRow, str(mate.user_id))
@@ -116,16 +120,13 @@ def test_default_workspace_api_for_members(tmp_path, monkeypatch) -> None:
         invited = owner.post("/v1/workspace/invite", json={
             "email": "mate@example.test", "display_name": "Team Mate", "role": "viewer",
         }).json()
+        accept_invite(mate, invited, "mate-new-password-for-test")
         second = owner.post("/v1/workspaces", json={"display_name": "Novaala"}).json()
         assert owner.post("/v1/workspace/invite", json={
             "email": "mate@example.test", "display_name": "Team Mate", "role": "member",
         }).status_code == 201
 
-        temporary = invited["temporary_password"]
-        assert mate.post("/v1/auth/login", json={"email": "mate@example.test", "password": temporary}).status_code == 200
-        assert mate.post("/v1/auth/change-password", json={
-            "current_password": temporary, "new_password": "mate-new-password-for-test",
-        }).status_code == 200
+        assert mate.post("/v1/auth/login", json={"email": "mate@example.test", "password": "mate-new-password-for-test"}).status_code == 200
         assert mate.get("/v1/auth/me").json()["organization_id"] == legacy_id
 
         chosen = mate.put("/v1/workspaces/default", json={"organization_id": second["organization_id"]})

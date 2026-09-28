@@ -1,7 +1,7 @@
 """Meeting-prep HTTP routes: organizer inputs, briefing generation (sync + SSE progress) and history.
 
-Roles: every signed-in member can read their own event's inputs, latest briefing and history;
-viewers cannot save inputs or generate (enforced in MeetingPrepService). Calendar events are
+Roles: every signed-in member can read their own event's inputs, latest briefing, history and the
+who's-who preview; viewers cannot save inputs or generate (enforced in MeetingPrepService). Calendar events are
 per-user snapshots, so all routes first resolve the event inside the caller's workspace.
 """
 
@@ -18,7 +18,8 @@ from fastapi.responses import StreamingResponse
 
 from .rate_limit import prep_generation_limiter
 from .composio_calendar import CalendarError
-from .meeting_prep import MeetingPrepService, PrepHistory, PrepInputs, PrepReport, PrepRequest
+from .meeting_prep import MeetingPrepService, PrepHistory, PrepInputs, PrepReport, PrepRequest, WhosWhoRequest
+from .prep_parties import WhosWho
 from .prep_report import PrepReportV2
 from .prep_research import PrepBusyError, PrepConfigError, PrepError, PrepPermissionError
 from .tenant import tenant_scope
@@ -117,6 +118,14 @@ def register_prep_routes(app: FastAPI, *, meeting_prep: MeetingPrepService) -> N
         try:
             return meeting_prep.save_inputs(request.state.actor, event_id, payload)
         except (CalendarError, PrepError) as exc:
+            raise _http_error(exc) from exc
+
+    @app.post("/v1/calendar/events/{event_id}/prep/whos-who", response_model=WhosWho)
+    def preview_whos_who(event_id: UUID, payload: WhosWhoRequest, request: Request) -> WhosWho:
+        """Read-only preview: our company vs. the target and each attendee's side (not audited)."""
+        try:
+            return meeting_prep.whos_who(request.state.actor, event_id, payload)
+        except CalendarError as exc:
             raise _http_error(exc) from exc
 
     @app.get("/v1/calendar/events/{event_id}/prep/history", response_model=PrepHistory)

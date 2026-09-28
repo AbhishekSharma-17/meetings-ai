@@ -282,3 +282,85 @@ def test_usage_and_storage_endpoints_are_owner_admin_only(tmp_path, monkeypatch,
         purge = {"category": "logs", "older_than_days": 30, "confirm": "DELETE"}
         assert member.post("/v1/workspace/storage/purge", json=purge).status_code == 403
         assert owner.post("/v1/workspace/storage/purge", json=purge).status_code == 200
+
+
+def _openrouter_embedding_app(tmp_path, model: str):
+    """An owner app with an OpenRouter embeddings profile whose provider reports token usage."""
+    app = _app(tmp_path, name=f"router-{model.replace('/', '-')}.db")
+    embed = httpx.MockTransport(lambda request: httpx.Response(
+        200, json={"data": [{"index": 0, "embedding": [0.1, 0.2]}], "usage": {"prompt_tokens": 4000}}))
+    service = app.state.profile_service
+    service.adapters[ProviderType.OPENAI_COMPATIBLE].transport = embed
+    with TestClient(app) as client:
+        created = client.post("/v1/provider-profiles", json={
+            "name": "OpenRouter embeddings", "provider_type": "openai_compatible", "execution_location": "cloud",
+            "base_url": "https://openrouter.ai/api/v1", "api_key": "sk-or-test",
+            "capabilities": [{"capability": "embeddings", "model": model}],
+        })
+        assert created.status_code == 201, created.text
+    profile_id = UUID(created.json()["id"])
+
+    async def scenario() -> None:
+        with tenant_scope(LEGACY_ORGANIZATION_ID):
+            await service.embed(EmbeddingRequest(inputs=["notes"], metadata={"purpose": "knowledge_index"}),
+                                profile_id=profile_id)
+
+    asyncio.run(scenario())
+    return app
+
+
+def test_openai_embeddings_through_openrouter_use_the_openai_list_price(tmp_path) -> None:
+    app = _openrouter_embedding_app(tmp_path, "openai/text-embedding-3-small")
+    row = _events(app, kind="embedding")[0]
+    assert row.provider == "openai_compatible" and row.details["endpoint_host"] == "openrouter.ai"
+    assert row.estimated_usd == pytest.approx(4000 * 0.02 / 1_000_000)
+    assert row.price_source == "published_list_price"
+
+
+def test_unpriced_openrouter_rows_are_priced_once_the_catalog_loads(tmp_path) -> None:
+    app = _openrouter_embedding_app(tmp_path, "qwen/qwen3-embedding-8b")
+    assert _events(app, kind="embedding")[0].estimated_usd is None  # catalog not cached yet (cold start)
+    catalog_calls: list[str] = []
+
+    def catalog(request: httpx.Request) -> httpx.Response:
+        catalog_calls.append(request.url.path)
+        rows = [{"id": "qwen/qwen3-embedding-8b", "name": "Qwen: Qwen3 Embedding 8B",
+                 "pricing": {"prompt": "0.00000001"}}] if request.url.path.endswith("/embeddings/models") else []
+        return httpx.Response(200, json={"data": rows})
+
+    ledger = app.state.profile_service.usage
+    ledger.catalog.browser.transport = httpx.MockTransport(catalog)
+    with TestClient(app) as client:
+        summary = client.get("/v1/workspace/usage")
+        assert summary.status_code == 200, summary.text
+        again = client.get("/v1/workspace/usage/events", params={"kind": "embedding"})
+        assert again.status_code == 200
+    row = _events(app, kind="embedding")[0]
+    assert row.estimated_usd == pytest.approx(4000 * 0.01 / 1_000_000)
+    assert row.price_source == "catalog_list_price"
+    assert summary.json()["unpriced_requests"] == 0
+    assert catalog_calls.count("/api/v1/embeddings/models") == 1  # cached after the first load
+
+
+def test_usage_page_survives_an_unreachable_price_list(tmp_path) -> None:
+    app = _openrouter_embedding_app(tmp_path, "qwen/qwen3-embedding-8b")
+    app.state.profile_service.usage.catalog.browser.transport = httpx.MockTransport(
+        lambda request: httpx.Response(503))
+    with TestClient(app) as client:
+        response = client.get("/v1/workspace/usage")
+    assert response.status_code == 200 and response.json()["unpriced_requests"] == 1
+
+
+def test_openrouter_transcription_rows_are_backfilled_from_list_prices(tmp_path) -> None:
+    app = _app(tmp_path, name="stt.db")
+    ledger = app.state.profile_service.usage
+    with tenant_scope(LEGACY_ORGANIZATION_ID):
+        for model in ("openai/whisper-1", "unknown/asr-model"):
+            ledger.record_event(kind="transcription", purpose="meeting_transcription", provider="openai_compatible",
+                                model=model, units=120.0, unit_type="audio_seconds",
+                                details={"endpoint_host": "openrouter.ai"})
+    assert ledger.reprice_unpriced(LEGACY_ORGANIZATION_ID) == 1
+    priced = {row.model: row for row in _events(app, kind="transcription")}
+    assert priced["openai/whisper-1"].estimated_usd == pytest.approx(2 * 0.006)
+    assert priced["openai/whisper-1"].price_source == "openai_stt_list_price_x_span"
+    assert priced["unknown/asr-model"].estimated_usd is None  # never invent a price

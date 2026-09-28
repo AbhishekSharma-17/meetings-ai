@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { formatFullDateTime } from "@/lib/time-preferences";
 import { Trash2 } from "lucide-react";
 import type { CalendarEvent, MeetingDetail, TranscriptionRoute } from "@/lib/types";
 
@@ -14,7 +15,7 @@ export function formatTimestamp(value: string | number | null): string {
     return `${minutes}:${Math.floor(value % 60).toString().padStart(2, "0")}`;
   }
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
+  return Number.isNaN(date.getTime()) ? value : formatFullDateTime(date);
 }
 
 function Metadata({ label, value }: { label: string; value: string }) {

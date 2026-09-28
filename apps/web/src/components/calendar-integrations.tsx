@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { formatDateTime } from "@/lib/time-preferences";
 import { Link2, RefreshCw } from "lucide-react";
 import type { CalendarConnection, CalendarSyncState } from "@/lib/types";
 import { AccountRow, CalendarAliasDialog, ProviderGrid, connectionStatusLabel } from "./calendar-connections";
@@ -55,7 +56,7 @@ export function CalendarIntegrations({ connections, syncs, busy, connecting = fa
           const editing = editTarget === item.id;
           const confirming = disconnectTarget === item.id;
           const rowSyncing = syncingIds.includes(item.id);
-          const syncLabel = rowSyncing ? "Syncing…" : sync ? `Synced ${new Date(sync.last_synced_at).toLocaleString(undefined, syncFormat)}` : "Not synced yet";
+          const syncLabel = rowSyncing ? "Syncing…" : sync ? `Synced ${formatDateTime(sync.last_synced_at, syncFormat)}` : "Not synced yet";
           const meta = item.status === "ACTIVE"
             ? <small role={rowSyncing ? "status" : undefined}>{syncLabel}</small>
             : <Badge tone="warning" dot>{connectionStatusLabel(item.status)}</Badge>;

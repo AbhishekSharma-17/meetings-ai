@@ -15,7 +15,8 @@ class CalendarSyncRequest(BaseModel):
     connection_ids: list[str] = Field(default_factory=list, max_length=20)
     start_date: date
     end_date: date
-    timezone: str = Field(default="UTC", max_length=100)
+    # Omitted: the signed-in person's effective time zone (manual choice, else their browser's).
+    timezone: str | None = Field(default=None, max_length=100)
 
 
 class CachedCalendarEvent(CalendarEvent):
@@ -128,7 +129,8 @@ class CalendarCacheService:
         return sum(self.forget_connection(actor, connection_id) for connection_id in cached - active_ids)
 
     async def sync(self, actor: Actor, request: CalendarSyncRequest) -> CalendarSyncResponse:
-        start, end = calendar_date_window(request.start_date, request.end_date, request.timezone)
+        timezone = request.timezone or "UTC"
+        start, end = calendar_date_window(request.start_date, request.end_date, timezone)
         connections = {item.id: item for item in await self.calendar.connections(actor) if item.status == "ACTIVE"}
         selected = list(dict.fromkeys(request.connection_ids)) if request.connection_ids else list(connections)
         # Accounts disconnected elsewhere (Composio dashboard, expiry) must not
@@ -141,7 +143,7 @@ class CalendarCacheService:
         errors: dict[str, str] = {}
         for connection_id in selected:
             try:
-                found = await self.calendar.events_for_window(actor, connection_id, start, end, request.timezone)
+                found = await self.calendar.events_for_window(actor, connection_id, start, end, timezone)
             except CalendarError as exc:
                 errors[connection_id] = str(exc)
                 continue
@@ -193,5 +195,5 @@ class CalendarCacheService:
                     state.range_start = start.astimezone(UTC)
                     state.range_end = end.astimezone(UTC)
                     state.truncated = found.truncated
-        snapshot = self.list(actor, request.start_date, request.end_date, request.timezone)
+        snapshot = self.list(actor, request.start_date, request.end_date, timezone)
         return CalendarSyncResponse(**snapshot.model_dump(), errors=errors)

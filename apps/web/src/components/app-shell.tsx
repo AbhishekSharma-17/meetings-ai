@@ -28,7 +28,11 @@ import { Avatar } from "./ui/avatar";
 import { EmptyState, LoadingRow } from "./ui/feedback";
 import { DemoBanner, DemoPill } from "./demo-banner";
 import { NotificationCenter } from "./notification-center";
+import { AccountLinkScreen, takeAccountLinkFromUrl, type AccountLink } from "./account-link-screen";
+import { ForgotPasswordForm } from "./forgot-password-form";
 import { rememberSelection, type NotificationTarget } from "./notification-feed";
+import { useTimePreferences, useTimePreferencesSync } from "@/lib/time-preferences";
+import { TimeZoneIndicator } from "./time-preferences-control";
 
 type View = "dashboard" | "meetings" | "calendar" | "prep" | "providers" | "meeting" | "workspace" | "knowledge" | "observability" | "profile";
 const views: View[] = ["dashboard", "meetings", "calendar", "prep", "providers", "meeting", "workspace", "knowledge", "observability", "profile"];
@@ -68,16 +72,24 @@ export function AppShell() {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [loggingIn, setLoggingIn] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
+  // An emailed invite/reset link (read from the URL fragment, then removed from the address bar).
+  const [accountLink, setAccountLink] = useState<AccountLink | null>(null);
+  const [forgotPassword, setForgotPassword] = useState(false);
   // Bumped when a notification opens a record on prep/knowledge, so the screen remounts and reads the new selection.
   const [focusNonce, setFocusNonce] = useState(0);
 
   const identity = account ? `${account.organization_id}:${account.user_id}` : null;
+  // Subscribing here re-renders every screen when the time zone or clock changes.
+  useTimePreferences();
+  useTimePreferencesSync(authenticated && account && !account.must_change_password ? account.user_id : null);
 
   useEffect(() => {
     const callback = new URLSearchParams(window.location.search);
     const invitedEmail = callback.get("invite");
     const calendarConnected = callback.get("calendar") === "connected";
     if (invitedEmail) queueMicrotask(() => setLoginEmail(invitedEmail));
+    const link = takeAccountLinkFromUrl();
+    if (link) queueMicrotask(() => setAccountLink(link));
     if (calendarConnected) {
       const connectedAccountId = callback.get("connected_account_id");
       queueMicrotask(() => setPreferredCalendarConnectionId(connectedAccountId));
@@ -208,6 +220,15 @@ export function AppShell() {
     window.location.reload();
   }, []);
 
+  if (accountLink) return <LoginLayout>
+    <AccountLinkScreen link={accountLink} onSignedIn={() => window.location.replace(window.location.pathname)}
+      onSignIn={() => setAccountLink(null)} onRequestReset={() => { setAccountLink(null); setForgotPassword(true); }} />
+  </LoginLayout>;
+
+  if (!authenticated && forgotPassword) return <LoginLayout>
+    <ForgotPasswordForm initialEmail={loginEmail} onBack={() => setForgotPassword(false)} />
+  </LoginLayout>;
+
   if (!authenticated) return <LoginLayout>
     <form className="login-card" onSubmit={(event) => void signIn(event)}>
       <div>
@@ -216,7 +237,7 @@ export function AppShell() {
       </div>
       {authenticated === false ? <>
         <div className="field"><label htmlFor="login-email">Work email</label><input id="login-email" type="email" autoComplete="username" placeholder="you@company.com" value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} required /></div>
-        <div className="field"><label htmlFor="admin-password">Password</label><input id="admin-password" type="password" autoComplete="current-password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} required /></div>
+        <div className="field"><div className="login-label-row"><label htmlFor="admin-password">Password</label><button type="button" className="text-button" onClick={() => { setLoginError(null); setForgotPassword(true); }}>Forgot password?</button></div><input id="admin-password" type="password" autoComplete="current-password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} required /></div>
         <button className="button primary lg block" disabled={loggingIn}>{loggingIn ? "Signing in…" : "Sign in"}</button>
       </> : <div className="login-checking" role="status"><span className="spinner" aria-hidden="true" />Connecting to your workspace…</div>}
       {loginError ? <p className="form-error" role="alert">{loginError} <button type="button" onClick={() => void meetingsService.getSession().then(setAuthenticated).catch(() => setLoginError("Could not reach the API."))}>Retry</button></p> : null}
@@ -225,7 +246,7 @@ export function AppShell() {
         <button type="button" className="button secondary lg block" disabled={loggingIn} onClick={() => void exploreDemo()}><Compass aria-hidden="true" />Explore the demo</button>
         <p className="login-demo-hint">Sample workspace · nothing is saved</p>
       </div> : null}
-      <p className="login-footnote">Invited by a teammate? Use the temporary password from your invitation; you will choose a new one next.</p>
+      <p className="login-footnote">Invited by a teammate? Open “Accept invite” in your invitation email to choose your password.</p>
     </form>
   </LoginLayout>;
 
@@ -373,6 +394,7 @@ function SidebarPanel({ view, onNavigate, workspaces, account, liveCount, onSign
     </nav>
     <div className="sidebar-spacer" />
     <div className="sidebar-foot">
+      <TimeZoneIndicator />
       <Popover.Root open={menuOpen} onOpenChange={setMenuOpen}>
         <Popover.Trigger className="profile-trigger"><Avatar name={account?.display_name} photoUrl={account?.photo_url} /><span className="profile-trigger-copy"><span className="profile-trigger-name">{account?.display_name ?? "Account"}</span><span className="profile-trigger-meta">{account?.email ?? account?.role ?? "User"}</span></span><ChevronsUpDown aria-hidden="true" /></Popover.Trigger>
         <Popover.Portal>

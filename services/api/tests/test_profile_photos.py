@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
+from account_links import accept_invite
 from app.main import create_app
 from app.profile_photos import MAX_PHOTO_BYTES, PHOTO_SIDE_PX, ProfilePhotoError, encode_profile_photo
 
@@ -121,11 +122,8 @@ def test_photo_api_lifecycle_and_workspace_isolation(tmp_path, monkeypatch) -> N
             "email": "outsider@example.test", "display_name": "Out Sider", "role": "member",
         }).json()
         outsider_id = invited["account"]["user_id"]
-        _login(outsider, "outsider@example.test", invited["temporary_password"])
-        assert _upload(outsider, _image_bytes(_two_tone(64, 64), "PNG")).status_code == 403  # password first
-        assert outsider.post("/v1/auth/change-password", json={
-            "current_password": invited["temporary_password"], "new_password": "outsider-new-password-test",
-        }).status_code == 200
+        assert _upload(outsider, _image_bytes(_two_tone(64, 64), "PNG")).status_code == 401  # not signed in
+        accept_invite(outsider, invited, "outsider-new-password-test")
         assert _upload(outsider, _image_bytes(_two_tone(64, 64), "JPEG"), "image/jpeg").status_code == 200
         outsider_url = outsider.get("/v1/auth/me").json()["photo_url"]
         assert outsider.get(outsider_url).status_code == 200

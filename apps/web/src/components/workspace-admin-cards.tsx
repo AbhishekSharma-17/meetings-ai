@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { formatFullDateTime } from "@/lib/time-preferences";
 import { RefreshCw } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
 import type { RetentionPolicy, UsageSummary, WorkspaceOperations } from "@/lib/types";
@@ -120,7 +121,7 @@ export function OperationsCard({ meetingTitles }: { meetingTitles: ReadonlyMap<s
           {usage.recent.length ? <ScrollPanel label="Recent AI usage" size="sm" className="ops-table"><table className="data-table" aria-label="Recent AI usage">
             <thead><tr><th>Process</th><th>Model</th><th className="num">Tokens in / out</th><th className="num">Estimated cost</th></tr></thead>
             <tbody>{usage.recent.map((event) => <tr key={event.id}>
-              <td><span className="cell-stack"><span>{purposeLabel(event.purpose)}</span><small>{new Date(event.created_at).toLocaleString()}{event.meeting_id ? ` · ${meetingTitles.get(event.meeting_id) ?? "a meeting"}` : event.knowledge_base_id ? " · AI knowledge" : ""}</small></span></td>
+              <td><span className="cell-stack"><span>{purposeLabel(event.purpose)}</span><small>{formatFullDateTime(event.created_at)}{event.meeting_id ? ` · ${meetingTitles.get(event.meeting_id) ?? "a meeting"}` : event.knowledge_base_id ? " · AI knowledge" : ""}</small></span></td>
               <td><span className="cell-stack"><span>{event.model}</span><small>{providerLabel(event.provider)}</small></span></td>
               <td className="num">{event.input_tokens?.toLocaleString() ?? "—"} / {event.output_tokens?.toLocaleString() ?? "—"}</td>
               <td className="num">{event.estimated_usd === null ? <Badge tone="warning">Unpriced</Badge> : money(event.estimated_usd, 5)}</td>

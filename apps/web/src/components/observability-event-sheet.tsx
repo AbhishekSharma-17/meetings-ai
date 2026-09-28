@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { formatFullDateTime } from "@/lib/time-preferences";
 import { Dialog } from "@base-ui/react/dialog";
 import { X } from "lucide-react";
 import type { UsageEvent } from "@/lib/types";
@@ -31,7 +32,7 @@ export function UsageEventSheet({ event, onClose }: { event: UsageEvent | null; 
             <Dialog.Close className="close-button" aria-label="Close call details"><X /></Dialog.Close>
             <p className="eyebrow">Usage record</p>
             <Dialog.Title className="dialog-title">{purposeLabel(event.purpose)}</Dialog.Title>
-            <Dialog.Description className="dialog-intro">{new Date(event.created_at).toLocaleString()}</Dialog.Description>
+            <Dialog.Description className="dialog-intro">{formatFullDateTime(event.created_at)}</Dialog.Description>
             <div className="cluster obs-sheet-badges">
               <Badge tone={kindTone(event.kind)}>{kindLabel(event.kind)}</Badge>
               <Badge tone={event.status === "succeeded" ? "success" : "danger"} dot>{statusLabel(event.status)}</Badge>

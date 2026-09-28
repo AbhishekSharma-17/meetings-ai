@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { formatFullDateTime } from "@/lib/time-preferences";
 import { MessageSquareText } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
 import type { MeetingDetail, TranscriptSegment } from "@/lib/types";
@@ -41,7 +42,7 @@ export function KnowledgeEvidenceScreen({ meetingId, focusSegmentId, onBack }: {
       eyebrow="Shared knowledge source"
       titleId="evidence-title"
       title={meeting?.title ?? (error ? "Source unavailable" : <span className="skeleton record-title-skeleton" aria-hidden="true" />)}
-      description={meeting ? `${meeting.joinedAt ? new Date(meeting.joinedAt).toLocaleString() : "Meeting time unavailable"} · Finalized transcript only` : undefined}
+      description={meeting ? `${meeting.joinedAt ? formatFullDateTime(meeting.joinedAt) : "Meeting time unavailable"} · Finalized transcript only` : undefined}
     />
     {error ? <p className="form-error" role="alert">{error}</p> : null}
     {meeting ? <section className="card transcript-card" aria-labelledby="evidence-transcript-title">

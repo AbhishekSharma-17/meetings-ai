@@ -5,8 +5,6 @@ import logging
 import re
 from datetime import date
 from dataclasses import replace
-from html import escape
-from urllib.parse import quote
 from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID
@@ -54,15 +52,20 @@ from .calendar_schedule import CalendarScheduleError, CalendarSchedulePublic, Ca
 from .calendar_cache import CalendarCacheService, CalendarSyncRequest, CalendarSyncResponse, CachedCalendarResponse
 from .meeting_prep import OrganizationBriefService, OrganizationBrief, BriefDocument, MeetingPrepService, PrepError
 from .routes_prep import register_prep_routes
+from .organization_identity import OrganizationIdentityService
+from .routes_identity import register_identity_routes
 from .background_wiring import install_background_services, start_background_services, stop_background_services
 from .routes_people import register_people_routes
 from .recipient_groups import RecipientGroupService
 from .routes_teams import register_team_routes
+from .routes_preferences import register_preference_routes
+from .user_preferences import UserPreferenceService
 from .repository import RecipientGroupNotFoundError
 from .routes_speakers import register_speaker_routes
 from .profile_photos import ProfilePhotoService
 from .database import Database, SchemaVersionRow, LEGACY_ADMIN_USER_ID, LEGACY_ORGANIZATION_ID
-from .accounts import AccountError, AccountPublic, AccountService, Actor, ChangePasswordRequest, InviteRequest, InviteResult, MemberRolePatch, OrganizationCreateRequest, OrganizationOption, ProfilePatch
+from .accounts import AccountError, AccountPublic, AccountService, Actor, ChangePasswordRequest, MemberRolePatch, OrganizationCreateRequest, OrganizationOption, ProfilePatch
+from .routes_account_links import PUBLIC_ACCOUNT_LINK_PATHS, register_account_link_routes
 from .meeting_service import MeetingConflictError, MeetingService, MeetingValidationError
 from .knowledge_service import KnowledgeAccessError, KnowledgeAnswerError, KnowledgeChatResponse, KnowledgeMapResponse, KnowledgeQuery, KnowledgeSearchResponse, KnowledgeService
 from .knowledge_index import KnowledgeIndexError, KnowledgeIndexService, KnowledgeIndexStatus
@@ -108,6 +111,14 @@ def _redact(value: Any) -> Any:
     if isinstance(value, list):
         return [_redact(item) for item in value]
     return value
+
+
+def _viewer_timezone(request: Request, requested: str | None) -> str:
+    """The zone the browser asked for, else the signed-in person's effective time zone."""
+    if requested:
+        return requested
+    actor = request.state.actor
+    return request.app.state.user_preferences.time_preferences(actor.user_id).timezone if actor else "UTC"
 
 
 def create_app(
@@ -178,9 +189,10 @@ def create_app(
     calendar = calendar_adapter or ComposioCalendar()
     calendar_cache = CalendarCacheService(database, calendar)
     organization_brief = OrganizationBriefService(database)
+    organization_identity = OrganizationIdentityService(database)
     meeting_prep = MeetingPrepService(database, calendar_cache, organization_brief, service,
                                       usage=usage, vault=vault, ai_settings=ai_settings,
-                                      retriever=chunk_retriever)
+                                      retriever=chunk_retriever, identities=organization_identity)
     calendar_schedule = CalendarScheduleService(database, calendar, meeting_service)
     document_service = DocumentService(database, VisionService(database, service, ai_settings), chunk_store)
     ai_settings.vision = document_service.vision
@@ -250,11 +262,16 @@ def create_app(
     app.state.indexing_worker = indexing_worker
     register_document_routes(app, documents=document_service)
     register_prep_routes(app, meeting_prep=meeting_prep)
+    app.state.organization_identity = organization_identity
+    register_identity_routes(app, identities=organization_identity)
     profile_photos = ProfilePhotoService(database)
     register_people_routes(app, accounts=accounts, photos=profile_photos)
     teams = RecipientGroupService(database)
     app.state.teams = teams
     register_team_routes(app, teams=teams)
+    user_preferences = UserPreferenceService(database)
+    app.state.user_preferences = user_preferences
+    register_preference_routes(app, preferences=user_preferences)
     register_speaker_routes(app, repository=repository, meeting_service=meeting_service,
                             calendar_schedule=calendar_schedule, workspace_service=workspace_service)
     install_background_services(
@@ -279,7 +296,7 @@ def create_app(
         path = request.url.path
         with tenant_scope(actor.organization_id if actor else LEGACY_ORGANIZATION_ID):
             if path.startswith("/v1/") and path not in {
-                "/v1/auth/login", "/v1/auth/session", "/v1/auth/logout",
+                "/v1/auth/login", "/v1/auth/session", "/v1/auth/logout", *PUBLIC_ACCOUNT_LINK_PATHS,
             }:
                 if actor is None:
                     return JSONResponse(status_code=401, content={"detail": "sign in required"})
@@ -300,6 +317,8 @@ def create_app(
                         or (method == "GET" and path == "/v1/knowledge/text-profiles")
                         or (method == "GET" and path == "/v1/ai/settings")
                         or path == "/v1/auth/me"
+                        or (method in {"GET", "PUT"} and path == "/v1/me/preferences")
+                        or (method == "POST" and path == "/v1/me/preferences/detected")
                         or (method in {"PUT", "DELETE"} and path == "/v1/auth/me/photo")
                         or (method == "PUT" and path == "/v1/workspaces/default")
                         or (method == "GET" and re.fullmatch(r"/v1/users/[0-9a-f-]{36}/photo", path))
@@ -313,6 +332,8 @@ def create_app(
                         or (method in {"GET", "POST"} and re.fullmatch(r"/v1/calendar/events/[0-9a-f-]+/prep(?:/stream)?", path))
                         or (method in {"GET", "PUT"} and re.fullmatch(r"/v1/calendar/events/[0-9a-f-]+/prep/inputs", path))
                         or (method == "GET" and re.fullmatch(r"/v1/calendar/events/[0-9a-f-]+/prep/history", path))
+                        or (method == "POST" and re.fullmatch(r"/v1/calendar/events/[0-9a-f-]+/prep/whos-who", path))
+                        or (method == "GET" and path == "/v1/workspace/identity")
                         or (method == "POST" and re.fullmatch(r"/v1/calendar/events/[0-9a-f-]+/prep/jobs", path))
                         or (method == "GET" and re.fullmatch(r"/v1/background-jobs(?:/[0-9a-f-]{36})?", path))
                         or (method == "POST" and re.fullmatch(r"/v1/background-jobs/[0-9a-f-]{36}/cancel", path))
@@ -346,8 +367,9 @@ def create_app(
                         return JSONResponse(status_code=404, content={"detail": "meeting not found"})
             response = await call_next(request)
             if request.method in {"POST", "PUT", "PATCH", "DELETE"} and path.startswith("/v1/") \
-                    and path not in {"/v1/auth/login", "/v1/auth/logout"} and response.status_code < 400 \
-                    and not path.startswith("/v1/notifications"):  # reading notifications is not auditable activity
+                    and path not in {"/v1/auth/login", "/v1/auth/logout", *PUBLIC_ACCOUNT_LINK_PATHS} and response.status_code < 400 \
+                    and not path.startswith("/v1/notifications") and not path.endswith("/prep/whos-who") \
+                    and path != "/v1/me/preferences/detected":  # reading notifications / browser zone reports are not activity
                 route = request.scope.get("route")
                 template = getattr(route, "path", path)
                 match = re.search(r"/([0-9a-f]{8}-[0-9a-f-]{27,})", path)
@@ -426,53 +448,6 @@ def create_app(
         )
         return {"changed": True}
 
-    @app.post("/v1/workspace/invite", response_model=InviteResult, status_code=201)
-    async def invite_member(payload: InviteRequest, request: Request) -> InviteResult:
-        try:
-            result = accounts.invite(request.state.actor, payload)
-        except AccountError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        if not resend.configuration()["can_attempt_send"]:
-            result.note = "Account added, but email delivery is not configured. Share the temporary password privately if one was created; existing users can sign in normally."
-            return result
-        workspace_name = workspace_service.get().display_name
-        sign_in_url = f"{os.getenv('WEB_ORIGIN', 'http://localhost:3020').rstrip('/')}/?invite={quote(payload.email)}"
-        subject = f"You've been invited to {workspace_name} on Meetings AI"
-        password_line = f"Temporary password: {result.temporary_password}\n" if result.temporary_password else "Use your existing Meetings AI password.\n"
-        plain = (
-            f"{payload.display_name},\n\n"
-            f"{request.state.actor.display_name} invited you to {workspace_name} on Meetings AI as a {payload.role}.\n"
-            f"Sign in: {sign_in_url}\nEmail: {payload.email}\n{password_line}"
-            + ("You will be asked to set a new password after signing in.\n" if result.temporary_password else "")
-            + "\nDo not forward this invitation or share its password.\n"
-        )
-        html = (
-            '<html><body style="background:#f4f7f6;padding:32px;font-family:Arial,sans-serif;color:#183331">'
-            '<div style="max-width:540px;margin:auto;background:white;border:1px solid #dce7e3;border-radius:12px;padding:32px">'
-            '<div style="font-size:15px;font-weight:bold;color:#13766d">▣ Meetings AI</div>'
-            f'<h1 style="font-size:24px;margin:28px 0 8px">Join {escape(workspace_name)}</h1>'
-            f'<p>{escape(request.state.actor.display_name)} invited you to this workspace as a {escape(payload.role)}.</p>'
-            f'<p><b>Sign-in email</b><br>{escape(payload.email)}</p>'
-            + (f'<p><b>Temporary password</b><br><code style="font-size:16px">{escape(result.temporary_password)}</code></p>' if result.temporary_password else '<p>Use your existing Meetings AI password.</p>')
-            + f'<p><a href="{escape(sign_in_url, quote=True)}" style="display:inline-block;background:#13766d;color:white;padding:12px 20px;border-radius:7px;text-decoration:none">Open Meetings AI</a></p>'
-            + ('<p>You must choose a new password after your first sign-in.</p>' if result.temporary_password else '')
-            + '<p style="font-size:12px;color:#687c77;margin-top:32px">This invitation contains a sign-in credential. Do not forward it.</p></div></body></html>'
-        )
-        try:
-            new_account = result.temporary_password is not None
-            await resend.send(
-                recipients=[payload.email], subject=subject, html=html, text=plain,
-                idempotency_key=f"invite-{request.state.actor.organization_id}-{result.account.user_id}",
-            )
-            result.email_sent = True
-            result.temporary_password = None
-            result.note = "Invitation email sent. The teammate must change the temporary password on first sign-in." if new_account else "Workspace notification emailed. The teammate can use their existing password."
-        except EmailDeliveryError:
-            # The account was already created; return its one-time secret to the admin
-            # instead of losing access behind a misleading HTTP 500.
-            result.note = "Account added, but invitation email failed. Share the temporary password privately if one was created; existing users can sign in normally."
-        return result
-
     def set_workspace_session(response: Response, actor: Actor) -> None:
         if not admin:
             return
@@ -481,6 +456,12 @@ def create_app(
             httponly=True, secure=os.getenv("APP_ENV") == "production",
             samesite="strict", max_age=60 * 60 * 12, path="/",
         )
+
+    register_account_link_routes(
+        app, accounts=accounts, resend=resend, audit=audit, database=database,
+        signing_key=session_secret or resolved_credential_key, sessions_enabled=admin is not None,
+        set_session=set_workspace_session, web_origin=os.getenv("WEB_ORIGIN", "http://localhost:3020"),
+    )
 
     @app.get("/v1/workspaces", response_model=list[OrganizationOption])
     def list_workspaces(request: Request) -> list[OrganizationOption]:
@@ -504,13 +485,6 @@ def create_app(
             raise HTTPException(status_code=404, detail="workspace not found") from exc
         set_workspace_session(response, actor)
         return accounts.public(actor)
-
-    @app.post("/v1/workspace/members/{user_id}/temporary-password", response_model=InviteResult)
-    def reset_member_password(user_id: UUID, request: Request) -> InviteResult:
-        try:
-            return accounts.reset_temporary_password(request.state.actor, user_id)
-        except AccountError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.patch("/v1/workspace/members/{user_id}/role", response_model=AccountPublic)
     def change_member_role(user_id: UUID, payload: MemberRolePatch, request: Request) -> AccountPublic:
@@ -980,22 +954,24 @@ def create_app(
             raise HTTPException(status_code=code, detail=str(exc)) from exc
 
     @app.get("/v1/calendar/events", response_model=CalendarEventsResponse)
-    async def calendar_events(request: Request, connection_id: str, period: CalendarRange = "today", timezone: str = "UTC") -> CalendarEventsResponse:
+    async def calendar_events(request: Request, connection_id: str, period: CalendarRange = "today", timezone: str | None = None) -> CalendarEventsResponse:
         try:
-            return await calendar.events(request.state.actor, connection_id, period, timezone)
+            return await calendar.events(request.state.actor, connection_id, period, _viewer_timezone(request, timezone))
         except CalendarError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/v1/calendar/synced", response_model=CachedCalendarResponse)
-    def saved_calendar_events(request: Request, start_date: date, end_date: date, timezone: str = "UTC") -> CachedCalendarResponse:
+    def saved_calendar_events(request: Request, start_date: date, end_date: date, timezone: str | None = None) -> CachedCalendarResponse:
         try:
-            return calendar_cache.list(request.state.actor, start_date, end_date, timezone)
+            return calendar_cache.list(request.state.actor, start_date, end_date, _viewer_timezone(request, timezone))
         except CalendarError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/v1/calendar/sync", response_model=CalendarSyncResponse)
     async def sync_calendar_events(payload: CalendarSyncRequest, request: Request) -> CalendarSyncResponse:
         try:
+            if not payload.timezone:
+                payload = payload.model_copy(update={"timezone": _viewer_timezone(request, None)})
             return await calendar_cache.sync(request.state.actor, payload)
         except CalendarError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

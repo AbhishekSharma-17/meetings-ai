@@ -99,7 +99,7 @@ def calendar_window(preset: CalendarRange, timezone: str, now: datetime | None =
     timezone = _TIMEZONE_ALIASES.get(timezone, timezone)
     try:
         zone = ZoneInfo(timezone)
-    except ZoneInfoNotFoundError as exc:
+    except (ZoneInfoNotFoundError, ValueError, OSError) as exc:  # e.g. "", "../x" or an overlong name
         raise CalendarError("choose a valid IANA time zone") from exc
     current = (now or datetime.now(UTC)).astimezone(zone)
     today = current.date()
@@ -120,7 +120,7 @@ def calendar_date_window(first: date, last: date, timezone: str) -> tuple[dateti
     timezone = _TIMEZONE_ALIASES.get(timezone, timezone)
     try:
         zone = ZoneInfo(timezone)
-    except ZoneInfoNotFoundError as exc:
+    except (ZoneInfoNotFoundError, ValueError, OSError) as exc:  # e.g. "", "../x" or an overlong name
         raise CalendarError("choose a valid IANA time zone") from exc
     if last < first or (last - first).days > 89:
         raise CalendarError("choose a date range of 1 to 90 days")

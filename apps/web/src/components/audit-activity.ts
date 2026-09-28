@@ -4,6 +4,8 @@ import {
   Settings2, ShieldAlert, ShieldCheck, Trash2, UserCog, UserMinus, UserPen, UserPlus, Users, UsersRound, Video,
 } from "lucide-react";
 import type { AuditEvent } from "@/lib/types";
+import { formatDate, zonedDayKey } from "@/lib/time-store";
+import { addDaysToKey } from "@/lib/time-format";
 
 /** Business-language rendering of workspace audit events. Raw endpoints are never shown. */
 export type ActivityCategory = "meetings" | "minutes" | "knowledge" | "people" | "security" | "integrations" | "settings";
@@ -74,6 +76,8 @@ const rules: Rule[] = [
   { path: "/v1/workspace/teams/{id}", category: "people", icon: UsersRound, verb: "updated the team", target: "team", unresolved: "updated a recipient team" },
   { path: "/v1/workspace/members/{id}/role", category: "people", icon: UserCog, verb: "changed the role of", target: "member", fallback: "a teammate" },
   { path: "/v1/workspace/members/{id}/temporary-password", category: "security", icon: KeyRound, verb: "reset sign-in access for", target: "member", fallback: "a teammate" },
+  { path: "/v1/workspace/members/{id}/reset-access", category: "security", icon: KeyRound, verb: "reset sign-in access for", target: "member", fallback: "a teammate" },
+  { path: "/v1/workspace/members/{id}/resend-invite", category: "people", icon: UserPlus, verb: "resent the invitation to", target: "member", fallback: "a teammate" },
   { method: "DELETE", path: "/v1/workspace/members/{id}", category: "people", icon: UserMinus, verb: "removed", target: "member", fallback: "a teammate", suffix: "from the workspace" },
   { path: "/v1/auth/change-password", category: "security", icon: KeyRound, verb: "changed their password" },
   { path: "/v1/auth/me", category: "people", icon: UserPen, verb: "updated their profile" },
@@ -150,6 +154,8 @@ function special(event: AuditEvent, lookup: ActivityLookup, actor: string | null
   switch (event.action) {
     case "auth.login.succeeded": return { category: "security", icon: LogIn, failed: false, actor, text: "signed in", target: null, suffix: null };
     case "auth.login.denied": return { category: "security", icon: ShieldAlert, failed: true, actor: null, text: "Sign-in failed — wrong email or password", target: null, suffix: null };
+    case "auth.invite.accepted": return { category: "people", icon: UserPlus, failed: false, actor, text: "accepted their invitation and joined", target: null, suffix: null };
+    case "auth.password_reset.completed": return { category: "security", icon: KeyRound, failed: false, actor, text: "set a new password from a reset link", target: null, suffix: null };
     case "auth.login.throttled": return { category: "security", icon: ShieldAlert, failed: true, actor: null, text: "Sign-in paused after repeated failed attempts", target: null, suffix: null };
     case "retention.meeting.deleted": return { category: "meetings", icon: Archive, failed: false, actor: null, text: "Automatic retention deleted", target: (targetId && lookup.meetingTitle(targetId)) || "an older meeting", suffix: null };
     case "retention.chats.deleted": return { category: "knowledge", icon: Archive, failed: false, actor: null, text: "Automatic retention deleted older saved AI chats", target: null, suffix: null };
@@ -198,9 +204,9 @@ export function describeAuditEvent(event: AuditEvent, lookup: ActivityLookup): A
 
 /** "Today", "Yesterday", or a short date — used to group the feed. */
 export function dayLabel(date: Date, now = new Date()): string {
-  const startOf = (value: Date) => new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
-  const days = Math.round((startOf(now) - startOf(date)) / 86_400_000);
-  if (days === 0) return "Today";
-  if (days === 1) return "Yesterday";
-  return date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: date.getFullYear() === now.getFullYear() ? undefined : "numeric" });
+  // Day boundaries follow the person's time zone, not the machine's.
+  const today = zonedDayKey(now), day = zonedDayKey(date);
+  if (day === today) return "Today";
+  if (day === addDaysToKey(today, -1)) return "Yesterday";
+  return formatDate(date, { weekday: "short", month: "short", day: "numeric", year: day.slice(0, 4) === today.slice(0, 4) ? undefined : "numeric" });
 }
