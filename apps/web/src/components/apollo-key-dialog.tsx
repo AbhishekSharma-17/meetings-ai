@@ -42,13 +42,13 @@ function ApolloKeyForm({ mode, onClose, onSaved }: { mode: "connect" | "replace"
     <Dialog.Close className="close-button" aria-label="Close"><X /></Dialog.Close>
     <Dialog.Title>{mode === "connect" ? "Connect Apollo" : "Replace Apollo key"}</Dialog.Title>
     <Dialog.Description className="dialog-intro">
-      Meetings AI registers the key with Composio as this workspace’s Apollo connection, checks it with a free credit-usage call and never shows it again. Members’ briefings use it without seeing it.
+      Adds verified company and people details to your team’s meeting briefings.
     </Dialog.Description>
     <div className="dialog-body form-stack">
       <div className="field">
         <label htmlFor="apollo-key">Apollo API key</label>
         <div className="input-with-icon"><KeyRound aria-hidden="true" /><input id="apollo-key" type="password" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder="Paste the key" autoComplete="new-password" spellCheck={false} required minLength={8} /></div>
-        <p className="field-hint">In Apollo: Settings → Integrations → API → API keys. A master key works for every lookup; restricted keys may skip some.</p>
+        <p className="field-hint">Find it in Apollo under Settings → Integrations → API.</p>
       </div>
       {error ? <p className="form-error" role="alert">{error}</p> : null}
     </div>

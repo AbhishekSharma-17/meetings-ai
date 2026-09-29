@@ -99,3 +99,8 @@ export const billingKeyInfo: Record<BillingKeyType, { provider: BalanceProvider;
 };
 
 export const billingKeyTypes = Object.keys(billingKeyInfo) as BillingKeyType[];
+
+/** Explanations are shown only when someone has to act (bad key, low or no credit, a failed check). */
+export function actionableNote(balance: { status: string; note: string | null | undefined }): string | null {
+  return ["invalid_key", "low", "exhausted", "error"].includes(balance.status) && balance.note ? balance.note : null;
+}

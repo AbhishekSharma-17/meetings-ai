@@ -8,7 +8,7 @@ import { NoMatches, SearchToolbar } from "./scroll-panel";
 import { UiSelect } from "./ui-select";
 import { useListSearch } from "./use-list-search";
 import { BalanceChip, CheckedAt, useProviderBalances } from "./provider-balance-chip";
-import { balanceChipText, balanceProviderName, billingKeyInfo, creditLineText, formatDollars, sortByRemaining } from "./provider-balance";
+import { actionableNote, balanceChipText, balanceProviderName, billingKeyInfo, creditLineText, formatDollars, sortByRemaining } from "./provider-balance";
 import { ProviderBrandIcon } from "./provider-brand-icons";
 
 type SortChoice = "least" | "most" | "name";
@@ -82,7 +82,7 @@ function CreditRow({ item }: { item: ProviderBalance }) {
       <ProviderBrandIcon brand={item.provider} size="sm" />
       <span><b>{item.label}</b><small>{balanceProviderName[item.provider]} · {item.hint}</small></span>
     </span>
-    <span className="provider-credit-status"><BalanceChip balance={item} /><small>{item.note}</small></span>
+    <span className="provider-credit-status"><BalanceChip balance={item} />{actionableNote(item) ? <small>{actionableNote(item)}</small> : null}</span>
     {item.provider === "apollo" ? <CreditLines item={item} /> : <dl className="provider-credit-figures">
       <div><dt>Left</dt><dd>{amount(item.remaining_usd)}</dd></div>
       <div><dt>{spentLabel}</dt><dd>{amount(item.spent_usd)}</dd></div>

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Radar, Server } from "lucide-react";
+import { Server } from "lucide-react";
 import { providerBrand, providerBrandNames, type ProviderBrand } from "./provider-brand";
 import { providerLabel } from "./usage-labels";
 
@@ -23,10 +23,18 @@ const MARKS: Record<Exclude<ProviderBrand, "apollo">, ReactNode> = {
   exa: <path clipRule="evenodd" d="M3 0h19v1.791L13.892 12 22 22.209V24H3V0zm9.62 10.348l6.589-8.557H6.03l6.59 8.557zM5.138 3.935v7.17h5.52l-5.52-7.17zm5.52 8.96h-5.52v7.17l5.52-7.17zM6.03 22.21l6.59-8.557 6.589 8.557H6.03z" />,
 };
 
+/** Apollo.io publishes no vector mark: this is its own site icon (apollo.io/icon.svg, a 256 px PNG) at 64 px. */
+function ApolloMark() {
+  return <>
+    {/* eslint-disable-next-line @next/next/no-img-element -- a 4 KB static logo; next/image adds nothing here */}
+    <img className="provider-mark provider-mark-image" src="/brand/apollo.png" alt="" width={64} height={64} decoding="async" draggable={false} />
+  </>;
+}
+
 /** Decorative provider logo: always pair it with the provider's name in visible text. */
 export function ProviderBrandIcon({ brand, size = "md", className = "" }: { brand: ProviderBrand | null; size?: ProviderIconSize; className?: string }) {
   return <span className={`provider-brand ${size} ${className}`.trim()} data-provider-brand={brand ?? "generic"} aria-hidden="true">
-    {brand === "apollo" ? <Radar className="provider-mark neutral" />
+    {brand === "apollo" ? <ApolloMark />
       : brand
         ? <svg className="provider-mark" viewBox="0 0 24 24" fill="currentColor" fillRule="evenodd" focusable="false">{MARKS[brand]}</svg>
         : <Server />}

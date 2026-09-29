@@ -26,3 +26,5 @@
 /* Model/route meta lines elsewhere (chat answers, briefings, transcription route). */
 .provider-route { display:inline-flex; align-items:center; flex-wrap:wrap; gap:4px 6px; min-width:0; }
 .knowledge-model-trigger .provider-brand.xs { color:var(--text-secondary); }
+/* Raster brand marks (Apollo): keep their own colours and rounded square, sized like the vector marks. */
+.provider-brand .provider-mark-image { display:block; border-radius:4px; object-fit:contain; }

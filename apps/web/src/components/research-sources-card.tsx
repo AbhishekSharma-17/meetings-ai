@@ -8,7 +8,7 @@ import { formatDateTime } from "@/lib/time-preferences";
 import type { ApolloIntegration } from "@/lib/types";
 import { Alert, Badge, LoadingRow } from "./ui/feedback";
 import type { SettingsNotice } from "./settings-toast";
-import { ProviderBrandIcon, ProviderName } from "./provider-brand-icons";
+import { ProviderBrandIcon } from "./provider-brand-icons";
 import { ApolloKeyDialog } from "./apollo-key-dialog";
 import { creditLineText } from "./provider-balance";
 
@@ -78,7 +78,7 @@ export function ResearchSourcesCard({ onNotice }: { onNotice(notice: SettingsNot
             <ProviderBrandIcon brand="apollo" />
             <span className="research-source-main">
               <b>Apollo</b>
-              <small>Company size, funding, tech stack, verified titles, hiring and news · connected through Composio</small>
+              <small>Company size, funding, tech stack, verified titles, hiring and news</small>
             </span>
             {connected && view?.hint ? <code className="provider-key-hint" aria-label={`Key ending ${view.hint.replace(/•/g, "")}`}>{view.hint}</code> : null}
             {status ? <Badge tone={status.tone} dot>{status.label}</Badge> : <Badge tone="neutral">Not connected</Badge>}
@@ -97,12 +97,11 @@ export function ResearchSourcesCard({ onNotice }: { onNotice(notice: SettingsNot
             </Menu.Root> : view?.available ? <button type="button" className="button secondary sm" onClick={() => setDialog("connect")}><Link2 aria-hidden="true" /> Connect Apollo</button> : null}
           </div>
           {connected && view ? <ConnectedDetail view={view} onReplace={() => setDialog("replace")} /> : null}
-          {!connected && view && !view.available ? <Alert tone="neutral" role="note" className="research-source-note">Apollo needs the server’s Composio connection. Ask whoever runs Meetings AI to set it up.</Alert> : null}
-          {!connected && view?.available ? <p className="research-source-note field-hint">Paste your Apollo API key once. It is registered with Composio for this workspace, tested with a free credit check and never shown again. Web research keeps using the <ProviderName brand="exa" label="Exa" /> key.</p> : null}
+          {!connected && view && !view.available ? <Alert tone="neutral" role="note" className="research-source-note">Apollo isn’t available on this server yet. Contact your administrator.</Alert> : null}
           {confirming ? <Alert tone="danger" className="research-source-note" title="Disconnect Apollo?" actions={<>
             <button type="button" className="button danger sm" disabled={removing} onClick={() => void disconnect()}>{removing ? "Disconnecting…" : "Disconnect"}</button>
             <button type="button" className="button secondary sm" onClick={() => setConfirming(false)}>Cancel</button>
-          </>}>The Composio connection is deleted and cached Apollo results are cleared. Saved briefings keep their Apollo facts.</Alert> : null}
+          </>}>New briefings stop using Apollo. Existing briefings keep their Apollo details.</Alert> : null}
         </div>}
     <ApolloKeyDialog mode={dialog} onClose={() => setDialog(null)} onSaved={(next) => {
       setView(next); setDialog(null);

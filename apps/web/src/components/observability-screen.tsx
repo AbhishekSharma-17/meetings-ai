@@ -41,7 +41,7 @@ export function ObservabilityScreen() {
       const [nextPeople, nextAccounts, nextMeetings] = await Promise.allSettled([meetingsService.listWorkspaceMembers(), meetingsService.listWorkspaceCalendarConnections(), meetingsService.listMeetings()]);
       if (nextPeople.status === "fulfilled") setPeople(nextPeople.value);
       if (nextAccounts.status === "fulfilled") { setAccounts(nextAccounts.value); setAccountsError(null); }
-      else setAccountsError("Connected accounts could not be loaded. Check the Composio connection and refresh.");
+      else setAccountsError("Connected accounts could not be loaded. Refresh to try again.");
       if (nextMeetings.status === "fulfilled") setMeetings(nextMeetings.value);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not load observability data."); }
     finally { setLoading(false); }

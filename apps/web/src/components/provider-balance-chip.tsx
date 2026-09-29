@@ -8,7 +8,7 @@ import type { BalanceOverview, ProviderBalance } from "@/lib/types";
 import { Badge } from "./ui/feedback";
 import { ProviderBrandIcon } from "./provider-brand-icons";
 import { relativeTime } from "./notification-feed";
-import { balanceChipText, balanceProviderName, balanceSpendText, balanceTone } from "./provider-balance";
+import { actionableNote, balanceChipText, balanceProviderName, balanceSpendText, balanceTone } from "./provider-balance";
 
 export type ProviderBalances = {
   overview: BalanceOverview | null;
@@ -86,6 +86,6 @@ export function KeyBalanceLine({ balance, loading, refreshing, onRefresh }: {
         <RefreshCw aria-hidden="true" className={refreshing ? "obs-spin" : undefined} />
       </button>
     </div>
-    <p className="provider-key-balance-note">{balance.note}</p>
+    {actionableNote(balance) ? <p className="provider-key-balance-note">{actionableNote(balance)}</p> : null}
   </div>;
 }

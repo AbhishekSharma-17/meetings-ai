@@ -28,7 +28,7 @@ export function keyChoicePayload(state: KeyChoiceState, profile: ProviderProfile
 function pasteHint(draft: ProviderProfile, typed: boolean): string {
   const saved = draft.credentialLabel ?? "the saved key";
   if (draft.credentialId) return typed ? `Replaces ${saved} for this profile only.` : `Leave blank to stop using ${saved}.`;
-  if (draft.apiKeyConfigured) return `Saved key ${draft.credentialHint ?? "••••"} is encrypted and never shown again. Leave blank to keep it.`;
+  if (draft.apiKeyConfigured) return `Saved key ${draft.credentialHint ?? "••••"}. Leave blank to keep it.`;
   if (draft.executionLocation === "local") return "Optional if your endpoint does not require a key.";
   return "Required for this cloud provider.";
 }

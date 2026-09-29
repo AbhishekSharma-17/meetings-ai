@@ -109,7 +109,7 @@ test("owner connects Apollo once under AI providers; the key is never shown agai
   await expect(card.getByText("Not connected")).toBeVisible();
   await card.getByRole("button", { name: "Connect Apollo" }).click();
   const dialog = page.getByRole("dialog", { name: "Connect Apollo" });
-  await expect(dialog.getByText("never shows it again", { exact: false })).toBeVisible();
+  await expect(dialog.getByText("Adds verified company and people details", { exact: false })).toBeVisible();
   await dialog.getByLabel("Apollo API key").fill(apolloKey);
   await dialog.getByRole("button", { name: "Connect" }).click();
   await expect(dialog).toBeHidden();
