@@ -80,7 +80,7 @@ export interface MeetingsService {
   deleteMeeting(id: string): Promise<void>;
   updateMeetingKnowledge(id: string, tags: string[], knowledgeEnabled: boolean, knowledgeBaseId?: string | null): Promise<MeetingDetail>;
   getTranscriptionRoute(id: string): Promise<TranscriptionRoute>;
-  joinMeeting(id: string): Promise<MeetingDetail>;
+  joinMeeting(id: string, coordination?: "own"): Promise<MeetingDetail>;
   stopMeeting(id: string): Promise<MeetingDetail>;
   refreshMeeting(id: string): Promise<MeetingDetail>;
   getTranscript(id: string): Promise<TranscriptSegment[]>;
@@ -234,7 +234,7 @@ function toFrontend(profile: BackendProfile, defaults: BackendDefault[]): Provid
   };
 }
 
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
+export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers: { "content-type": "application/json", ...init?.headers },
@@ -680,7 +680,7 @@ class HttpMeetingsService implements MeetingsService {
     const result = await api<{ meeting: BackendMeeting }>("/v1/meetings/schedules", {
       method: "POST",
       body: JSON.stringify({
-        starts_at: startsAt,
+        starts_at: startsAt, ...(input.coordination ? { coordination: input.coordination } : {}),
         meeting: {
           meeting_url: input.meetingUrl, title: input.title || undefined,
           bot_name: input.botName || "Meetings AI", delivery_settings: input.deliverySettings,
@@ -751,6 +751,7 @@ class HttpMeetingsService implements MeetingsService {
   async scheduleCalendarEvent(event: CalendarEvent, period: CalendarPeriod, timezone: string, input: CreateMeetingInput, eventDate?: string): Promise<MeetingDetail> {
     const result = await api<{ meeting: BackendMeeting }>("/v1/calendar/schedules", { method: "POST", body: JSON.stringify({
       connection_id: event.connection_id, event_id: event.event_id, period, event_date: eventDate, timezone,
+      ...(input.coordination ? { coordination: input.coordination } : {}),
       meeting: {
         meeting_url: event.meeting_url, title: input.title || event.title, bot_name: input.botName || "Meetings AI",
         delivery_settings: input.deliverySettings, tags: input.tags ?? [],
@@ -764,6 +765,7 @@ class HttpMeetingsService implements MeetingsService {
   async joinCalendarEvent(event: CalendarEvent, period: CalendarPeriod, timezone: string, input: CreateMeetingInput, eventDate?: string): Promise<MeetingDetail> {
     const result = await api<{ meeting: BackendMeeting }>("/v1/calendar/meetings", { method: "POST", body: JSON.stringify({
       connection_id: event.connection_id, event_id: event.event_id, period, event_date: eventDate, timezone,
+      ...(input.coordination ? { coordination: input.coordination } : {}),
       meeting: {
         meeting_url: event.meeting_url, title: input.title || event.title, bot_name: input.botName || "Meetings AI",
         delivery_settings: input.deliverySettings, tags: input.tags ?? [], mom_guidance: input.momGuidance,
@@ -800,8 +802,8 @@ class HttpMeetingsService implements MeetingsService {
     return api<TranscriptionRoute>(`/v1/meetings/${id}/transcription-route`);
   }
 
-  async joinMeeting(id: string): Promise<MeetingDetail> {
-    return toMeetingDetail(await api<BackendMeeting>(`/v1/meetings/${id}/join`, { method: "POST" }));
+  async joinMeeting(id: string, coordination?: "own"): Promise<MeetingDetail> {
+    return toMeetingDetail(await api<BackendMeeting>(`/v1/meetings/${id}/join${coordination ? `?coordination=${coordination}` : ""}`, { method: "POST" }));
   }
 
   async stopMeeting(id: string): Promise<MeetingDetail> {
@@ -1177,6 +1179,17 @@ export const usageService = {
   /** Same-origin download link; the session cookie authorises it. */
   exportUrl(filters: UsageEventFiltersT): string {
     return `${API_BASE_URL}/v1/workspace/usage/export.csv${usageQuery(filters)}`;
+  },
+};
+
+/** Remaining credit / spend for saved provider keys (owners and admins). */
+export const balanceService = {
+  overview(): Promise<import("./types").BalanceOverview> {
+    return api<import("./types").BalanceOverview>("/v1/provider-balances");
+  },
+  /** Re-checks with the providers now (rate limited per workspace); one key when `credentialId` is given. */
+  refresh(credentialId?: string): Promise<import("./types").BalanceOverview> {
+    return api<import("./types").BalanceOverview>(`/v1/provider-balances/refresh${credentialId ? `?credential_id=${encodeURIComponent(credentialId)}` : ""}`, { method: "POST" });
   },
 };
 

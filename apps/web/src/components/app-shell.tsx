@@ -17,7 +17,7 @@ import { ProviderSettings } from "./provider-settings";
 import { WorkspaceSettings } from "./workspace-settings";
 import { ProfileSettings } from "./profile-settings";
 import { KnowledgeScreen } from "./knowledge-screen";
-import { KnowledgeEvidenceScreen } from "./knowledge-evidence-screen";
+import { MemberMeetingScreen } from "./shared-meeting-screen";
 import { ObservabilityScreen } from "./observability-screen";
 import { ProvidersIcon } from "./ui-icons";
 import { ThemeSwitcher } from "./theme-switcher";
@@ -276,19 +276,19 @@ export function AppShell() {
         <main id="main-content">
           {view === "dashboard" ? <Dashboard meetings={meetings} account={account} onNewMeeting={() => { setCalendarSelection(null); setDialogOpen(true); }} onOpenCalendar={() => setView("calendar")} onOpenProviders={() => setView("providers")} onOpenKnowledge={() => setView("knowledge")} onOpenMeetings={() => setView("meetings")} onOpenMeeting={openMeeting} /> : null}
           {view === "meetings" && identity ? <MeetingsLibrary key={identity} identity={identity} meetings={meetings} onOpen={openMeeting} onNew={() => { setCalendarSelection(null); setDialogOpen(true); }} onCalendar={() => setView("calendar")} /> : null}
-          {view === "calendar" && account && account.role !== "viewer" ? <CalendarWorkspace key={identity} calendarIdentity={`${account.organization_id}:${account.user_id}`} preferredConnectionId={preferredCalendarConnectionId} onPreferredConnectionApplied={() => setPreferredCalendarConnectionId(null)} canSchedule={account.role === "owner" || account.role === "admin"} onChoose={(selection) => { setCalendarSelection(selection); setDialogOpen(true); }} onPrepare={(event) => { setPrepEvent(event); setView("prep"); }} onNewMeeting={account.role === "owner" || account.role === "admin" ? () => { setCalendarSelection(null); setDialogOpen(true); } : undefined} /> : null}
+          {view === "calendar" && account && account.role !== "viewer" ? <CalendarWorkspace key={identity} calendarIdentity={`${account.organization_id}:${account.user_id}`} preferredConnectionId={preferredCalendarConnectionId} onPreferredConnectionApplied={() => setPreferredCalendarConnectionId(null)} canSchedule={account.role === "owner" || account.role === "admin"} onChoose={(selection) => { setCalendarSelection(selection); setDialogOpen(true); }} onPrepare={(event) => { setPrepEvent(event); setView("prep"); }} onNewMeeting={account.role === "owner" || account.role === "admin" ? () => { setCalendarSelection(null); setDialogOpen(true); } : undefined} onOpenMeeting={openMeeting} /> : null}
           {view === "prep" && account && account.role !== "viewer" && identity ? <MeetingPrepWorkspace key={`${identity}:${focusNonce}`} identity={identity} initialEvent={prepEvent} onOpenCalendar={() => setView("calendar")} onOpenOrganization={() => setView("workspace")} onOpenProviders={account.role === "owner" || account.role === "admin" ? () => setView("providers") : undefined} /> : null}
           {view === "providers" ? providersLoadError ? <section className="page narrow"><EmptyState icon={<ProvidersIcon />} title="AI providers are unavailable" action={<button className="button secondary" onClick={() => void meetingsService.listProviderProfiles().then((nextProfiles) => { setProfiles(nextProfiles); setProvidersLoadError(null); }).catch(() => undefined)}>Retry</button>}><span role="alert">{providersLoadError}</span></EmptyState></section> : identity ? <ProviderSettings key={identity} identity={identity} profiles={profiles} onProfilesChange={setProfiles} /> : null : null}
           {view === "knowledge" && identity ? <KnowledgeScreen key={`${identity}:${focusNonce}`} identity={identity} account={account} onOpenSource={openMeeting} onOpenProviders={account?.role === "owner" || account?.role === "admin" ? () => setView("providers") : undefined} /> : null}
           {view === "observability" && (account?.role === "owner" || account?.role === "admin") ? <ObservabilityScreen /> : null}
           {view === "workspace" ? workspace
-            ? <WorkspaceSettings workspace={workspace} workspaces={workspaces} account={account} onWorkspaceChange={setWorkspace} onSwitchWorkspace={switchWorkspace} onCreateWorkspace={createWorkspace} onWorkspacesChange={setWorkspaces} />
+            ? <WorkspaceSettings workspace={workspace} workspaces={workspaces} account={account} onWorkspaceChange={setWorkspace} onSwitchWorkspace={switchWorkspace} onCreateWorkspace={createWorkspace} onWorkspacesChange={setWorkspaces} onOpenObservability={() => setView("observability")} />
             : <section className="page narrow">{workspaceLoading ? <LoadingRow>Loading workspace…</LoadingRow> : <EmptyState icon={<Building2 />} title="Workspace profile is unavailable">Refresh the page to try again.</EmptyState>}</section>
             : null}
           {view === "profile" && account ? <ProfileSettings account={account} workspace={workspace} onAccountChange={setAccount} /> : null}
           {view === "meeting" && activeMeetingId ? account?.role === "owner" || account?.role === "admin"
             ? <MeetingDetailScreen meetingId={activeMeetingId} focusSegmentId={focusSegmentId} backLabel={backLabel[meetingReturnView] ?? "Back"} onBack={() => setView(meetingReturnView)} onMeetingChange={updateMeeting} onDeleted={(id) => { setMeetings((current) => current.filter((meeting) => meeting.id !== id)); setActiveMeetingId(null); setView("dashboard"); }} />
-            : <KnowledgeEvidenceScreen meetingId={activeMeetingId} focusSegmentId={focusSegmentId} onBack={() => setView("knowledge")} /> : null}
+            : <MemberMeetingScreen meetingId={activeMeetingId} focusSegmentId={focusSegmentId} backLabel={meetingReturnView === "calendar" ? "Calendar" : "AI knowledge"} onBack={() => setView(meetingReturnView === "calendar" ? "calendar" : "knowledge")} onBackToKnowledge={() => setView("knowledge")} /> : null}
         </main>
       </div>
       <Dialog.Root open={mobileNavOpen} onOpenChange={setMobileNavOpen}>

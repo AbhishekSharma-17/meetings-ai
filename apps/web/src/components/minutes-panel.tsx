@@ -249,10 +249,13 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
     finally { setBusy(null); }
   }
 
+  // Internal recipients are optional: participants alone are a valid audience.
+  const hasAudience = recipientList.length > 0 || groupIds.length > 0 || (shareParticipants && participantList.length > 0);
+
   async function send() {
     setMessageAt("delivery");
     if (!resendStatus?.can_attempt_send) { setError("Email delivery is not configured yet."); return; }
-    if (!recipientList.length && !groupIds.length) { setError("Enter at least one recipient email address or team."); return; }
+    if (!hasAudience) { setError("Choose at least one recipient — a teammate, a team or the meeting participants."); return; }
     setBusy("send"); setError(null); setNotice(null);
     try {
       await meetingsService.saveDeliverySettings(meeting.id, settingsPayload());
@@ -313,7 +316,7 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
       </div> : null}
     </section>
     {minutes?.status === "approved" ? <RecapDeliveryCard recipients={recipients} participantRecipients={participantRecipients} shareParticipants={shareParticipants} includeTranscript={includeTranscript}
-      resendStatus={resendStatus} resendStatusError={resendStatusError} busy={busy} canSend={Boolean((recipientList.length || groupIds.length) && !(shareParticipants && !participantList.length) && resendStatus?.can_attempt_send)}
+      resendStatus={resendStatus} resendStatusError={resendStatusError} busy={busy} canSend={Boolean(hasAudience && !(shareParticipants && !participantList.length) && resendStatus?.can_attempt_send)}
       messages={inDelivery ? messages : null} onRecipientsChange={setRecipients} teams={teams} members={members} groupIds={groupIds} onGroupIdsChange={setGroupIds} onParticipantRecipientsChange={setParticipantRecipients} onShareParticipantsChange={setShareParticipants} onIncludeTranscriptChange={setIncludeTranscript}
       onSave={() => void saveDeliverySettings()} onSend={() => void send()} /> : null}
   </div>;

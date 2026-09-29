@@ -358,6 +358,7 @@ class MeetingPrepService:
         self.usage = usage if usage is not None else getattr(providers, "usage", None)
         self.vault, self.ai_settings, self.retriever = vault, ai_settings, retriever
         self.exa_transport, self.environ, self.exa_sleep = exa_transport, environ, exa_sleep
+        self.credit_alerts: Any | None = None  # set by create_app; alerts owners when Exa returns 402
         # One running briefing per user and event (single API process; see deployment notes).
         self._active: set[tuple[str, str, str]] = set()
 
@@ -480,6 +481,8 @@ class MeetingPrepService:
                 organization_id=actor.organization_id, prep_event_id=event_id, actor_user_id=actor.user_id)}
             if self.exa_sleep:
                 client_args["sleep"] = self.exa_sleep
+            if self.credit_alerts is not None:
+                client_args["on_out_of_credit"] = self.credit_alerts.report_exa_out_of_credit
             async with ExaClient(exa_key, **client_args) as exa:
                 outcome = await pipeline.run(exa=exa, **run_args)
         else:

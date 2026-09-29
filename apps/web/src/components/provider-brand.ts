@@ -50,9 +50,12 @@ export function usageEndpointHost(details: Record<string, unknown> | null | unde
   return typeof host === "string" && host ? host : null;
 }
 
+/** Billing-only vault keys belong to the vendor whose balance they read. */
+const BILLING_KEY_BRANDS: Readonly<Record<string, ProviderBrand>> = { openrouter_management: "openrouter", openai_admin: "openai", exa_service: "exa" };
+
 /** A saved vault key's vendor (OpenAI-compatible keys saved for openrouter.ai count as OpenRouter). */
 export const credentialBrand = (credential: { provider_type: string; base_url: string | null }): ProviderBrand | null =>
-  providerBrand(credential.provider_type, credential.base_url);
+  BILLING_KEY_BRANDS[credential.provider_type] ?? providerBrand(credential.provider_type, credential.base_url);
 
 /** A provider profile's vendor, from its provider label and endpoint. */
 export const profileBrand = (profile: { provider: string; endpoint: string }): ProviderBrand | null =>

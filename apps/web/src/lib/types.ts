@@ -391,6 +391,8 @@ export type CreateMeetingInput = {
   knowledgeEnabled?: boolean;
   knowledgeBaseId?: string | null;
   momGuidance?: MomGuidance;
+  /** "own": bring my own assistant although a teammate's is already set for this call. */
+  coordination?: "own";
 };
 
 export type MomGuidance = {
@@ -513,7 +515,10 @@ export type ProviderProfile = {
   credentialLabel?: string | null;
 };
 
-export type VaultProviderType = "openai" | "openrouter" | "openai_compatible" | "exa";
+export type VaultProviderType = "openai" | "openrouter" | "openai_compatible" | "exa" | BillingKeyType;
+
+/** Billing-only saved keys: they read balances and spend, never make model or research calls. */
+export type BillingKeyType = "openrouter_management" | "openai_admin" | "exa_service";
 
 /** A saved workspace API key. The secret itself is write-only and never returned. */
 export type VaultCredential = {
@@ -527,6 +532,47 @@ export type VaultCredential = {
   last_used_at: string | null;
   used_by_profiles: number;
   used_by_settings: boolean;
+  /** True for billing keys (never selectable for model calls or research). */
+  billing_only?: boolean;
+};
+
+export type BalanceProvider = "openrouter" | "openai" | "exa";
+export type BalanceState = "ok" | "low" | "exhausted" | "unknown" | "invalid_key" | "error";
+
+/** Credit status of one saved key, as reported by the provider (or estimated from this app's own ledger). */
+export type ProviderBalance = {
+  credential_id: string;
+  provider: BalanceProvider;
+  label: string;
+  hint: string;
+  balance_usd: number | null;
+  limit_usd: number | null;
+  remaining_usd: number | null;
+  spent_usd: number | null;
+  spent_period: "this_month" | "all_time" | null;
+  our_tracked_spend_usd: number;
+  status: BalanceState;
+  source: "provider_api" | "admin_key" | "our_ledger";
+  checked_at: string;
+  note: string;
+  dashboard_url: string;
+};
+
+export type BillingKeyInfo = {
+  provider_type: BillingKeyType;
+  provider: BalanceProvider;
+  configured: boolean;
+  credential_id: string | null;
+  label: string | null;
+  hint: string | null;
+  unlocks: string;
+};
+
+export type BalanceOverview = {
+  items: ProviderBalance[];
+  billing_keys: BillingKeyInfo[];
+  low_balance_threshold_usd: number;
+  checked_at: string | null;
 };
 
 export type VaultCredentialInput = { label: string; provider_type: VaultProviderType; secret: string; base_url?: string | null };

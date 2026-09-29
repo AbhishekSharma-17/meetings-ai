@@ -62,7 +62,9 @@ def register_ai_routes(app: FastAPI, *, vault: CredentialVault, ai_settings: AiS
     @app.get("/v1/credentials", response_model=list[CredentialPublic])
     def list_credentials(
         request: Request,
-        provider_type: Literal["openai", "openrouter", "openai_compatible", "exa"] | None = None,
+        provider_type: Literal[
+            "openai", "openrouter", "openai_compatible", "exa", "openrouter_management", "openai_admin", "exa_service",
+        ] | None = None,
     ) -> list[CredentialPublic]:
         actor = _require_admin(request)
         return vault.list(actor.organization_id, provider_type)

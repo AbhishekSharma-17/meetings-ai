@@ -225,3 +225,53 @@ def test_worker_does_not_poll_historical_meetings():
             raise AssertionError("historical meeting must not be polled")
 
     asyncio.run(PostMeetingWorker(HistoricalRepository(), UnexpectedCall(), UnexpectedCall()).tick())
+
+
+def test_recap_can_go_to_participants_only_but_never_to_nobody(monkeypatch):
+    monkeypatch.delenv("MEETINGS_AI_ADMIN_PASSWORD", raising=False)
+    monkeypatch.delenv("MEETINGS_AI_SESSION_SECRET", raising=False)
+    sent = []
+
+    def vexa_handler(request):
+        if request.url.path == "/transcripts/by-id/42":
+            return httpx.Response(200, json={"status": "completed", "segments": [
+                {"segment_id": "s1", "start": 0, "end": 4, "text": "We reviewed the MVP.", "speaker": "Anna", "completed": True}]})
+        return httpx.Response(200, json={"status": "completed"})
+
+    def resend_handler(request):
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json={"id": "email-test"})
+
+    app = create_app(
+        database_url="sqlite+pysqlite:///:memory:", credential_key="test-key",
+        vexa_adapter=VexaCaptureAdapter("http://vexa.test", transport=httpx.MockTransport(vexa_handler)),
+        resend_adapter=ResendAdapter("test-key", "Meetings AI <bot@example.test>",
+                                     transport=httpx.MockTransport(resend_handler)),
+    )
+    app.state.profile_service.adapters[ProviderType.OPENAI] = DraftAdapter()
+    with TestClient(app) as client:
+        profile = client.post("/v1/provider-profiles", json={
+            "name": "MOM", "provider_type": "openai", "execution_location": "cloud",
+            "capabilities": [{"capability": "text_generation", "model": "economy-model"}], "api_key": "test-only",
+        }).json()
+        client.put("/v1/provider-defaults/text_generation", json={"policy": "cloud_only", "cloud_profile_id": profile["id"]})
+        meeting_id = client.post("/v1/meetings", json={"meeting_url": "https://meet.google.com/abc-defg-hij"}).json()["id"]
+        meeting = app.state.repository.get_meeting(meeting_id)
+        meeting.status = MeetingStatus.COMPLETED
+        meeting.vexa_meeting_id = 42
+        app.state.repository.save_meeting(meeting)
+        asyncio.run(app.state.post_meeting_worker.tick())
+        client.post(f"/v1/meetings/{meeting_id}/minutes/approve")
+
+        nobody = {"internal_recipients": [], "participant_recipients": ["guest@example.test"],
+                  "send_to_participants": False, "include_transcript": False}
+        assert client.put(f"/v1/meetings/{meeting_id}/delivery-settings", json=nobody).status_code == 200
+        refused = client.post(f"/v1/meetings/{meeting_id}/minutes/send-configured")
+        assert refused.status_code == 409 and "at least one recipient" in refused.json()["detail"]
+        assert not sent
+
+        participants_only = {**nobody, "send_to_participants": True}
+        assert client.put(f"/v1/meetings/{meeting_id}/delivery-settings", json=participants_only).status_code == 200
+        delivered = client.post(f"/v1/meetings/{meeting_id}/minutes/send-configured")
+        assert delivered.status_code == 200, delivered.text
+        assert sent[0]["to"] == ["guest@example.test"]

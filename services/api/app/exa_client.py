@@ -121,6 +121,7 @@ class ExaClient:
         transport: httpx.AsyncBaseTransport | None = None, base_url: str = EXA_BASE_URL,
         timeout: float = 30.0, max_retries: int = 2, backoff_seconds: float = 0.75,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        on_out_of_credit: Callable[[UUID], None] | None = None,
     ) -> None:
         if not api_key:
             raise ExaKeyMissingError(MISSING_KEY_MESSAGE)
@@ -133,6 +134,7 @@ class ExaClient:
         self._max_retries = max_retries
         self._backoff = backoff_seconds
         self._sleep = sleep
+        self._on_out_of_credit = on_out_of_credit
         self._client: httpx.AsyncClient | None = None
         self.log = ExaCallLog()
 
@@ -231,6 +233,8 @@ class ExaClient:
             if response.status_code in {401, 403}:
                 raise ExaError("Exa rejected the API key; update the Exa key in AI providers", response.status_code)
             if response.status_code == 402:
+                if self._on_out_of_credit is not None and self._usage is not None:
+                    self._on_out_of_credit(self._usage.organization_id)
                 raise ExaError("Exa reports the account has no remaining credits", response.status_code)
             if response.status_code == 429:
                 raise ExaError("Exa rate limit reached; try again shortly", response.status_code)

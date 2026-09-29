@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import { ArrowUpRight } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
 import type { CurrentAccount, Workspace, WorkspaceMember, WorkspaceOption } from "@/lib/types";
 import { PageHeader } from "./ui/page-header";
@@ -8,7 +9,7 @@ import { SettingsToast } from "./settings-toast";
 import { WorkspacePeople } from "./workspace-people";
 import { WorkspaceDirectory } from "./workspace-directory";
 import { WorkspaceBrief } from "./workspace-brief";
-import { OperationsCard, RetentionCard } from "./workspace-admin-cards";
+import { RetentionCard } from "./workspace-admin-cards";
 import { ActivityCard } from "./workspace-activity";
 import { WorkspaceTeams } from "./workspace-teams";
 import { WorkspaceLeavePolicy } from "./workspace-leave-policy";
@@ -22,11 +23,10 @@ const sectionLinks: SectionLink[] = [
   { id: "settings-brief", label: "Company profile" },
   { id: "settings-leave", label: "Leaving calls" },
   { id: "settings-retention", label: "Data retention", adminOnly: true },
-  { id: "settings-operations", label: "Operations", adminOnly: true },
   { id: "settings-activity", label: "Recent activity", adminOnly: true },
 ];
 
-export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceChange, onSwitchWorkspace, onCreateWorkspace, onWorkspacesChange }: {
+export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceChange, onSwitchWorkspace, onCreateWorkspace, onWorkspacesChange, onOpenObservability }: {
   workspace: Workspace;
   workspaces: WorkspaceOption[];
   account: CurrentAccount | null;
@@ -34,6 +34,8 @@ export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceC
   onSwitchWorkspace(id: string): Promise<void>;
   onCreateWorkspace(name: string): Promise<void>;
   onWorkspacesChange?(workspaces: WorkspaceOption[]): void;
+  /** Usage, spend and job health live on the Observability page (owners and admins). */
+  onOpenObservability?(): void;
 }) {
   const [name, setName] = useState(workspace.display_name);
   const [contactEmail, setContactEmail] = useState(workspace.contact_email ?? "");
@@ -90,6 +92,9 @@ export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceC
     <div className="settings-layout">
       <nav className="settings-nav" aria-label="Settings sections">
         {links.map((link) => <button key={link.id} type="button" onClick={() => document.getElementById(link.id)?.scrollIntoView({ behavior: "smooth", block: "start" })}>{link.label}</button>)}
+        {canManage && onOpenObservability ? <button type="button" className="settings-nav-external" onClick={onOpenObservability}>
+          Usage, spend & job health<ArrowUpRight aria-hidden="true" />
+        </button> : null}
       </nav>
       <div className="settings-sections">
         {canManage ? <OrganizationProfileForm slug={workspace.slug} name={name} contactEmail={contactEmail} saving={saving} onName={setName} onContactEmail={setContactEmail} onSubmit={save} /> : <OrganizationSummary workspace={workspace} />}
@@ -101,7 +106,6 @@ export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceC
         <WorkspaceBrief workspaceId={workspace.id} canManage={canManage} />
         <WorkspaceLeavePolicy key={workspace.id} onSaved={(text) => { setError(null); setMessage(text); }} />
         {canManage ? <RetentionCard onSaved={setMessage} /> : null}
-        {canManage ? <OperationsCard meetingTitles={meetingTitles} /> : null}
         {canManage ? <ActivityCard members={members} meetingTitles={meetingTitles} baseNames={baseNames} teamNames={teamNames} /> : null}
       </div>
     </div>

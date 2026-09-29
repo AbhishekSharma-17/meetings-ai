@@ -6,10 +6,11 @@ import type { DemoRouter } from "../router";
 import type { DemoStore } from "../store";
 
 const hintFor = (secret: string) => `…${secret.trim().slice(-4)}`;
+const BILLING_TYPES = new Set<string>(["openrouter_management", "openai_admin", "exa_service"]);
 
 function credentialsView(store: DemoStore): VaultCredential[] {
   return store.credentials.map((item) => ({
-    ...item, used_by_profiles: store.profiles.filter((profile) => profile.credential_id === item.id).length,
+    ...item, billing_only: BILLING_TYPES.has(item.provider_type), used_by_profiles: store.profiles.filter((profile) => profile.credential_id === item.id).length,
     used_by_settings: store.ai.research_credential_id === item.id || store.profiles.some((profile) => profile.credential_id === item.id && [store.ai.chat_profile_id, store.ai.vision_profile_id, store.ai.research_profile_id].includes(profile.id)),
   }));
 }
@@ -104,7 +105,8 @@ export function registerProviders(router: DemoRouter): void {
       const secret = str(body.secret);
       const type = str(body.provider_type) as VaultProviderType | null;
       if (!label || !secret || secret.trim().length < 8 || !type) return problem(422, "Enter a label and a key of at least 8 characters.");
-      return json(addCredential(store, { label, provider_type: type, base_url: type === "openrouter" ? OPENROUTER_URL : str(body.base_url), secret }), 201);
+      const saved = addCredential(store, { label, provider_type: type, base_url: type === "openrouter" ? OPENROUTER_URL : BILLING_TYPES.has(type) ? null : str(body.base_url), secret });
+      return json({ ...saved, billing_only: BILLING_TYPES.has(type) }, 201);
     })
     .on("PATCH", "/v1/credentials/:id", ({ store, params, body }) => {
       const current = store.credentials.find((item) => item.id === params.id);

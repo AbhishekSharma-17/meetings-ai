@@ -125,6 +125,8 @@ class CatalogSourceResolver:
         credential = self.vault.get(organization_id, credential_id)
         if credential.provider_type == "exa":
             raise CatalogRequestError("an Exa key is for web research and has no model list")
+        if credential.billing_only:
+            raise CatalogRequestError("a billing key only reads balances and has no model list")
         derived: CatalogProvider = credential.provider_type  # type: ignore[assignment]
         if provider is not None and provider != derived:
             raise CatalogRequestError("this saved key belongs to a different provider")

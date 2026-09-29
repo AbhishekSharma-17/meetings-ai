@@ -32,8 +32,18 @@ from .security import CredentialCipher
 
 logger = logging.getLogger(__name__)
 
-VaultProviderType = Literal["openai", "openrouter", "openai_compatible", "exa"]
-VAULT_PROVIDER_TYPES: frozenset[str] = frozenset({"openai", "openrouter", "openai_compatible", "exa"})
+VaultProviderType = Literal[
+    "openai", "openrouter", "openai_compatible", "exa",
+    # Billing-only keys: they read balances and spend, and are never used for model calls or research.
+    "openrouter_management", "openai_admin", "exa_service",
+]
+BILLING_PROVIDER_TYPES: frozenset[str] = frozenset({"openrouter_management", "openai_admin", "exa_service"})
+VAULT_PROVIDER_TYPES: frozenset[str] = frozenset({"openai", "openrouter", "openai_compatible", "exa"}) | BILLING_PROVIDER_TYPES
+# Loose format checks so an ordinary key pasted into a billing slot fails with a clear message.
+BILLING_KEY_PREFIXES: dict[str, tuple[str, str]] = {
+    "openai_admin": ("sk-admin-", "an OpenAI admin key starts with sk-admin- (create one under Organization settings > Admin keys)"),
+    "openrouter_management": ("sk-or-", "an OpenRouter management key starts with sk-or- (create one under Settings > Management keys)"),
+}
 
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
@@ -93,6 +103,8 @@ class CredentialPublic(BaseModel):
     last_used_at: datetime | None
     used_by_profiles: int
     used_by_settings: bool = False
+    # True for balance-reading keys that can never be picked for model calls or research.
+    billing_only: bool = False
 
 
 class CredentialTestResult(BaseModel):
@@ -131,6 +143,13 @@ def secret_hint(secret: str) -> str:
     return f"••••{secret[-4:]}"
 
 
+def check_billing_key_format(provider_type: str, secret: str) -> None:
+    """Reject an obviously wrong key for a billing slot; the message never echoes the key."""
+    expected = BILLING_KEY_PREFIXES.get(provider_type)
+    if expected and not secret.startswith(expected[0]):
+        raise CredentialValidationError(expected[1])
+
+
 def _clean_label(value: str) -> str:
     label = " ".join(value.split())
     if not label or len(label) > 100:
@@ -141,6 +160,10 @@ def _clean_label(value: str) -> str:
 def _vault_base_url(provider_type: str, base_url: str | None) -> str | None:
     """Fixed hosts for known providers; a validated URL for generic compatible endpoints."""
     requested = normalize_base_url(base_url)
+    if provider_type in BILLING_PROVIDER_TYPES:
+        if requested is not None:
+            raise CredentialValidationError("a billing key uses the provider's standard endpoint")
+        return None
     fixed = {"openai": None, "openrouter": OPENROUTER_BASE_URL, "exa": None}
     if provider_type in fixed:
         allowed = {None, fixed[provider_type]}
@@ -167,6 +190,8 @@ def profile_link_base_url(
     cannot redirect a workspace key to an arbitrary endpoint.
     """
     requested = normalize_base_url(base_url)
+    if credential.provider_type in BILLING_PROVIDER_TYPES:
+        raise CredentialValidationError("a billing key only reads balances and cannot back a model profile")
     if credential.provider_type == "exa":
         raise CredentialValidationError("an Exa key is for web research and cannot back a model profile")
     if credential.provider_type == "openai":
@@ -241,6 +266,14 @@ class CredentialVault:
             return None
         return credential_id, self.resolve_secret(organization_id, credential_id)
 
+    def secret_for_balance_check(self, organization_id: UUID, credential_id: UUID) -> str:
+        """Decrypt a key for a read-only balance check; unlike ``resolve_secret`` it is not marked as used."""
+        with self.database.session_factory() as session:
+            secret = self.cipher.decrypt(self._row(session, organization_id, credential_id).credential_ciphertext)
+        if not secret:
+            raise CredentialNotFoundError(credential_id)
+        return secret
+
     def touch(self, organization_id: UUID, credential_id: UUID) -> None:
         """Record use of a linked profile key without failing the caller."""
         try:
@@ -256,6 +289,7 @@ class CredentialVault:
         self, organization_id: UUID, request: CredentialCreate, actor_user_id: UUID | None = None,
     ) -> CredentialPublic:
         secret = clean_secret(request.secret.get_secret_value())
+        check_billing_key_format(request.provider_type, secret)
         label = _clean_label(request.label)
         base_url = _vault_base_url(request.provider_type, request.base_url)
         now = datetime.now(UTC)
@@ -283,6 +317,7 @@ class CredentialVault:
                 row.label = label
             if patch.secret is not None:
                 secret = clean_secret(patch.secret.get_secret_value())
+                check_billing_key_format(row.provider_type, secret)
                 row.credential_ciphertext = self.cipher.encrypt(secret)
                 row.hint = secret_hint(secret)
             row.updated_at = datetime.now(UTC)
@@ -321,6 +356,8 @@ class CredentialVault:
                 credential_id=credential.id, status="unverified", network_call_performed=False,
                 message="Saved. Custom endpoints are checked when a profile first uses this key.",
             )
+        if credential.provider_type in BILLING_PROVIDER_TYPES:
+            return await self._test_billing(credential, secret)
         try:
             async with httpx.AsyncClient(timeout=TEST_TIMEOUT_SECONDS, transport=self.transport) as client:
                 if credential.provider_type == "exa":
@@ -362,6 +399,23 @@ class CredentialVault:
                     details={"credential_id": str(credential.id), "num_results": 1},
                 )
         return self._result_from_status(credential, response.status_code)
+
+    async def _test_billing(self, credential: CredentialPublic, secret: str) -> CredentialTestResult:
+        """A billing key is checked with the same read-only call the balance view makes (free)."""
+        from .provider_balance_clients import probe_billing_key  # local import: keeps the vault import-light
+
+        status_code = await probe_billing_key(credential.provider_type, secret, transport=self.transport)
+        if status_code is None:
+            return CredentialTestResult(
+                credential_id=credential.id, status="unverified", network_call_performed=True,
+                message="The provider could not be reached; try again later.",
+            )
+        if status_code == 403 and credential.provider_type == "openai_admin":
+            return CredentialTestResult(
+                credential_id=credential.id, status="invalid", network_call_performed=True,
+                message="OpenAI refused this key for billing data. Use an admin key with read access to usage.",
+            )
+        return self._result_from_status(credential, status_code)
 
     @staticmethod
     def _result_from_status(credential: CredentialPublic, status_code: int) -> CredentialTestResult:
@@ -424,13 +478,13 @@ class CredentialVault:
             id=UUID(row.id), label=row.label, provider_type=row.provider_type, base_url=row.base_url,
             hint=row.hint, created_at=_utc(row.created_at), updated_at=_utc(row.updated_at),
             last_used_at=_utc(row.last_used_at), used_by_profiles=used_by_profiles,
-            used_by_settings=used_by_settings,
+            used_by_settings=used_by_settings, billing_only=row.provider_type in BILLING_PROVIDER_TYPES,
         )
 
 
 __all__ = [
     "CredentialCreate", "CredentialInUseError", "CredentialNotFoundError", "CredentialPatch",
-    "CredentialPublic", "CredentialTestResult", "CredentialValidationError", "CredentialVault",
-    "EXA_SEARCH_USD_PER_REQUEST", "VAULT_PROVIDER_TYPES",
+    "BILLING_PROVIDER_TYPES", "CredentialPublic", "CredentialTestResult", "CredentialValidationError",
+    "CredentialVault", "EXA_SEARCH_USD_PER_REQUEST", "VAULT_PROVIDER_TYPES",
     "profile_link_base_url", "vault_type_for_profile",
 ]

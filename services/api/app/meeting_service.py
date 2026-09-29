@@ -49,6 +49,8 @@ class MeetingService:
     events: Any = NO_EVENTS
     # Auto-leave hooks (LeaveService: automatic_leave/joining/stopped/finished); a no-op unless wired.
     leave: Any = NO_EVENTS
+    # Call coordination (CallCoordinationService.join_refused); a no-op unless wired.
+    coordination: Any = NO_EVENTS
 
     def __init__(
         self, repository: object, vexa: VexaCaptureAdapter,
@@ -184,7 +186,8 @@ class MeetingService:
             meeting.vexa_meeting_id = _integer(upstream.get("id"), "Vexa meeting id")
         except VexaAPIError as exc:
             meeting.status = MeetingStatus.FAILED
-            meeting.last_error = str(exc)
+            # A teammate's assistant already in this call makes this one stand down (one bot per call).
+            meeting.last_error = self.coordination.join_refused(meeting, exc) or str(exc)
             meeting.updated_at = datetime.now(UTC)
             self.repository.save_meeting(meeting)
             self.events.meeting_status(meeting)

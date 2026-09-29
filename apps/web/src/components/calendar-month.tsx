@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { CalendarDays, ChevronRight, Clock, NotebookPen } from "lucide-react";
 import type { CalendarConnection, CalendarInvitee } from "@/lib/types";
 import { dayKeyIn } from "@/lib/time-format";
@@ -74,8 +75,10 @@ export function MonthGrid({ month, days, selectedDay, entriesByDay, connections,
 }
 
 /** Meetings on the selected day, with a jump list when the day itself is empty. */
-export function DayAgenda({ selectedDay, dayEntries, rangeEntries, selectedEventId, hasAccounts, connections, query = "", searchedCount = 0, onClearQuery, onSelectEntry, onJumpToEntry }: {
+export function DayAgenda({ selectedDay, dayEntries, rangeEntries, selectedEventId, hasAccounts, connections, query = "", searchedCount = 0, onClearQuery, onSelectEntry, onJumpToEntry, markFor }: {
   selectedDay: string;
+  /** Optional extra mark per row (call coordination: "Asha's assistant"). */
+  markFor?(entry: CalendarEntry): ReactNode;
   /** Active calendar search; entries arrive already filtered by it. */
   query?: string;
   /** How many meetings the search ran over; "no matches" only makes sense when there were some. */
@@ -111,6 +114,7 @@ export function DayAgenda({ selectedDay, dayEntries, rangeEntries, selectedEvent
                 <PlatformMark event={entry.event} decorative />
                 <span>{platform ? platformLabel(platform) : "No video link"}</span>
                 {entry.event.rescheduled_from ? <><span className="calendar-meta-sep" aria-hidden="true">·</span><span className="calendar-event-moved">Rescheduled</span></> : null}
+                {markFor?.(entry)}
               </small>
             </span>
             <ChevronRight className="row-arrow" aria-hidden="true" />
@@ -134,8 +138,10 @@ export function DayAgenda({ selectedDay, dayEntries, rangeEntries, selectedEvent
 }
 
 /** Everything known about one meeting, every account it came from, plus the next step. */
-export function EventDetail({ entry, connections, canSchedule, alreadyScheduled, onSchedule, onPrepare }: {
+export function EventDetail({ entry, connections, canSchedule, alreadyScheduled, onSchedule, onPrepare, coordination }: {
   entry: CalendarEntry | null;
+  /** Optional block about teammates' assistants for this call (call coordination). */
+  coordination?: ReactNode;
   connections: CalendarConnection[];
   canSchedule: boolean;
   alreadyScheduled: boolean;
@@ -177,6 +183,7 @@ export function EventDetail({ entry, connections, canSchedule, alreadyScheduled,
       <p className="field-hint">Invitees are not verified attendees or speakers.</p>
       <InviteeList key={event.id} invitees={invitees} />
     </div>
+    {coordination}
     <div className="calendar-detail-actions">
       {canSchedule ? alreadyScheduled
         ? <Badge tone="success" dot>Assistant already scheduled</Badge>

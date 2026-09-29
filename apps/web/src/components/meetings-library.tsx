@@ -10,6 +10,8 @@ import type { CalendarSchedule, Meeting } from "@/lib/types";
 import { PageHeader } from "./ui/page-header";
 import { EmptyState } from "./ui/feedback";
 import { RescheduledBadge } from "./calendar-change-history";
+import { CoverageChip, useCoverageSummaries } from "./coordination-chips";
+import type { CoverageSummary } from "@/lib/coordination";
 import { FilterInput, NoMatches } from "./scroll-panel";
 import { matchesQuery } from "@/lib/search";
 
@@ -54,6 +56,7 @@ export function MeetingsLibrary({ identity, meetings, onOpen, onNew, onCalendar 
   const [query, setQuery] = useUiPreference(`meetings-ai:meeting-query:${identity}`, "", (value): value is string => typeof value === "string" && value.length <= 120, "session");
   useEffect(() => { void meetingsService.listCalendarSchedules().then(setSchedules).catch(() => setSchedules([])); }, [meetings]);
   const byId = useMemo(() => new Map(schedules.map((item) => [item.meeting_id, item])), [schedules]);
+  const coverage = useCoverageSummaries(meetings);
   const counts = countFilters(meetings, byId);
   const visible = meetings.filter((meeting) => matchesFilter(filter, meeting, byId.get(meeting.id)) && matchesQuery(query, meetingSearchFields(meeting, byId.get(meeting.id))));
   const clearFilters = () => { setFilter("all"); setQuery(""); };
@@ -72,7 +75,7 @@ export function MeetingsLibrary({ identity, meetings, onOpen, onNew, onCalendar 
       <FilterInput id="meeting-search" className="library-search page-search" label="Search meetings" value={query} onChange={setQuery} placeholder="Search meetings" />
     </div>
     {visible.length ? <ul className="list-card library-list" aria-label={`${visible.length} meeting${visible.length === 1 ? "" : "s"}`}>
-      {visible.map((meeting) => <LibraryRow key={meeting.id} meeting={meeting} schedule={byId.get(meeting.id)} onOpen={() => onOpen(meeting.id)} />)}
+      {visible.map((meeting) => <LibraryRow key={meeting.id} meeting={meeting} schedule={byId.get(meeting.id)} coverage={coverage.get(meeting.id)} onOpen={() => onOpen(meeting.id)} />)}
     </ul> : meetings.length ? <NoMatches query={query} noun="meetings" onClear={clearFilters} />
       : <EmptyState icon={<Mic />} title="No meetings yet">Send the assistant to a Google Meet, Zoom, Teams or Jitsi call, or schedule one from your calendar.</EmptyState>}
   </section>;
@@ -85,7 +88,7 @@ function meetingSearchFields(meeting: Meeting, schedule: CalendarSchedule | unde
     schedule ? [sourceNames[schedule.provider ?? ""] ?? schedule.provider, formatWhen(schedule.starts_at)] : meeting.startsAt];
 }
 
-function LibraryRow({ meeting, schedule, onOpen }: { meeting: Meeting; schedule: CalendarSchedule | undefined; onOpen(): void }) {
+function LibraryRow({ meeting, schedule, coverage, onOpen }: { meeting: Meeting; schedule: CalendarSchedule | undefined; coverage?: CoverageSummary; onOpen(): void }) {
   const scheduled = schedule?.status === "pending";
   const when = schedule ? `${sourceNames[schedule.provider ?? ""] ?? schedule.provider ?? "Calendar"} · ${formatWhen(schedule.starts_at)}` : meeting.startsAt;
   return <li>
@@ -94,6 +97,7 @@ function LibraryRow({ meeting, schedule, onOpen }: { meeting: Meeting; schedule:
       <span className="library-row-copy"><b>{meeting.title}</b><small>{meeting.platform} · {when}{meeting.participants ? ` · ${meeting.participants} participant${meeting.participants === 1 ? "" : "s"}` : ""}</small></span>
       <span className="library-row-duration">{meeting.duration === "—" ? "" : meeting.duration}</span>
       <span className="library-row-status">
+        <CoverageChip summary={coverage} />
         {scheduled && schedule?.rescheduled_from ? <RescheduledBadge from={schedule.rescheduled_from} /> : null}
         <span className={`status ${scheduled ? "scheduled" : meeting.status}`}>{scheduled ? "Scheduled" : meetingStatusLabel[meeting.status]}</span>
       </span>

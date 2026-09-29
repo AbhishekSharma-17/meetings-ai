@@ -70,6 +70,9 @@ from .leave_service import LeaveService
 from .leave_store import LeavePolicyService, MeetingLeaveStore, service_max_hours_from_env
 from .leave_watchdog import LeaveWatchdog
 from .routes_leave import register_leave_routes
+from .call_coordination import CallCoordinationService
+from .coordination_notices import CoordinationNotices
+from .routes_call_coordination import member_route_allowed, register_call_coordination_routes
 from .profile_photos import ProfilePhotoService
 from .database import Database, SchemaVersionRow, LEGACY_ADMIN_USER_ID, LEGACY_ORGANIZATION_ID
 from .accounts import AccountError, AccountPublic, AccountService, Actor, ChangePasswordRequest, MemberRolePatch, OrganizationCreateRequest, OrganizationOption, ProfilePatch
@@ -103,6 +106,8 @@ from .routes_usage import register_usage_routes
 from .storage import StorageService
 from .storage_purge import StoragePurgeService
 from .routes_storage import register_storage_routes
+from .provider_balances import ProviderBalanceService
+from .routes_balances import register_balance_routes
 from .stt_route import STTRouteError
 from .tenant import tenant_scope
 from .workspace_service import WorkspacePatch, WorkspacePublic, WorkspaceMemberPublic, WorkspaceService
@@ -224,12 +229,14 @@ def create_app(
             if os.getenv("AUTO_CALENDAR_SCHEDULE_ENABLED") == "1" and calendar_watch.enabled else None
         # On by default: an assistant that never leaves a call is worse than any other failure here.
         leave_task = asyncio.create_task(leave_watchdog.run()) if os.getenv("AUTO_LEAVE_ENABLED", "1") != "0" else None
+        # Every PROVIDER_BALANCE_CHECK_HOURS (default 6, 0 = off): low-credit alerts for saved keys.
+        balance_task = asyncio.create_task(balances.run()) if balances.interval_seconds > 0 else None
         await start_background_services(app)
         try:
             yield
         finally:
             await stop_background_services(app)
-            for running in (task, index_task, retention_task, schedule_task, watch_task, leave_task):
+            for running in (task, index_task, retention_task, schedule_task, watch_task, leave_task, balance_task):
                 if running:
                     running.cancel()
                     try:
@@ -309,6 +316,16 @@ def create_app(
     app.state.leave_service = leave_service
     app.state.leave_watchdog = leave_watchdog
     register_leave_routes(app, policies=leave_policies, leave=leave_service)
+    # Call coordination: teammates who set an assistant for the same call decide who brings it.
+    call_coordination = CallCoordinationService(database, CoordinationNotices(app.state.notifications), repository)
+    calendar_schedule.coordination = meeting_service.coordination = calendar_cache.coordination = call_coordination
+    app.state.call_coordination = call_coordination
+    register_call_coordination_routes(app, coordination=call_coordination, minutes_service=minutes_service)
+    balances = ProviderBalanceService(database, vault, app.state.notifications)
+    app.state.provider_balances = balances
+    service.credit_alerts = balances  # out-of-credit model calls raise an alert (see ProfileService)
+    meeting_prep.credit_alerts = balances  # and so do Exa 402s during research
+    register_balance_routes(app, balances=balances)
 
     @app.middleware("http")
     async def require_admin(request: Request, call_next):
@@ -375,13 +392,15 @@ def create_app(
                         or (method == "GET" and path in {"/v1/workspace/brief", "/v1/workspace/brief/documents"})
                         or (method in {"GET", "POST", "DELETE"} and re.fullmatch(r"/v1/documents(?:/url|/[0-9a-f-]{36}(?:/reindex)?)?", path))
                         or (method == "GET" and re.fullmatch(r"/v1/meetings/[0-9a-f-]+(?:/transcript|/leave)?", path))
+                        or member_route_allowed(method, path)
                     )
                     if not allowed:
                         return JSONResponse(status_code=403, content={"detail": "workspace role does not permit this action"})
                     if actor.role == "viewer" and path == "/v1/knowledge-bases" and method == "POST":
                         return JSONResponse(status_code=403, content={"detail": "viewers cannot create knowledge bases"})
                     match = re.fullmatch(r"/v1/meetings/([0-9a-f-]+)(?:/transcript|/leave)?", path)
-                    if match:
+                    # A meeting whose assistant covers this person (owner or sharing) is readable at any status.
+                    if match and not (method == "GET" and call_coordination.can_read(actor, match.group(1))):
                         try:
                             meeting = repository.get_meeting(UUID(match.group(1)))
                             if meeting.status is not MeetingStatus.COMPLETED or not meeting.knowledge_enabled or not meeting.knowledge_base_id:
@@ -1152,12 +1171,19 @@ def create_app(
         return Response(status_code=204)
 
     @app.post("/v1/meetings/{meeting_id}/join", response_model=MeetingPublic)
-    async def join_meeting(meeting_id: UUID, request: Request) -> MeetingPublic:
+    async def join_meeting(meeting_id: UUID, request: Request, coordination: str | None = None) -> MeetingPublic:
+        # coordination=own: send my own assistant although a teammate's is set for this call.
+        if coordination not in {None, "own"}:
+            raise HTTPException(status_code=422, detail="coordination must be 'own' when given")
         try:
             scheduled = calendar_schedule.get(request.state.actor, meeting_id)
             if scheduled and scheduled.status in {"pending", "joining"}:
                 raise HTTPException(status_code=409, detail="this event is scheduled; cancel its automatic join before joining manually")
-            return meeting_service.to_public(await meeting_service.join(meeting_id))
+            actor = request.state.actor
+            call_coordination.record_owner(actor.organization_id, meeting_id, actor.user_id)
+            joined = await meeting_service.join(meeting_id)
+            call_coordination.announce(actor, meeting_id, coordination)
+            return meeting_service.to_public(joined)
         except MEETING_EXCEPTIONS as exc:
             raise api_error(exc) from exc
 
@@ -1337,12 +1363,14 @@ def create_app(
             # Teams are expanded to their current members now, at send time.
             expansion = teams.expand(settings.internal_group_ids)
             internal = list(dict.fromkeys([*settings.internal_recipients, *expansion.emails]))
-            if not internal:
-                raise MinutesConflictError("configure at least one internal recipient or team before sending")
+            # Internal recipients are optional: participants alone are a valid audience
+            # (teammates are often already among them). Only an empty audience is refused.
             recipients = list(internal)
             if settings.send_to_participants:
                 recipients.extend(settings.participant_recipients)
             recipients = list(dict.fromkeys(recipients))
+            if not recipients:
+                raise MinutesConflictError("choose at least one recipient — a teammate, a team or the meeting participants")
             if len(recipients) > MAX_RECAP_RECIPIENTS:
                 raise MinutesConflictError(
                     f"this recap would go to {len(recipients)} addresses; the limit is {MAX_RECAP_RECIPIENTS} per send")

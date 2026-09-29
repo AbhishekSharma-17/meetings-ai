@@ -10,6 +10,7 @@ import { calendarProviderNames } from "./calendar-providers";
 import { DeliveryOptions, KnowledgeOptions, MinutesOptions, SourcePreview, type MomTemplate } from "./new-meeting-sections";
 import { readSetupDefaults, saveSetupDefaults } from "./new-meeting-defaults";
 import { chipProblem } from "./ui/chip-input";
+import { CallCoordinationPrompt, submitLabel, useCallCoordination } from "./call-coordination-prompt";
 import { Alert } from "./ui/feedback";
 import { formatDateTime, useTimePreferences } from "@/lib/time-preferences";
 import { WEEKDAY_DATE_TIME, wallTimeToDate, zoneAbbreviation } from "@/lib/time-format";
@@ -48,6 +49,8 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
   const [scheduledStart, setScheduledStart] = useState("");
   const [linkValue, setLinkValue] = useState("");
   const [linkError, setLinkError] = useState<string | null>(null);
+  // Teammates may already bring an assistant to this call: ask before creating a second one.
+  const coordination = useCallCoordination();
   // Scheduled start times are entered and shown in the person's effective zone, not the machine's.
   const { timeZone } = useTimePreferences();
   useEffect(() => {
@@ -80,7 +83,7 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
   }, [open]);
   if (!open) return null;
 
-  function close() { setError(null); setJoining(false); setSelectedBaseId(""); setNewBaseName(""); setTags([]); setKnowledgeEnabled(false); setMomTemplate("standard"); setMomInstructions(""); setMomFocus([]); setGroupIds([]); setJoinTiming("now"); setScheduledStart(""); setLinkValue(""); setLinkError(null); onClose(); }
+  function close() { setError(null); setJoining(false); setSelectedBaseId(""); setNewBaseName(""); setTags([]); setKnowledgeEnabled(false); setMomTemplate("standard"); setMomInstructions(""); setMomFocus([]); setGroupIds([]); setJoinTiming("now"); setScheduledStart(""); setLinkValue(""); setLinkError(null); coordination.reset(); onClose(); }
 
   async function resolveKnowledgeBaseId(): Promise<string | null> {
     if (!knowledgeEnabled) return null;
@@ -135,6 +138,13 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
         }
         scheduledStartIso = new Date(scheduledTime).toISOString();
       }
+      const callLink = calendarSelection ? calendarSelection.event.meeting_url : String(form.get("meeting-link") ?? "");
+      const callStart = calendarSelection ? calendarSelection.event.starts_at : scheduledStartIso;
+      if (await coordination.evaluate(callLink, callStart, calendarSelection ? calendarSelection.event.ends_at : null) === "ask") return;
+      if (coordination.sharingWith) {
+        onMeetingJoined(await coordination.share());
+        return;
+      }
       const knowledgeBaseId = await resolveKnowledgeBaseId();
       const input = {
         meetingUrl: String(form.get("meeting-link") ?? ""),
@@ -145,6 +155,7 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
         knowledgeBaseId,
         deliverySettings,
         momGuidance: { template: momTemplate, instructions: momInstructions.trim(), focus_fields: focusFields },
+        coordination: coordination.decision,
       };
       const remember = () => {
         if (!identity) return;
@@ -173,7 +184,7 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
       const meeting = await meetingsService.createMeeting(input);
       remember();
       try {
-        const joined = await meetingsService.joinMeeting(meeting.id);
+        const joined = await meetingsService.joinMeeting(meeting.id, coordination.decision);
         onMeetingJoined(joined);
       } catch (joinError) {
         // The API persists adapter failures on the meeting record. Open that
@@ -217,7 +228,7 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
               <Link2 aria-hidden="true" />
               <input id="meeting-link" name="meeting-link" type="url" required placeholder="https://meet.google.com/..." autoFocus defaultValue={source?.meeting_url ?? ""} readOnly={Boolean(source)} disabled={joining}
                 aria-invalid={linkError ? true : undefined} aria-describedby="meeting-link-hint"
-                onChange={(event) => { setLinkValue(event.target.value); setLinkError(null); }}
+                onChange={(event) => { setLinkValue(event.target.value); setLinkError(null); coordination.reset(); }}
                 onInvalid={(event) => { event.preventDefault(); event.currentTarget.focus(); setLinkError(event.currentTarget.value ? "Enter a full meeting link that starts with https://." : "Paste the meeting link to continue."); }} />
             </div>
             {linkError
@@ -245,7 +256,7 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
           </div>
           {joinTiming === "scheduled" ? <div className="field nm-schedule-field">
             <label htmlFor="scheduled-start">Meeting start</label>
-            <input id="scheduled-start" type="datetime-local" value={scheduledStart} onChange={(event) => setScheduledStart(event.target.value)} required disabled={joining} />
+            <input id="scheduled-start" type="datetime-local" value={scheduledStart} onChange={(event) => { setScheduledStart(event.target.value); coordination.reset(); }} required disabled={joining} />
             <p className="field-hint">{scheduledPreview ? <><span className="nm-schedule-preview">Joins {formatDateTime(scheduledPreview, WEEKDAY_DATE_TIME)}</span> · </> : null}Times are in {timeZone} ({zoneAbbreviation(timeZone)}). The assistant leaves once the meeting goes quiet.</p>
           </div> : null}
         </fieldset> : null}
@@ -266,10 +277,12 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
 
         <Alert tone="info" role="note" title="Disclosure is required." className="nm-disclosure">Before sending, confirm the host will announce: “Meetings AI has joined and will record and transcribe this conversation.”</Alert>
 
+        <CallCoordinationPrompt state={coordination} disabled={joining} />
+
         <div className="dialog-footer nm-footer">
           {error ? <p className="form-error nm-footer-error" role="alert">{error}</p> : null}
           <button className="button secondary" type="button" onClick={close} disabled={joining}>Cancel</button>
-          <button className="button primary" type="submit" disabled={joining}>{joining ? "Saving…" : willSchedule ? "Schedule assistant" : "Send assistant"}</button>
+          <button className="button primary" type="submit" disabled={joining}>{joining ? "Saving…" : submitLabel(coordination, Boolean(willSchedule), willSchedule ? "Schedule assistant" : "Send assistant")}</button>
         </div>
       </form>
     </Dialog.Popup>

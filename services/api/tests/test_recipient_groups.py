@@ -265,7 +265,7 @@ def test_team_only_audience_and_empty_audience(tmp_path) -> None:
         _approve_minutes(app, first["id"])
         refused = client.post(f"/v1/meetings/{first['id']}/minutes/send-configured")
         assert refused.status_code == 409
-        assert "internal recipient or team" in refused.json()["detail"]
+        assert "at least one recipient" in refused.json()["detail"]
 
         assert client.put(f"/v1/meetings/{first['id']}/delivery-settings", json={"internal_group_ids": [team["id"]]}).status_code == 200
         delivered = client.post(f"/v1/meetings/{first['id']}/minutes/send-configured").json()

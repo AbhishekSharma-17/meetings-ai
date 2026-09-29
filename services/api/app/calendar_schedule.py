@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, date, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from meetings_contracts import MeetingCreate, MeetingPublic
@@ -31,12 +31,15 @@ class ScheduleCreate(BaseModel):
     event_date: date | None = None
     timezone: str = "UTC"
     meeting: MeetingCreate
+    # "own": keep my own assistant although a teammate's is already set for this call.
+    coordination: Literal["own"] | None = None
 
 
 class ManualScheduleCreate(BaseModel):
     starts_at: datetime
     ends_at: datetime | None = None
     meeting: MeetingCreate
+    coordination: Literal["own"] | None = None
 
 
 class CalendarSchedulePublic(BaseModel):
@@ -80,6 +83,8 @@ class CalendarScheduleService:
     events: Any = NO_EVENTS
     # The calendar watcher (calendar_watch.CalendarWatchService); None when not wired.
     watcher: Any = None
+    # Call coordination (call_coordination.CallCoordinationService); a no-op unless wired.
+    coordination: Any = NO_EVENTS
 
     def __init__(self, database: Database, calendar: ComposioCalendar, meetings: MeetingService):
         self.database, self.calendar, self.meetings = database, calendar, meetings
@@ -139,29 +144,40 @@ class CalendarScheduleService:
             raise CalendarScheduleError("selected event is no longer available; scan the source again")
         return event
 
-    def _assert_not_imported(self, actor: Actor, event: CalendarEvent) -> None:
+    def _assert_not_imported(self, actor: Actor, event: CalendarEvent, coordination: str | None = None) -> None:
         with self.database.session_factory() as session:
             existing = session.execute(select(MeetingSourceRow).where(
                 MeetingSourceRow.organization_id == str(actor.organization_id),
                 MeetingSourceRow.meeting_url == event.meeting_url,
             )).scalars().all()
-            if any(abs((row.starts_at.replace(tzinfo=row.starts_at.tzinfo or UTC) - event.starts_at.astimezone(UTC)).total_seconds()) < 60 for row in existing):
-                raise CalendarScheduleError("this meeting link and start time already have a record in this workspace")
+            clashes = [row for row in existing if abs((row.starts_at.replace(tzinfo=row.starts_at.tzinfo or UTC) - event.starts_at.astimezone(UTC)).total_seconds()) < 60]
+            if not clashes:
+                return
+            # A teammate's record for the same call is fine once this person chose to bring their own
+            # assistant too (call coordination); their own duplicate never is.
+            if coordination == "own" and not any(
+                    self.coordination.owned_by(session, row.meeting_id, actor.user_id, actor.organization_id) for row in clashes):
+                return
+            raise CalendarScheduleError("this meeting link and start time already have a record in this workspace; "
+                                        "share that assistant or choose to send your own")
 
     async def create_now(self, actor: Actor, payload: ScheduleCreate) -> MeetingPublic:
         event = await self._verified_event(actor, payload)
         now = datetime.now(UTC)
         if event.starts_at.astimezone(UTC) > now + timedelta(minutes=1) or event.ends_at.astimezone(UTC) <= now:
             raise CalendarScheduleError("this event is not in progress; schedule the assistant for its start time")
-        self._assert_not_imported(actor, event)
+        self._assert_not_imported(actor, event, payload.coordination)
         meeting = self.meetings.create(payload.meeting.model_copy(update={
             "meeting_url": event.meeting_url, "title": payload.meeting.title or event.title,
         }))
         self._save_source(actor, meeting.id, event)
+        self.coordination.record_owner(actor.organization_id, meeting.id, actor.user_id)
         try:
-            return self.meetings.to_public(await self.meetings.join(meeting.id))
+            joined = self.meetings.to_public(await self.meetings.join(meeting.id))
         except VexaAPIError:
             return self.meetings.to_public(self.meetings.repository.get_meeting(meeting.id))
+        self.coordination.announce(actor, meeting.id, payload.coordination)
+        return joined
 
     async def create(self, actor: Actor, payload: ScheduleCreate) -> tuple[CalendarSchedulePublic, MeetingPublic]:
         # Never trust the event URL or start time posted by the browser. Re-read
@@ -170,7 +186,7 @@ class CalendarScheduleService:
         now = datetime.now(UTC)
         if event.starts_at.astimezone(UTC) <= now + timedelta(minutes=1):
             raise CalendarScheduleError("this meeting starts too soon to schedule; use Send assistant now")
-        self._assert_not_imported(actor, event)
+        self._assert_not_imported(actor, event, payload.coordination)
         with self.database.session_factory() as session:
             existing = session.execute(select(CalendarScheduleRow).where(
                 CalendarScheduleRow.organization_id == str(actor.organization_id),
@@ -197,6 +213,7 @@ class CalendarScheduleService:
             )
             session.add(row)
         self.events.schedule_created(actor.organization_id, meeting.id, meeting.title, event.starts_at)
+        self.coordination.announce(actor, meeting.id, payload.coordination)
         return _public(row), self.meetings.to_public(meeting)
 
     def create_manual(self, actor: Actor, payload: ManualScheduleCreate) -> tuple[CalendarSchedulePublic, MeetingPublic]:
@@ -222,6 +239,7 @@ class CalendarScheduleService:
             )
             session.add(row)
         self.events.schedule_created(actor.organization_id, meeting.id, meeting.title, starts_at)
+        self.coordination.announce(actor, meeting.id, payload.coordination)
         return _public(row), self.meetings.to_public(meeting)
 
     def cancel(self, actor: Actor, meeting_id: UUID) -> CalendarSchedulePublic:
@@ -257,6 +275,17 @@ class CalendarScheduleService:
                 return None
             return _utc(row.starts_at), _utc(row.ends_at)
 
+    def _stand_aside(self, meeting_id: str, now: datetime) -> bool:
+        """Never double-join a call: skip a handed-over record or the same person's duplicate."""
+        reason = self.coordination.join_guard(meeting_id)
+        if not reason:
+            return False
+        with self.database.session_factory.begin() as session:
+            session.execute(update(CalendarScheduleRow).where(
+                CalendarScheduleRow.meeting_id == meeting_id, CalendarScheduleRow.status == "pending",
+            ).values(status="cancelled", last_error=reason, updated_at=now))
+        return True
+
     async def tick(self) -> None:
         now = datetime.now(UTC)
         self.events.schedule_reminders(now)
@@ -281,6 +310,8 @@ class CalendarScheduleService:
                         CalendarScheduleRow.status == "pending",
                     ).values(status="missed", last_error="scheduled start was missed; use a fresh meeting link to join manually", updated_at=now))
                 self.events.schedule_missed(organization_id, meeting_id)
+                continue
+            if self._stand_aside(meeting_id, now):
                 continue
             with self.database.session_factory.begin() as session:
                 claimed = session.execute(update(CalendarScheduleRow).where(

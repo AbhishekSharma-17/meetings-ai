@@ -20,6 +20,7 @@ from .accounts import Actor
 from .calendar_changes import first_moves
 from .composio_calendar import CalendarEvent, CalendarError, CalendarInvitee, ComposioCalendar, calendar_date_window
 from .database import CalendarEventCacheRow, CalendarSyncStateRow, Database, KnowledgeDocumentRow, MeetingPrepInputRow, MeetingPrepRow
+from .notification_events import NO_EVENTS
 
 
 class CalendarSyncRequest(BaseModel):
@@ -163,6 +164,8 @@ def rekey_moved_rows(session: Session, organization_id: str, user_id: str, conne
 class CalendarCacheService:
     # Receives re-keyed (moved) events after a manual sync; set to the calendar watcher in create_app.
     changes: Any = _NoChangeHook()
+    # Call coordination: heads-ups about teammates' assistants for synced calls; a no-op unless wired.
+    coordination: Any = NO_EVENTS
 
     def __init__(self, database: Database, calendar: ComposioCalendar) -> None:
         self.database = database
@@ -333,5 +336,7 @@ class CalendarCacheService:
                     state.truncated = found.truncated
             if moves:
                 await self._announce_moves(actor, connection_id, moves)
+        # Teammates' assistants for calls on this calendar (call coordination; failure-safe).
+        self.coordination.after_sync(actor)
         snapshot = self.list(actor, request.start_date, request.end_date, timezone)
         return CalendarSyncResponse(**snapshot.model_dump(), errors=errors)

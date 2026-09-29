@@ -10,6 +10,7 @@ import { MinutesPanel } from "./minutes-panel";
 import { MeetingTranscript, namedSpeakersOf, relativeTime, transcriptSeconds } from "./meeting-transcript";
 import { MeetingPeopleCard } from "./meeting-people-card";
 import { MeetingKnowledgeSettings } from "./meeting-knowledge-settings";
+import { CallCoordinationPanel } from "./call-coordination-panel";
 import { MeetingDetailsCard, MeetingDangerZone, MeetingSourceCard, formatTimestamp } from "./meeting-record-cards";
 import { PageHeader } from "./ui/page-header";
 import { LastChecked, MovedFrom, RescheduledBadge, ScheduleChangesCard } from "./calendar-change-history";
@@ -272,6 +273,7 @@ export function MeetingDetailScreen({ meetingId, focusSegmentId, backLabel = "Al
         <MeetingTranscript meetingTitle={meeting.title} assistantName={meeting.botName} segments={segments} focusSegmentId={focusSegmentId} isPolling={pollableStatuses.has(meeting.status)} isLive={meeting.status === "live"} saving={savingSpeaker} onSaveSpeaker={saveSpeaker} onDownload={downloadTranscript} />
       </div>
       <aside className="record-side" aria-label="Meeting information">
+        <CallCoordinationPanel meetingId={meetingId} reloadKey={`${meeting.status}:${schedule?.status ?? ""}`} onChanged={() => void meetingsService.getCalendarSchedule(meetingId).then(setSchedule).catch(() => undefined)} />
         <MeetingDetailsCard meeting={meeting} route={transcriptionRoute} />
         <MeetingPeopleCard meetingId={meetingId} participants={participants} assistantName={meeting.botName} namedSpeakers={namedSpeakers} speakerIdentities={speakerIdentities} source={source} onSaveIdentity={saveIdentity} onIdentitiesSaved={setSpeakerIdentities} />
         {source ? <MeetingSourceCard source={source} /> : null}

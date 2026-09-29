@@ -53,6 +53,8 @@ class ProviderProfileService:
         self.repository = repository
         self.usage = usage
         self.vault = vault
+        # Set by create_app: raises an owner alert when a call fails for lack of provider credit.
+        self.credit_alerts: object | None = None
         self.adapters: dict[ProviderType, ProviderAdapter] = {
             ProviderType.OPENAI: OpenAIAdapter(),
             ProviderType.OPENAI_COMPATIBLE: OpenAICompatibleAdapter(),
@@ -219,6 +221,8 @@ class ProviderProfileService:
         if self.usage is not None and hasattr(self.usage, "record_failure"):
             self.usage.record_failure(profile, metadata, kind=kind, model=profile.models.get(capability),
                                       error=error, duration_ms=_elapsed_ms(started))
+        if self.credit_alerts is not None:
+            self.credit_alerts.observe_profile_failure(profile, error, kind)
 
     def _record_key_use(self, profile: ProviderProfile) -> None:
         if self.vault is not None and profile.credential_id is not None:

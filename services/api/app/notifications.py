@@ -26,6 +26,7 @@ from .accounts import Actor
 from .database import (
     CalendarScheduleRow,
     Database,
+    MeetingCoverageRow,
     NotificationRow,
     OrganizationMembershipRow,
 )
@@ -185,24 +186,34 @@ class NotificationService:
             )).scalars().all()
         return sorted(set(rows))
 
-    def meeting_audience(self, organization_id: UUID | str, meeting_id: UUID | str) -> list[str]:
-        """Owners and admins, plus whoever scheduled the meeting's assistant (if still a member)."""
-        creator = None
+    def meeting_audience(self, organization_id: UUID | str, meeting_id: UUID | str, *,
+                         include_sharers: bool = True) -> list[str]:
+        """Owners and admins, whoever scheduled the meeting's assistant, and the teammates it covers
+        (call coordination: its owner and, with ``include_sharers``, people sharing its notes), if still members."""
+        people: list[str | None] = []
         try:
             with self.database.session_factory() as session:
                 row = session.get(CalendarScheduleRow, str(meeting_id))
                 if row is not None and row.organization_id == str(organization_id):
-                    creator = row.user_id
+                    people.append(row.user_id)
+                roles = ("owner", "sharing") if include_sharers else ("owner",)
+                people.extend(session.execute(select(MeetingCoverageRow.user_id).where(
+                    MeetingCoverageRow.meeting_id == str(meeting_id),
+                    MeetingCoverageRow.organization_id == str(organization_id),
+                    MeetingCoverageRow.role.in_(roles),
+                    MeetingCoverageRow.decision.is_distinct_from("handed_over"),
+                )).scalars().all())
         except Exception:
             logger.exception("could not resolve meeting creator for notifications")
-        return self.recipients(organization_id, user_ids=[creator], roles=ADMIN_ROLES)
+        return self.recipients(organization_id, user_ids=people, roles=ADMIN_ROLES)
 
     def notify_meeting(self, organization_id: UUID | str, meeting_id: UUID | str, *, kind: str,
                        severity: Severity, title: PersonalText, body: PersonalText | None = None,
                        dedupe_key: str | None = None) -> int:
         """Notify the meeting audience with a link to the meeting detail screen."""
         try:
-            audience = self.meeting_audience(organization_id, meeting_id)
+            # Sharers read approved minutes only, so draft-minutes news goes to the owner and admins.
+            audience = self.meeting_audience(organization_id, meeting_id, include_sharers=not kind.startswith("minutes."))
         except Exception:
             logger.exception("could not resolve meeting audience")
             return 0

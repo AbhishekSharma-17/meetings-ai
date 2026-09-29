@@ -14,6 +14,7 @@ import { useCalendarConnect } from "./use-calendar-connect";
 import { entryMatches, findEntry, mergeCalendarEvents, type CalendarEntry } from "./calendar-events";
 import { FilterInput } from "./scroll-panel";
 import { DayAgenda, EventDetail, MonthGrid, dayKey, eventDay } from "./calendar-month";
+import { CalendarCoordinationMark, EventCoordination, useCalendarCoordination } from "./coordination-chips";
 import { calendarProviderNames } from "./calendar-providers";
 import { formatDateTime, formatDayHeading, todayKey, useTimePreferences } from "@/lib/time-preferences";
 import { Alert } from "./ui/feedback";
@@ -69,7 +70,7 @@ function formatDay(key: string): string {
   return validDate(key) ? formatDayHeading(key, shortDate) : "—";
 }
 
-export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onPreferredConnectionApplied, canSchedule = true, onChoose, onPrepare, onNewMeeting }: {
+export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onPreferredConnectionApplied, canSchedule = true, onChoose, onPrepare, onNewMeeting, onOpenMeeting }: {
   calendarIdentity: string;
   preferredConnectionId?: string | null;
   onPreferredConnectionApplied?(): void;
@@ -78,6 +79,8 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
   onPrepare(event: CachedCalendarEvent): void;
   /** Optional: shows a "New meeting" action in the header for people who can schedule. */
   onNewMeeting?(): void;
+  /** Opens a meeting record (a teammate's assistant this person shares). */
+  onOpenMeeting?(id: string): void;
 }) {
   const storageKey = `meetings-ai:calendar-view:${calendarIdentity}`;
   const [initial] = useState(() => initialPreferences(storageKey));
@@ -103,6 +106,8 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
   const autoRefreshKey = useRef<string | null>(null);
   const rangeDays = (Date.parse(`${endDate}T00:00:00Z`) - Date.parse(`${startDate}T00:00:00Z`)) / 86_400_000 + 1;
   const rangeValid = Number.isFinite(rangeDays) && rangeDays >= 1 && rangeDays <= 90;
+  // Teammates' assistants for calls on this calendar (who brings the assistant).
+  const coordination = useCalendarCoordination(startDate, endDate, snapshot.syncs.map((item) => item.last_synced_at).join("|"));
 
   useEffect(() => {
     if (preferredConnectionId) onPreferredConnectionApplied?.();
@@ -314,8 +319,9 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
         <div className="calendar-layout">
           <MonthGrid month={month} days={monthDays} selectedDay={selectedDay} entriesByDay={entriesByDay} connections={connections} onSelectDay={(key) => { setSelectedDay(key); setSelectedEvent(null); }} />
           <div className="calendar-side">
-            <DayAgenda selectedDay={selectedDay} dayEntries={dayEntries} rangeEntries={visibleEntries} selectedEventId={selectedEvent?.id ?? null} hasAccounts={active.length > 0} connections={connections} query={query} searchedCount={rangeEntries.length} onClearQuery={() => setQuery("")} onSelectEntry={(entry) => setSelectedEvent(entry.event)} onJumpToEntry={(entry) => { setSelectedDay(eventDay(entry.event.starts_at, timezone)); setSelectedEvent(entry.event); }} />
-            <EventDetail entry={selectedEntry} connections={connections} canSchedule={canSchedule} alreadyScheduled={selectedScheduled} onSchedule={() => { if (selectedEvent) scheduleSelected(selectedEvent); }} onPrepare={() => { if (selectedEvent) onPrepare(selectedEvent); }} />
+            <DayAgenda selectedDay={selectedDay} dayEntries={dayEntries} rangeEntries={visibleEntries} selectedEventId={selectedEvent?.id ?? null} hasAccounts={active.length > 0} connections={connections} query={query} searchedCount={rangeEntries.length} onClearQuery={() => setQuery("")} onSelectEntry={(entry) => setSelectedEvent(entry.event)} onJumpToEntry={(entry) => { setSelectedDay(eventDay(entry.event.starts_at, timezone)); setSelectedEvent(entry.event); }} markFor={(entry) => <CalendarCoordinationMark item={coordination.forEntry(entry)} />} />
+            <EventDetail entry={selectedEntry} connections={connections} canSchedule={canSchedule} alreadyScheduled={selectedScheduled} onSchedule={() => { if (selectedEvent) scheduleSelected(selectedEvent); }} onPrepare={() => { if (selectedEvent) onPrepare(selectedEvent); }}
+              coordination={<EventCoordination key={`coordination-${selectedEntry?.id ?? "none"}`} item={coordination.forEntry(selectedEntry)} onShared={() => void coordination.reload()} onOpenMeeting={onOpenMeeting} />} />
           </div>
         </div>
       </Tabs.Panel>

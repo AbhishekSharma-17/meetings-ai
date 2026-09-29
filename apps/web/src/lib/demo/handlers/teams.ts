@@ -110,8 +110,8 @@ function sendConfigured(store: DemoStore, id: string): Response {
   const settings = deliveryOf(store, id);
   const used = teamsOf(store).filter((team) => settings.internal_group_ids?.includes(team.id)).map((team) => publicTeam(store, team));
   const internal = [...new Set([...settings.internal_recipients, ...used.flatMap((team) => team.members.filter((member) => member.active).map((member) => member.email))])];
-  if (!internal.length) return problem(409, "configure at least one internal recipient or team before sending");
   const to = [...new Set([...internal, ...(settings.send_to_participants ? settings.participant_recipients : [])])];
+  if (!to.length) return problem(409, "choose at least one recipient — a teammate, a team or the meeting participants");
   const now = new Date().toISOString();
   store.minutes = { ...store.minutes, [id]: { ...minutes, status: "sent", sent_at: now, updated_at: now } };
   notify(`Demo: no email was sent. In a real workspace the approved recap would go to ${to.length} recipient${to.length === 1 ? "" : "s"}${used.length ? `, including ${used.map((team) => team.name).join(" and ")}` : ""}.`);

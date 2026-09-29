@@ -44,13 +44,13 @@ export function RecapDeliveryCard({ recipients, participantRecipients, sharePart
 }) {
   return <section className="card mom-delivery" aria-labelledby="mom-delivery-title">
     <div className="card-header">
-      <div><h2 id="mom-delivery-title">Send approved recap</h2><p>Only this approved version is sent. Participants receive it only if you turn that on.</p></div>
+      <div><h2 id="mom-delivery-title">Send approved recap</h2><p>Only this approved version is sent. Choose teammates, a team, the participants, or any mix. Participants receive it only if you turn that on.</p></div>
     </div>
     <div className="card-body form-stack">
       {!resendStatus?.can_attempt_send ? <Alert tone="warning" role="status">{senderProblem(resendStatus, resendStatusError)}</Alert>
         : <p className="field-hint" role="status">Sender: {resendStatus.sender}. Domain verification is confirmed only when Resend accepts a send.</p>}
       <div className="field-row">
-        <TeamRecipientChips id="mom-internal-recipients" label="Internal team recipients" value={toList(recipients)} onChange={(list) => onRecipientsChange(toText(list))}
+        <TeamRecipientChips id="mom-internal-recipients" label="Internal team recipients" labelSuffix={<span className="optional">optional</span>} value={toList(recipients)} onChange={(list) => onRecipientsChange(toText(list))}
           groupIds={groupIds} onGroupIdsChange={onGroupIdsChange ?? (() => undefined)} teams={teams} members={members}
           placeholder={teams.length ? "team@company.com or @team" : "team@company.com"} />
         <EmailChips id="mom-participant-recipients" label="Participant recipients" labelSuffix={<span className="optional">optional</span>} value={toList(participantRecipients)} onChange={(list) => onParticipantRecipientsChange(toText(list))} placeholder="Exact addresses only" />

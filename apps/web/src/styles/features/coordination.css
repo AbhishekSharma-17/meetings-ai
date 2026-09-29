@@ -1,0 +1,49 @@
+/* Call coordination: who brings the assistant when teammates share a call. Layout only, tokens only. */
+.coordination-prompt { display:grid; gap:12px; }
+.coordination-prompt .alert .lucide.coordination-inline-icon { position:static; display:inline-block; width:14px; height:14px; margin:0 4px -2px 0; vertical-align:baseline; }
+.coordination-choices { display:grid; gap:8px; min-width:0; margin:0; padding:0; border:0; }
+.coordination-choices .choice-card { min-width:0; }
+.coordination-choices .choice-card > span { min-width:0; }
+.coordination-recommended { display:inline-flex; align-items:center; height:18px; margin-left:8px; padding:0 6px; border:1px solid var(--brand-border); border-radius:999px; background:var(--brand-subtle); color:var(--brand); font-size:11px; font-weight:500; vertical-align:1px; }
+.coordination-recap { margin:-2px 0 2px 38px; font-size:13px; }
+
+.coordination-body { display:grid; gap:12px; }
+.coordination-bringer { display:flex; align-items:flex-start; gap:10px; min-width:0; }
+.coordination-bringer .avatar { flex:none; margin-top:1px; }
+.coordination-bringer p { flex:1; min-width:0; margin:0; font-size:13px; line-height:1.5; overflow-wrap:anywhere; }
+.coordination-bringer p b { font-weight:500; color:var(--foreground); }
+.coordination-bringer small { color:var(--text-secondary); font-size:13px; }
+.coordination-bringer .badge { margin-left:auto; }
+.coordination-note { display:flex; align-items:flex-start; gap:6px; margin:0; color:var(--text-secondary); font-size:13px; line-height:1.5; }
+.coordination-note .lucide { flex:none; width:15px; height:15px; margin-top:2px; color:var(--text-tertiary); }
+.coordination-others { display:grid; gap:8px; padding-top:10px; border-top:1px solid var(--border); }
+.coordination-others h3 { margin:0; font-size:12px; font-weight:500; color:var(--text-secondary); }
+.coordination-others ul { display:grid; gap:8px; margin:0; padding:0; list-style:none; }
+.coordination-others li { display:flex; align-items:center; gap:10px; min-width:0; flex-wrap:wrap; }
+.coordination-other-copy { display:grid; flex:1; min-width:140px; font-size:13px; line-height:1.4; }
+.coordination-other-copy b { font-weight:500; }
+.coordination-other-copy small { color:var(--text-secondary); font-size:12px; }
+.coordination-other-actions { display:flex; align-items:center; gap:6px; margin-left:auto; }
+.coordination-actions { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+.coordination-actions .check-label { font-size:13px; }
+
+.library-row-status .coordination-chip { max-width:220px; overflow:hidden; text-overflow:ellipsis; }
+.coordination-mark { display:inline-flex; align-items:center; gap:4px; margin-left:6px; padding:0 6px; height:18px; border:1px solid var(--info-border); border-radius:999px; background:var(--info-subtle); color:var(--info-text); font-size:11px; font-weight:500; white-space:nowrap; }
+.coordination-mark.warn { border-color:var(--warning-border); background:var(--warning-subtle); color:var(--warning-text); }
+.coordination-event { display:grid; gap:10px; }
+.coordination-event .text-button { justify-self:start; }
+
+.shared-meeting { display:grid; gap:16px; }
+.shared-meeting .page-header { margin-bottom:0; }
+.shared-minutes { display:grid; gap:8px; font-size:14px; line-height:1.55; }
+.shared-minutes h3 { margin:6px 0 0; font-size:13px; font-weight:500; color:var(--text-secondary); }
+.shared-minutes ul { margin:0; padding-left:18px; }
+.shared-minutes small { color:var(--text-secondary); }
+
+@media (max-width: 640px) {
+  .coordination-recap { margin-left:0; }
+  .library-row-status .coordination-chip { max-width:160px; }
+  .coordination-bringer { flex-wrap:wrap; }
+  .coordination-bringer .badge { margin-left:32px; }
+  .coordination-other-actions { width:100%; margin-left:32px; }
+}

@@ -191,18 +191,8 @@
 .brief-document-copy b { font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .brief-document-copy small { color:var(--text-secondary); }
 .retention-footer-hint { margin-right:auto; }
-.ops-groups { display:grid; gap:16px; }
-.mini-stats-title { margin-bottom:8px; color:var(--text-tertiary); font-size:12px; font-weight:500; }
-.mini-stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; }
-.mini-stats > div { padding:10px 14px; margin:0 -1px -1px 0; border-right:1px solid var(--border); border-bottom:1px solid var(--border); min-width:0; }
-.mini-stats dt { color:var(--text-secondary); font-size:12px; line-height:1.4; }
-.mini-stats dd { margin-top:2px; font-size:17px; font-weight:600; font-variant-numeric:tabular-nums; }
-.mini-stats > div[data-alert=true] dd { color:var(--destructive-text); }
 .cell-stack { display:grid; gap:1px; }
 .cell-stack small { color:var(--text-tertiary); }
-.ops-table-block { display:grid; gap:8px; }
-.ops-table-block .mini-stats-title { margin-bottom:0; }
-.ops-table { border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; }
 
 @media (max-width: 1100px) {
   .settings-layout { grid-template-columns:minmax(0,1fr); }
@@ -302,7 +292,6 @@
 .scroll-panel:has(thead)::before { top:36px; }
 .scroll-panel .data-table thead th { position:sticky; top:0; z-index:2; }
 .scroll-panel:last-child, .scroll-panel:last-child .scroll-panel-viewport { border-radius:0 0 var(--radius-lg) var(--radius-lg); }
-.ops-table.scroll-panel .scroll-panel-viewport, .ops-table.scroll-panel { border-radius:var(--radius); }
 .scroll-panel.obs-table { overflow:visible; }
 
 /* ---------- Recent activity feed ---------- */
@@ -537,3 +526,6 @@
   .team-row-actions { grid-column:2 / -1; justify-content:flex-start; }
   .team-row-error { grid-column:1 / -1; }
 }
+
+.settings-nav-external { display:flex; align-items:center; justify-content:space-between; gap:6px; margin-top:8px; padding-top:10px; border-top:1px solid var(--border); color:var(--text-secondary); }
+.settings-nav-external svg { width:14px; height:14px; flex:none; }

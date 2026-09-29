@@ -125,3 +125,22 @@ test("a profile photo can be uploaded, shown and removed", async ({ page }) => {
   await expect(identity.locator(".avatar")).toHaveText("WO");
   await expect(page.getByRole("button", { name: "Upload photo" })).toBeVisible();
 });
+
+test("workspace settings link to Observability instead of repeating its numbers", async ({ page }) => {
+  await mockApi(page, async (route, pathname) => {
+    if (pathname === "/v1/auth/me") { await route.fulfill({ json: account(null) }); return true; }
+    if (pathname === "/v1/workspaces") { await route.fulfill({ json: [{ id: ORG, slug: "genai-protos", display_name: "GenAI Protos", role: "owner", is_default: false }] }); return true; }
+    if (pathname === "/v1/workspace/usage") {
+      await route.fulfill({ json: { total_requests: 0, input_tokens: 0, output_tokens: 0, estimated_usd: 0, unpriced_requests: 0, failed_requests: 0, by_meeting: [], by_purpose: [], by_provider: [], by_kind: [], by_model: [], recent: [] } });
+      return true;
+    }
+    return false;
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: /Workspace owner owner@example.test/ }).click();
+  await page.getByRole("button", { name: "Organization & people" }).click();
+  await expect(page.getByRole("region", { name: "Your workspaces" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Operations" })).toHaveCount(0);
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: /Usage, spend & job health/ }).click();
+  await expect(page.getByRole("heading", { name: "Pipeline status" })).toBeVisible();
+});

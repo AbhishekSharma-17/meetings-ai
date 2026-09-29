@@ -1,0 +1,78 @@
+/* Provider credit balances: key-row balance line, billing keys section, Observability "Provider credits". Tokens only. */
+
+/* ----- Chip ----- */
+.balance-chip { max-width:100%; gap:6px; white-space:normal; line-height:1.35; }
+.balance-chip > span:last-child { min-width:0; }
+.balance-chip .provider-brand.xs { color:inherit; }
+
+/* ----- Balance line under a saved key (AI providers) ----- */
+.provider-key-balance { display:grid; gap:4px; margin:-4px 0 6px; padding:0 14px 0 62px; }
+.provider-key-balance-main { display:flex; align-items:center; flex-wrap:wrap; gap:6px 12px; min-width:0; }
+.provider-key-balance-meta { display:inline-flex; align-items:center; flex-wrap:wrap; gap:4px 12px; color:var(--text-tertiary); font-size:12px; }
+.provider-key-balance-spend { color:var(--text-secondary); font-variant-numeric:tabular-nums; }
+.provider-key-balance-meta .text-button { font-size:12px; }
+.provider-key-balance-meta .text-button .lucide { width:12px; height:12px; }
+.provider-key-balance-refresh.icon-button { width:26px; height:26px; margin-left:auto; }
+.provider-key-balance-refresh .lucide { width:14px; height:14px; }
+.provider-key-balance-note { margin:0; color:var(--text-secondary); font-size:12px; line-height:1.45; max-width:72ch; }
+
+/* ----- Billing keys section inside the API keys card ----- */
+.billing-keys { display:grid; gap:6px; padding:12px 6px 10px; border-top:1px solid var(--border); }
+.billing-keys-header { display:flex; align-items:center; gap:12px 16px; padding:4px 14px; }
+.billing-keys-header > div { flex:1 1 auto; min-width:0; }
+.billing-keys-header h3 { margin:0; font-size:14px; font-weight:600; }
+.billing-keys-header p { margin:2px 0 0; color:var(--text-secondary); font-size:12.5px; }
+.billing-keys-header .button { flex:none; }
+.billing-keys-missing { list-style:none; display:grid; gap:6px; margin:0; padding:4px 14px 2px 62px; color:var(--text-secondary); font-size:12.5px; line-height:1.45; }
+.billing-keys-missing li { display:flex; align-items:flex-start; gap:8px; }
+.billing-keys-missing li .provider-brand.xs { margin-top:2px; color:var(--text-tertiary); }
+.billing-keys-missing b { color:var(--foreground); font-weight:500; }
+.billing-key-choices { display:grid; gap:8px; margin:0; padding:0; border:0; min-width:0; }
+.billing-key-choices legend { margin-bottom:6px; padding:0; }
+.billing-key-choices .choice-card { align-items:center; }
+.billing-key-choices .choice-card input { margin-top:0; }
+.billing-key-added { color:var(--text-tertiary); font-style:normal; font-weight:400; }
+
+/* ----- Observability: Provider credits ----- */
+.provider-credits-actions { display:flex; align-items:center; gap:8px; }
+.provider-credits-state { padding:14px 20px 18px; }
+.provider-credits-problem { margin:10px 20px 0; }
+.provider-credits-sort { flex:0 0 210px; }
+.provider-credits-list { list-style:none; margin:0; padding:0; }
+.provider-credit { display:grid; grid-template-columns:minmax(160px,1.1fr) minmax(220px,1.6fr) minmax(260px,1.4fr) auto; align-items:center; gap:10px 20px; padding:12px 20px; border-bottom:1px solid var(--border); }
+.provider-credit:last-child { border-bottom:0; }
+.provider-credit-key { display:flex; align-items:center; gap:10px; min-width:0; }
+.provider-credit-key > span:last-child { display:grid; min-width:0; }
+.provider-credit-key b { font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.provider-credit-key small { color:var(--text-secondary); font-size:12px; }
+.provider-credit-status { display:grid; justify-items:start; gap:4px; min-width:0; }
+.provider-credit-status small { color:var(--text-secondary); font-size:12px; line-height:1.45; }
+.provider-credit-figures { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:8px; margin:0; }
+.provider-credit-figures div { display:grid; gap:1px; min-width:0; }
+.provider-credit-figures dt { color:var(--text-tertiary); font-size:11.5px; }
+.provider-credit-figures dd { margin:0; font-variant-numeric:tabular-nums; font-weight:500; }
+.provider-credit[data-state=low] .provider-credit-figures div:first-child dd { color:var(--warning-text); }
+.provider-credit[data-state=exhausted] .provider-credit-figures div:first-child dd { color:var(--destructive-text); }
+.provider-credit-checked { display:grid; justify-items:end; gap:2px; color:var(--text-tertiary); font-size:12px; white-space:nowrap; }
+.provider-credit-checked .text-button { font-size:12px; }
+.provider-credits-footnote { margin:0; padding:10px 20px 14px; border-top:1px solid var(--border); }
+
+@media (max-width: 1100px) {
+  .provider-credit { grid-template-columns:minmax(0,1fr) minmax(0,1.3fr); }
+  .provider-credit-figures { grid-column:1; }
+  .provider-credit-checked { justify-items:end; }
+}
+@media (max-width: 640px) {
+  .provider-key-balance { padding:0 10px 0 10px; }
+  .provider-key-balance-refresh.icon-button { margin-left:0; }
+  .billing-keys-header { flex-wrap:wrap; padding:4px 10px; }
+  .billing-keys-header p { display:none; }
+  .billing-keys-missing { padding-left:10px; padding-right:10px; }
+  .provider-credits-actions { width:100%; justify-content:space-between; }
+  .provider-credits-sort { flex:1 1 auto; min-width:0; }
+  .provider-credit { grid-template-columns:minmax(0,1fr); gap:8px; padding:12px 16px; }
+  .provider-credit-figures { grid-column:auto; }
+  .provider-credit-checked { display:flex; justify-content:space-between; }
+  .provider-credits-state, .provider-credits-footnote { padding-left:16px; padding-right:16px; }
+  .provider-credits-problem { margin:10px 16px 0; }
+}

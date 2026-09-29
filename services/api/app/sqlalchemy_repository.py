@@ -32,6 +32,7 @@ from .database import (
     CalendarScheduleRow,
     MeetingSourceRow,
     MeetingLeaveStateRow,
+    MeetingCoverageRow,
     Database,
     EmailDeliveryRow,
     MeetingRow,
@@ -384,7 +385,7 @@ class SQLAlchemyRepository:
                 MeetingSpeakerIdentityRow, TranscriptReviewStateRow, MinutesSourceRow,
                 MeetingMinutesEvidenceRow, MeetingMinutesRow, MeetingDeliveryGroupRow,
                 EmailDeliveryGroupRow, EmailDeliveryRow,
-                MeetingTranscriptionRouteRow, MeetingLeaveStateRow, MeetingTenantRow,
+                MeetingTranscriptionRouteRow, MeetingLeaveStateRow, MeetingCoverageRow, MeetingTenantRow,
             ):
                 session.execute(delete(model).where(model.meeting_id == key))
             session.delete(row)

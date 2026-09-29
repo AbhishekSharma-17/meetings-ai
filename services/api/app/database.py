@@ -915,6 +915,29 @@ class MeetingLeaveStateRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class MeetingCoverageRow(Base):
+    """Who a meeting's assistant covers: its owner and teammates sharing its notes (v28).
+
+    ``owner`` is the person who scheduled or sent the assistant. ``sharing`` means this person
+    relies on the owner's assistant instead of bringing their own; it grants read access to the
+    meeting's status, transcript and approved minutes (never delete or delivery changes). An
+    owner row's ``decision`` records ``own`` (kept their own assistant although a teammate also
+    brings one) or ``handed_over`` (stood down in favour of ``handed_to_meeting_id``).
+    """
+
+    __tablename__ = "meeting_coverage"
+
+    meeting_id: Mapped[str] = mapped_column(String(36), ForeignKey("meetings.id"), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)  # owner | sharing
+    decision: Mapped[str | None] = mapped_column(String(20))  # own | handed_over | share
+    handed_to_meeting_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    receive_recap: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    decided_by: Mapped[str | None] = mapped_column(String(36))
+
+
 class SchemaVersionRow(Base):
     __tablename__ = "schema_version"
 
@@ -968,6 +991,7 @@ SCHEMA_TABLES_BY_VERSION: dict[int, tuple[str, ...]] = {
     25: ("account_tokens", "user_preferences", "organization_identities"),
     26: ("calendar_event_changes",),
     27: ("organization_leave_policies", "meeting_leave_state"),
+    28: ("meeting_coverage",),
 }
 
 SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
@@ -1035,6 +1059,7 @@ SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
     "calendar_event_changes": ("id", "organization_id", "user_id", "connection_id", "provider", "event_id", "meeting_id", "cache_event_id", "kind", "old_starts_at", "new_starts_at", "old_ends_at", "new_ends_at", "old_meeting_url", "new_meeting_url", "source", "detected_at"),
     "organization_leave_policies": ("organization_id", "silence_minutes", "quiet_after_end_minutes", "no_one_joined_minutes", "max_hours", "updated_by", "updated_at"),
     "meeting_leave_state": ("meeting_id", "organization_id", "keep_until", "kept_by", "warned_at", "warned_leave_at", "warned_reason", "end_reason", "ended_by", "ended_at", "quiet_since", "last_speech_at", "stop_attempts", "next_attempt_at", "last_error", "updated_at"),
+    "meeting_coverage": ("meeting_id", "user_id", "organization_id", "role", "decision", "handed_to_meeting_id", "receive_recap", "decided_at", "decided_by"),
 }
 
 
@@ -1117,7 +1142,7 @@ def _migrate_to_v22(connection) -> None:
 class Database:
     """Upgrades known schemas and rejects unknown or incomplete ones."""
 
-    SCHEMA_VERSION = 27
+    SCHEMA_VERSION = 28
 
     def __init__(self, url: str) -> None:
         engine_options: dict[str, object] = {"pool_pre_ping": True}

@@ -76,6 +76,9 @@ export const vaultProviderLabel: Record<VaultProviderType, string> = {
   openrouter: "OpenRouter",
   openai_compatible: "OpenAI-compatible",
   exa: "Exa web research",
+  openrouter_management: "OpenRouter management key (billing only)",
+  openai_admin: "OpenAI admin key (billing only)",
+  exa_service: "Exa service key (billing only)",
 };
 
 export const vaultProviderOptions: { value: VaultProviderType; label: string }[] = [

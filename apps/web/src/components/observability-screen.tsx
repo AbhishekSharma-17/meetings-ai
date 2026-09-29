@@ -15,6 +15,7 @@ import { StoragePanel } from "./storage-panel";
 import { RangePicker, rangeFor, type RangeChoice } from "./observability-range";
 import { formatCompact, formatDuration, formatUsd, providerLabel, purposeLabel } from "./usage-labels";
 import { UsageProviderName } from "./provider-brand-icons";
+import { ProviderCreditsCard } from "./observability-credits";
 
 type Tab = "overview" | "ledger" | "prep" | "storage";
 const tabs: Tab[] = ["overview", "ledger", "prep", "storage"];
@@ -61,7 +62,7 @@ export function ObservabilityScreen() {
         <Tabs.Tab value="prep"><BookOpenCheck aria-hidden="true" />Meeting prep</Tabs.Tab>
         <Tabs.Tab value="storage"><Database aria-hidden="true" />Data &amp; storage</Tabs.Tab>
       </Tabs.List>
-      <Tabs.Panel value="overview"><Overview usage={usage} operations={operations} people={people} accounts={accounts} accountsError={accountsError} meetings={meetings} /></Tabs.Panel>
+      <Tabs.Panel value="overview"><Overview usage={usage} operations={operations} people={people} accounts={accounts} accountsError={accountsError} meetings={meetings} refreshKey={refreshKey} /></Tabs.Panel>
       <Tabs.Panel value="ledger"><UsageLedger range={range} usage={usage} refreshKey={refreshKey} /></Tabs.Panel>
       <Tabs.Panel value="prep"><PrepUsagePanel range={range} usage={usage} refreshKey={refreshKey} /></Tabs.Panel>
       <Tabs.Panel value="storage"><StoragePanel refreshKey={refreshKey} /></Tabs.Panel>
@@ -69,9 +70,9 @@ export function ObservabilityScreen() {
   </section>;
 }
 
-function Overview({ usage, operations, people, accounts, accountsError, meetings }: {
+function Overview({ usage, operations, people, accounts, accountsError, meetings, refreshKey }: {
   usage: UsageSummaryDetail | null; operations: WorkspaceOperations | null; people: WorkspaceMember[];
-  accounts: WorkspaceCalendarConnection[]; accountsError: string | null; meetings: Meeting[];
+  accounts: WorkspaceCalendarConnection[]; accountsError: string | null; meetings: Meeting[]; refreshKey: number;
 }) {
   const failures = operations ? operations.failed_captures + operations.failed_mom_jobs + operations.failed_index_jobs + operations.failed_email_deliveries : 0;
   const dash = "—";
@@ -92,6 +93,7 @@ function Overview({ usage, operations, people, accounts, accountsError, meetings
       <Info aria-hidden="true" />
       <p>Estimates use published list prices and provider-reported usage — not an invoice. Unpriced calls, email, database and hosting are <b>not included</b>, so a zero estimate does not mean zero operating cost.</p>
     </div>
+    <ProviderCreditsCard refreshKey={refreshKey} />
     <div className="obs-grid">
       <SpendByKind rows={usage?.by_kind ?? []} />
       <UsageTable id="obs-provider" title="Cost by provider" description="Usage across connected providers." firstColumn="Provider" rows={usage?.by_provider ?? []} format={providerLabel} renderName={(name) => <UsageProviderName provider={name} />} empty="No provider usage recorded yet." />
