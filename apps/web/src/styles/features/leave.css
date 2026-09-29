@@ -1,0 +1,19 @@
+/* When the assistant leaves a call: settings card, in-call line, heads-up and ended line. */
+.leave-rules { display:grid; gap:4px; font-size:13px; line-height:1.55; }
+.leave-rules p:not(.field-hint) { color:var(--foreground); font-weight:500; }
+.leave-fields { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:18px 20px; }
+.leave-input { display:grid; grid-template-columns:96px auto; justify-content:start; align-items:center; gap:8px; }
+.field .leave-input input { width:100%; min-width:0; font-variant-numeric:tabular-nums; }
+.leave-input span { color:var(--text-secondary); font-size:13px; }
+.leave-preview { line-height:1.55; }
+.leave-line { display:flex; align-items:flex-start; gap:6px; margin-top:4px; color:var(--text-secondary); font-size:13px; line-height:1.5; }
+.leave-line .lucide { flex:none; width:15px; height:15px; margin-top:2px; color:var(--brand); }
+.record-call-copy p.leave-line { color:var(--text-secondary); font-size:13px; }
+.leave-banner .alert-actions { flex-wrap:wrap; }
+.leave-dialog { max-width:460px; }
+
+@media (max-width: 640px) {
+  .leave-fields { grid-template-columns:minmax(0, 1fr); }
+  .leave-banner { flex-wrap:wrap; }
+  .leave-banner .alert-actions { width:100%; }
+}

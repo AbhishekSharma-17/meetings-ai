@@ -754,3 +754,49 @@ export type TimePreferencesPayload = {
   detected_timezone: string | null;
   time_format: "auto" | "12h" | "24h";
 };
+
+/** When the assistant leaves a call (`/v1/workspace/leave-policy`). Minutes, except `max_hours`. */
+export type LeavePolicyValues = {
+  silence_minutes: number;
+  quiet_after_end_minutes: number;
+  no_one_joined_minutes: number;
+  max_hours: number;
+};
+
+export type LeavePolicy = LeavePolicyValues & {
+  /** The meeting-bot service ends every call after this many hours, whatever `max_hours` says. */
+  service_max_hours: number;
+  /** The safety cap in force: min(max_hours, service_max_hours). */
+  effective_max_hours: number;
+  configured: boolean;
+  can_edit: boolean;
+  updated_at: string | null;
+  defaults: LeavePolicyValues;
+  limits: Record<keyof LeavePolicyValues, [number, number]>;
+};
+
+export type LeaveReason =
+  | "ended_quiet_after_schedule" | "silent" | "no_one_joined" | "everyone_left" | "time_limit"
+  | "host_ended" | "user_stopped" | "not_admitted" | "capture_ended" | "capture_failed" | "bot_lost";
+
+/** A meeting's planned automatic leave (while in a call) or why it ended (`/v1/meetings/{id}/leave`). */
+export type MeetingLeave = {
+  meeting_id: string;
+  in_call: boolean;
+  policy: LeavePolicyValues;
+  effective_max_hours: number;
+  service_max_hours: number;
+  /** True when the meeting-bot service's limit (not the workspace setting) sets the safety cap. */
+  cap_is_service_limit: boolean;
+  joined_at: string | null;
+  scheduled_end: string | null;
+  last_speech_at: string | null;
+  safety_cap_at: string | null;
+  keep_until: string | null;
+  /** Owners/admins can make it leave; `can_keep` is false once keeping can't help (near the safety cap). */
+  can_manage: boolean;
+  can_keep: boolean;
+  next_leave: { leave_at: string; reason: LeaveReason; quiet_since: string | null; heads_up_sent: boolean } | null;
+  ended: { reason: LeaveReason; ended_by: "auto" | "user" | "host" | "vexa" | null; ended_at: string | null; quiet_since: string | null } | null;
+  last_error: string | null;
+};

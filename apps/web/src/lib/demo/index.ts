@@ -3,6 +3,7 @@ import { filterLedger, ledgerCsv } from "./fixtures/usage";
 import { registerActivity } from "./handlers/activity";
 import { registerCalendar } from "./handlers/calendar";
 import { registerKnowledge } from "./handlers/knowledge";
+import { registerLeave } from "./handlers/leave";
 import { registerPreferences } from "./handlers/preferences";
 import { registerMeetings } from "./handlers/meetings";
 import { registerMinutes } from "./handlers/minutes";
@@ -29,7 +30,7 @@ let installed = false;
 function buildRouter(): DemoRouter {
   const router = new DemoRouter();
   // Teams first: its delivery-settings and send-configured routes understand internal_group_ids.
-  for (const register of [registerTeams, registerWorkspace, registerMeetings, registerMinutes, registerSpeakers, registerCalendar, registerPrep, registerKnowledge, registerProviders, registerUsage, registerActivity, registerPreferences]) register(router);
+  for (const register of [registerTeams, registerLeave, registerWorkspace, registerMeetings, registerMinutes, registerSpeakers, registerCalendar, registerPrep, registerKnowledge, registerProviders, registerUsage, registerActivity, registerPreferences]) register(router);
   return router;
 }
 

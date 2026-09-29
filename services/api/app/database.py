@@ -874,6 +874,47 @@ class CalendarEventChangeRow(Base):
     detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 
 
+class OrganizationLeavePolicyRow(Base):
+    """When the assistant leaves a call on its own (per workspace; defaults apply until saved)."""
+
+    __tablename__ = "organization_leave_policies"
+
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), primary_key=True)
+    silence_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    quiet_after_end_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    no_one_joined_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_hours: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_by: Mapped[str | None] = mapped_column(String(36))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class MeetingLeaveStateRow(Base):
+    """Per-meeting auto-leave bookkeeping: keep-in-call, the heads-up, and why the call ended."""
+
+    __tablename__ = "meeting_leave_state"
+
+    meeting_id: Mapped[str] = mapped_column(String(36), ForeignKey("meetings.id"), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+    keep_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    kept_by: Mapped[str | None] = mapped_column(String(36))
+    warned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The planned leave time the heads-up was sent for; a new plan (speech resumed, kept) warns again.
+    warned_leave_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    warned_reason: Mapped[str | None] = mapped_column(String(40))
+    end_reason: Mapped[str | None] = mapped_column(String(40))
+    ended_by: Mapped[str | None] = mapped_column(String(10))  # auto | user | host | vexa
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The quiet-since moment behind an automatic leave, for the "ended because…" sentence.
+    quiet_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Latest speech ever seen for this bot session; only moves forward, so a transient empty
+    # transcript from Vexa can never look like silence.
+    last_speech_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    stop_attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class SchemaVersionRow(Base):
     __tablename__ = "schema_version"
 
@@ -926,6 +967,7 @@ SCHEMA_TABLES_BY_VERSION: dict[int, tuple[str, ...]] = {
     ),
     25: ("account_tokens", "user_preferences", "organization_identities"),
     26: ("calendar_event_changes",),
+    27: ("organization_leave_policies", "meeting_leave_state"),
 }
 
 SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
@@ -991,6 +1033,8 @@ SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
     "user_preferences": ("user_id", "timezone", "detected_timezone", "time_format", "updated_at"),
     "organization_identities": ("organization_id", "company_name", "aliases", "domains", "updated_by", "updated_at"),
     "calendar_event_changes": ("id", "organization_id", "user_id", "connection_id", "provider", "event_id", "meeting_id", "cache_event_id", "kind", "old_starts_at", "new_starts_at", "old_ends_at", "new_ends_at", "old_meeting_url", "new_meeting_url", "source", "detected_at"),
+    "organization_leave_policies": ("organization_id", "silence_minutes", "quiet_after_end_minutes", "no_one_joined_minutes", "max_hours", "updated_by", "updated_at"),
+    "meeting_leave_state": ("meeting_id", "organization_id", "keep_until", "kept_by", "warned_at", "warned_leave_at", "warned_reason", "end_reason", "ended_by", "ended_at", "quiet_since", "last_speech_at", "stop_attempts", "next_attempt_at", "last_error", "updated_at"),
 }
 
 
@@ -1073,7 +1117,7 @@ def _migrate_to_v22(connection) -> None:
 class Database:
     """Upgrades known schemas and rejects unknown or incomplete ones."""
 
-    SCHEMA_VERSION = 26
+    SCHEMA_VERSION = 27
 
     def __init__(self, url: str) -> None:
         engine_options: dict[str, object] = {"pool_pre_ping": True}

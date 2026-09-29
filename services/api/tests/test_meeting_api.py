@@ -25,6 +25,12 @@ def test_meeting_vertical_slice_with_mocked_vexa() -> None:
                 "transcribe_enabled": True,
                 "recording_enabled": False,
                 "language": "en",
+                # Workspace leave policy defaults (ms): silence 10 min, no one joined 10 min, 4 h cap.
+                "automatic_leave": {
+                    "everyone_left_timeout": 600_000,
+                    "no_one_joined_timeout": 600_000,
+                    "max_bot_time": 14_400_000,
+                },
             }
             return httpx.Response(
                 201,

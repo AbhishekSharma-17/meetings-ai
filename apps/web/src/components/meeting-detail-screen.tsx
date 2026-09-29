@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
-import { ExternalLink, LogIn, RefreshCw, Square } from "lucide-react";
-import { meetingsService } from "@/lib/meetings-service";
+import { ExternalLink, LogIn, LogOut, RefreshCw } from "lucide-react";
+import { leaveService, meetingsService } from "@/lib/meetings-service";
 import { meetingStatusLabel } from "@/lib/meeting-status";
 import type { CalendarEvent, CalendarSchedule, MeetingDetail, MeetingParticipants, SpeakerIdentity, TranscriptSegment, TranscriptionRoute } from "@/lib/types";
 import { MinutesPanel } from "./minutes-panel";
@@ -14,6 +14,7 @@ import { MeetingDetailsCard, MeetingDangerZone, MeetingSourceCard, formatTimesta
 import { PageHeader } from "./ui/page-header";
 import { LastChecked, MovedFrom, RescheduledBadge, ScheduleChangesCard } from "./calendar-change-history";
 import { Alert, LoadingRow, Skeleton } from "./ui/feedback";
+import { LeaveNowDialog, MeetingEndedLine, MeetingLeaveBanner, MeetingLeaveLine, useMeetingLeave } from "./meeting-leave-status";
 
 const pollableStatuses = new Set<MeetingDetail["status"]>(["created", "joining", "waiting_room", "live", "stopping", "processing"]);
 const inCallStatuses = new Set<MeetingDetail["status"]>(["joining", "waiting_room", "live", "needs_attention", "stopping"]);
@@ -45,7 +46,10 @@ export function MeetingDetailScreen({ meetingId, focusSegmentId, backLabel = "Al
   const [deleting, setDeleting] = useState(false);
   const [savingSpeaker, setSavingSpeaker] = useState(false);
   const [speakerRevision, setSpeakerRevision] = useState(0);
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const [keeping, setKeeping] = useState(false);
   const lastFocused = useRef<string | null>(null);
+  const { leave, setLeave, reload: reloadLeave } = useMeetingLeave(meetingId, meeting?.status ?? null);
 
   const acceptMeeting = useCallback((next: MeetingDetail) => {
     setMeeting(next);
@@ -131,6 +135,21 @@ export function MeetingDetailScreen({ meetingId, focusSegmentId, backLabel = "Al
     }
   }
 
+  async function leaveNow() {
+    await runAction("stop");
+    setConfirmLeave(false);
+    void reloadLeave();
+  }
+
+  async function keepInCall() {
+    setKeeping(true); setError(null);
+    try {
+      setLeave(await leaveService.keepInCall(meetingId));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not keep the assistant in the call.");
+    } finally { setKeeping(false); }
+  }
+
   async function saveSpeaker(segment: TranscriptSegment, name: string, applyToSameLabel: boolean): Promise<boolean> {
     setSavingSpeaker(true); setError(null);
     try {
@@ -214,13 +233,15 @@ export function MeetingDetailScreen({ meetingId, focusSegmentId, backLabel = "Al
       </span>}
       actions={<>
         <button className="button ghost" onClick={() => void runAction("refresh")} disabled={action !== null}><RefreshCw aria-hidden="true" className={action === "refresh" ? "record-spin" : undefined} />{action === "refresh" ? "Refreshing…" : "Refresh"}</button>
-        {canStop ? <button className="button danger-outline" onClick={() => void runAction("stop")} disabled={action !== null}><Square aria-hidden="true" />{action === "stop" ? "Stopping…" : "Stop assistant"}</button> : null}
+        {canStop ? <button className="button danger-outline" onClick={() => setConfirmLeave(true)} disabled={action !== null}><LogOut aria-hidden="true" />{action === "stop" ? "Leaving…" : "Leave now"}</button> : null}
         {canJoin ? <button className="button primary" onClick={() => void runAction("join")} disabled={action !== null}><LogIn aria-hidden="true" />{action === "join" ? "Joining…" : meeting.status === "failed" ? "Retry join" : "Join meeting"}</button> : null}
       </>}
     />
 
     <div className="record-alerts">
       {error ? <p className="form-error" role="alert">{error}</p> : null}
+      <MeetingLeaveBanner leave={leave} busy={keeping || action !== null} onKeep={() => void keepInCall()} onLeaveNow={() => setConfirmLeave(true)} />
+      {!inCallStatuses.has(meeting.status) || meeting.status === "stopping" ? <MeetingEndedLine leave={leave} /> : null}
       {schedule ? <Alert tone={scheduled ? (schedule.last_error ? "warning" : "info") : schedule.status === "failed" || schedule.status === "missed" ? "warning" : "neutral"} title={`${schedule.provider === "manual" ? "Scheduled assistant" : "Calendar assistant"} · ${schedule.status}`}
         actions={scheduled ? <button className="button secondary sm" type="button" onClick={cancelSchedule}>Cancel auto-join</button> : undefined}>
         Starts {formatTimestamp(schedule.starts_at)}. {scheduled ? schedule.last_error || "The assistant joins at the start time. Cancelling keeps this meeting." : schedule.last_error || "Review this meeting for capture updates."}
@@ -243,6 +264,7 @@ export function MeetingDetailScreen({ meetingId, focusSegmentId, backLabel = "Al
             <p className="eyebrow">Assistant in call</p>
             <h2>{meeting.botName}</h2>
             <p>{meeting.status === "waiting_room" ? `Ask the host to admit “${meeting.botName}” from the waiting room.` : meeting.status === "live" ? `${finalizedCount} finalized transcript turn${finalizedCount === 1 ? "" : "s"} · ${namedSpeakers.length} named speaker${namedSpeakers.length === 1 ? "" : "s"}` : lifecycleDetail[meeting.status]}</p>
+            <MeetingLeaveLine leave={leave} />
             <p className="field-hint">Tell the host: “Meetings AI has joined and will record and transcribe this conversation.”</p>
           </div>
         </section> : null}
@@ -258,5 +280,6 @@ export function MeetingDetailScreen({ meetingId, focusSegmentId, backLabel = "Al
         {deletableStatuses.has(meeting.status) ? <MeetingDangerZone deleting={deleting} onDelete={() => void deleteMeeting()} /> : null}
       </aside>
     </div>
+    <LeaveNowDialog open={confirmLeave} busy={action === "stop"} botName={meeting.botName} onCancel={() => setConfirmLeave(false)} onConfirm={() => void leaveNow()} />
   </section>;
 }

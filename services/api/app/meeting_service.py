@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime
 from typing import Any
 from hashlib import sha256
@@ -18,6 +19,7 @@ from meetings_contracts import (
 )
 
 from .adapters.vexa import VexaAPIError, VexaCaptureAdapter
+from .leave_rules import LeaveReason
 from .meeting_links import parse_meeting_url
 from .notification_events import NO_EVENTS
 from .repository import RecipientGroupNotFoundError
@@ -36,11 +38,17 @@ class MeetingConflictError(RuntimeError):
 _VEXA_STATUSES = {item.value: item for item in MeetingStatus if item is not MeetingStatus.CREATED}
 _VEXA_STATUSES["needs_help"] = MeetingStatus.NEEDS_HUMAN_HELP
 _TERMINAL_STATUSES = {MeetingStatus.COMPLETED, MeetingStatus.FAILED}
+_LIVE_STATUSES = {MeetingStatus.ACTIVE, MeetingStatus.NEEDS_HUMAN_HELP, MeetingStatus.STOPPING}
+# Meetings whose empty-transcript glitch was already logged (one small entry per affected meeting).
+_EMPTY_TRANSCRIPT_LOGGED: set[UUID] = set()
+logger = logging.getLogger(__name__)
 
 
 class MeetingService:
     # Notification hooks (NotificationEvents); a no-op unless wired in create_app.
     events: Any = NO_EVENTS
+    # Auto-leave hooks (LeaveService: automatic_leave/joining/stopped/finished); a no-op unless wired.
+    leave: Any = NO_EVENTS
 
     def __init__(
         self, repository: object, vexa: VexaCaptureAdapter,
@@ -149,6 +157,8 @@ class MeetingService:
         self.repository.save_meeting(meeting)
         # A retry must not display the route from the previous bot attempt.
         self.repository.clear_transcription_route(meeting.id)
+        self.leave.joining(meeting)
+        automatic_leave = self.leave.automatic_leave()
         try:
             upstream = await self.vexa.join(
                 meeting_url=meeting.meeting_url,
@@ -157,6 +167,7 @@ class MeetingService:
                 transcribe_enabled=meeting.transcribe_enabled,
                 recording_enabled=meeting.recording_enabled,
                 stt_override=stt_override,
+                **({"automatic_leave": automatic_leave} if automatic_leave else {}),
             )
             if profile is not None:
                 data = upstream.get("data")
@@ -215,23 +226,52 @@ class MeetingService:
         meeting.last_error = _upstream_failure(upstream, meeting.status)
         saved = self.repository.save_meeting(meeting)
         self.events.meeting_status(saved)
+        self._record_finish(saved, upstream)
         return saved
 
-    async def stop(self, meeting_id: UUID) -> Meeting:
+    async def stop(
+        self, meeting_id: UUID, *, end_reason: LeaveReason = LeaveReason.USER_STOPPED,
+        ended_by: str = "user", quiet_since: datetime | None = None, already_gone_ok: bool = False,
+    ) -> Meeting:
+        """Ask the assistant to leave. ``already_gone_ok`` treats Vexa's "no active bot" (404) as left."""
         meeting = self.repository.get_meeting(meeting_id)
         if meeting.status in {MeetingStatus.STOPPING, *_TERMINAL_STATUSES}:
             return meeting
         if meeting.vexa_meeting_id is None:
             raise MeetingConflictError("meeting has not been joined yet")
-        await self.vexa.stop(meeting.platform.value, meeting.native_meeting_id)
+        try:
+            await self.vexa.stop(meeting.platform.value, meeting.native_meeting_id)
+        except VexaAPIError as exc:
+            if not (already_gone_ok and exc.status_code == 404):
+                raise
         now = datetime.now(UTC)
         meeting.status = MeetingStatus.STOPPING
         meeting.stopped_at = now
         meeting.updated_at = now
         meeting.last_error = None
-        return self.repository.save_meeting(meeting)
+        saved = self.repository.save_meeting(meeting)
+        self.leave.stopped(saved, end_reason, ended_by, quiet_since)
+        return saved
 
-    async def transcript(self, meeting_id: UUID) -> MeetingTranscriptResponse:
+    def mark_completed(self, meeting_id: UUID) -> Meeting:
+        """Close a capture Vexa no longer tracks, so the post-meeting pipeline can run."""
+        meeting = self.repository.get_meeting(meeting_id)
+        if meeting.status in _TERMINAL_STATUSES:
+            return meeting
+        now = datetime.now(UTC)
+        meeting.status = MeetingStatus.COMPLETED
+        meeting.stopped_at = meeting.stopped_at or now
+        meeting.updated_at = now
+        saved = self.repository.save_meeting(meeting)
+        self.events.meeting_status(saved)
+        return saved
+
+    def _record_finish(self, meeting: Meeting, upstream: dict[str, Any]) -> None:
+        if meeting.status in _TERMINAL_STATUSES:
+            self.leave.finished(meeting, _completion_reason(upstream))
+
+    async def transcript(self, meeting_id: UUID, *, allow_cached: bool = True) -> MeetingTranscriptResponse:
+        """Fresh transcript from Vexa; with ``allow_cached`` a Vexa outage falls back to the saved copy."""
         meeting = self.repository.get_meeting(meeting_id)
         if meeting.vexa_meeting_id is None:
             cached = self.repository.get_transcript(meeting.id)
@@ -245,7 +285,7 @@ class MeetingService:
             upstream = await self.vexa.get_transcript(meeting.vexa_meeting_id)
         except VexaAPIError:
             cached = self.repository.get_transcript(meeting.id)
-            if not cached:
+            if not cached or not allow_cached:
                 raise
             return MeetingTranscriptResponse(
                 meeting_id=meeting.id,
@@ -260,12 +300,14 @@ class MeetingService:
         meeting.updated_at = now
         self.repository.save_meeting(meeting)
         self.events.meeting_status(meeting)
+        self._record_finish(meeting, upstream)
         segments = [
             _segment(raw)
             for raw in upstream.get("segments", [])
             if isinstance(raw, dict)
         ]
-        self.repository.replace_transcript(meeting.id, segments)
+        if segments or not self._keep_stored_transcript(meeting):
+            self.repository.replace_transcript(meeting.id, segments)
         resolved = self.repository.get_transcript(meeting.id)
         self._record_transcription_usage(meeting, resolved)
         return MeetingTranscriptResponse(
@@ -275,6 +317,15 @@ class MeetingService:
             segments=resolved,
             segment_count=len(resolved),
         )
+
+    def _keep_stored_transcript(self, meeting: Meeting) -> bool:
+        """An empty transcript from Vexa mid-call is a glitch, not silence: never wipe what we already saved."""
+        if meeting.status not in _LIVE_STATUSES or not self.repository.get_transcript(meeting.id):
+            return False
+        if meeting.id not in _EMPTY_TRANSCRIPT_LOGGED:
+            _EMPTY_TRANSCRIPT_LOGGED.add(meeting.id)
+            logger.warning("Vexa returned an empty transcript for in-call meeting %s; kept the saved one", meeting.id)
+        return True
 
     def _record_transcription_usage(self, meeting: Meeting, segments: "list[MeetingTranscriptSegment]") -> None:
         """Once a capture is final, log its speech-to-text usage (idempotent per bot session)."""
@@ -340,6 +391,12 @@ def _number(value: object, fallback: float) -> float:
         return float(value)
     except (TypeError, ValueError):
         return fallback
+
+
+def _completion_reason(upstream: dict[str, Any]) -> str | None:
+    data = upstream.get("data")
+    value = upstream.get("completion_reason") or (data.get("completion_reason") if isinstance(data, dict) else None)
+    return str(value) if value else None
 
 
 def _status(value: object, fallback: MeetingStatus) -> MeetingStatus:

@@ -1,9 +1,12 @@
 """HTTP adapter for the pinned local Vexa gateway API."""
 
+import logging
 from typing import Any
 from urllib.parse import quote
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 class VexaAPIError(RuntimeError):
@@ -45,6 +48,7 @@ class VexaCaptureAdapter:
         transcribe_enabled: bool,
         recording_enabled: bool,
         stt_override: dict[str, object] | None = None,
+        automatic_leave: dict[str, int] | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "meeting_url": meeting_url,
@@ -65,7 +69,19 @@ class VexaCaptureAdapter:
                     "connected Vexa does not advertise signed per-bot STT routing",
                 )
             payload["stt_override"] = stt_override
-        return await self._request("POST", "/bots", operation="join", json=payload)
+        if not automatic_leave:
+            return await self._request("POST", "/bots", operation="join", json=payload)
+        try:
+            return await self._request("POST", "/bots", operation="join",
+                                       json={**payload, "automatic_leave": automatic_leave})
+        except VexaAPIError as exc:
+            if exc.status_code != 422 or "automatic_leave" not in exc.detail:
+                raise
+            # A Vexa build that does not know these leave rules must never block a join: retry once
+            # with Vexa's defaults. The app-side leave watchdog still applies the workspace policy.
+            logger.warning("Vexa rejected automatic_leave (%s); joining with Vexa's default leave rules",
+                           exc.detail[:300])
+            return await self._request("POST", "/bots", operation="join", json=payload)
 
     async def preflight(self) -> dict[str, Any]:
         """Validate gateway reachability and API-key authentication without mutation."""

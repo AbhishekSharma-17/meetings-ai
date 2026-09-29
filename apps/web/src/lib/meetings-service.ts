@@ -1269,3 +1269,39 @@ export const preferencesService = {
     return api<TimePreferencesPayloadT>("/v1/me/preferences/detected", { method: "POST", body: JSON.stringify({ timezone }) });
   },
 };
+
+type LeavePolicyT = import("./types").LeavePolicy;
+type LeavePolicyValuesT = import("./types").LeavePolicyValues;
+type MeetingLeaveT = import("./types").MeetingLeave;
+
+/** Rejects a response that is not a leave policy (e.g. an older API or proxy page) instead of crashing callers. */
+function asLeavePolicy(value: unknown): LeavePolicyT {
+  const candidate = value as Partial<LeavePolicyT> | null;
+  if (!candidate || typeof candidate.silence_minutes !== "number" || !candidate.limits || !candidate.defaults) {
+    throw new Error("The leave rules response was not understood.");
+  }
+  return candidate as LeavePolicyT;
+}
+
+function asMeetingLeave(value: unknown): MeetingLeaveT {
+  const candidate = value as Partial<MeetingLeaveT> | null;
+  if (!candidate || typeof candidate.in_call !== "boolean" || !candidate.policy) throw new Error("The meeting leave response was not understood.");
+  return candidate as MeetingLeaveT;
+}
+
+/** When the assistant leaves a call: the workspace policy (members read, owners/admins edit) and each meeting's status. */
+export const leaveService = {
+  async getPolicy(): Promise<LeavePolicyT> {
+    return asLeavePolicy(await api<unknown>("/v1/workspace/leave-policy"));
+  },
+  async savePolicy(values: LeavePolicyValuesT): Promise<LeavePolicyT> {
+    return asLeavePolicy(await api<unknown>("/v1/workspace/leave-policy", { method: "PUT", body: JSON.stringify(values) }));
+  },
+  async getMeetingLeave(meetingId: string): Promise<MeetingLeaveT> {
+    return asMeetingLeave(await api<unknown>(`/v1/meetings/${meetingId}/leave`));
+  },
+  /** Keeps the assistant in the call 30 more minutes (owners and admins). */
+  async keepInCall(meetingId: string): Promise<MeetingLeaveT> {
+    return asMeetingLeave(await api<unknown>(`/v1/meetings/${meetingId}/keep`, { method: "POST" }));
+  },
+};

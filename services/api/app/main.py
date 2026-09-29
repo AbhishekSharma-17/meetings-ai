@@ -65,6 +65,11 @@ from .routes_preferences import register_preference_routes
 from .user_preferences import UserPreferenceService
 from .repository import RecipientGroupNotFoundError
 from .routes_speakers import register_speaker_routes
+from .leave_notices import LeaveNotices
+from .leave_service import LeaveService
+from .leave_store import LeavePolicyService, MeetingLeaveStore, service_max_hours_from_env
+from .leave_watchdog import LeaveWatchdog
+from .routes_leave import register_leave_routes
 from .profile_photos import ProfilePhotoService
 from .database import Database, SchemaVersionRow, LEGACY_ADMIN_USER_ID, LEGACY_ORGANIZATION_ID
 from .accounts import AccountError, AccountPublic, AccountService, Actor, ChangePasswordRequest, MemberRolePatch, OrganizationCreateRequest, OrganizationOption, ProfilePatch
@@ -217,12 +222,14 @@ def create_app(
         schedule_task = asyncio.create_task(calendar_schedule.run()) if os.getenv("AUTO_CALENDAR_SCHEDULE_ENABLED") == "1" else None
         watch_task = asyncio.create_task(calendar_watch.run()) \
             if os.getenv("AUTO_CALENDAR_SCHEDULE_ENABLED") == "1" and calendar_watch.enabled else None
+        # On by default: an assistant that never leaves a call is worse than any other failure here.
+        leave_task = asyncio.create_task(leave_watchdog.run()) if os.getenv("AUTO_LEAVE_ENABLED", "1") != "0" else None
         await start_background_services(app)
         try:
             yield
         finally:
             await stop_background_services(app)
-            for running in (task, index_task, retention_task, schedule_task, watch_task):
+            for running in (task, index_task, retention_task, schedule_task, watch_task, leave_task):
                 if running:
                     running.cancel()
                     try:
@@ -293,6 +300,15 @@ def create_app(
         knowledge_index=knowledge_index, knowledge_bases=knowledge_bases, indexing_worker=indexing_worker,
     )
     calendar_changes.events = app.state.notification_events
+    # Vexa ends every call after BOT_MAX_ACTIVE_MS (4 h unless raised); never promise longer than that.
+    leave_policies = LeavePolicyService(database, service_max_hours_from_env(os.getenv("VEXA_MAX_BOT_HOURS")))
+    leave_notices = LeaveNotices(app.state.notifications)
+    leave_service = LeaveService(database, repository, leave_policies, MeetingLeaveStore(database), leave_notices)
+    meeting_service.leave = leave_service
+    leave_watchdog = LeaveWatchdog(database, meeting_service, leave_service, leave_notices)
+    app.state.leave_service = leave_service
+    app.state.leave_watchdog = leave_watchdog
+    register_leave_routes(app, policies=leave_policies, leave=leave_service)
 
     @app.middleware("http")
     async def require_admin(request: Request, call_next):
@@ -349,6 +365,7 @@ def create_app(
                         or (method == "GET" and re.fullmatch(r"/v1/calendar/events/[0-9a-f-]+/changes", path))
                         or (method == "POST" and re.fullmatch(r"/v1/calendar/events/[0-9a-f-]+/prep/whos-who", path))
                         or (method == "GET" and path == "/v1/workspace/identity")
+                        or (method == "GET" and path == "/v1/workspace/leave-policy")
                         or (method == "POST" and re.fullmatch(r"/v1/calendar/events/[0-9a-f-]+/prep/jobs", path))
                         or (method == "GET" and re.fullmatch(r"/v1/background-jobs(?:/[0-9a-f-]{36})?", path))
                         or (method == "POST" and re.fullmatch(r"/v1/background-jobs/[0-9a-f-]{36}/cancel", path))
@@ -357,13 +374,13 @@ def create_app(
                         or (method == "DELETE" and re.fullmatch(r"/v1/notifications(?:/[0-9a-f-]{36})?", path))
                         or (method == "GET" and path in {"/v1/workspace/brief", "/v1/workspace/brief/documents"})
                         or (method in {"GET", "POST", "DELETE"} and re.fullmatch(r"/v1/documents(?:/url|/[0-9a-f-]{36}(?:/reindex)?)?", path))
-                        or (method == "GET" and re.fullmatch(r"/v1/meetings/[0-9a-f-]+(?:/transcript)?", path))
+                        or (method == "GET" and re.fullmatch(r"/v1/meetings/[0-9a-f-]+(?:/transcript|/leave)?", path))
                     )
                     if not allowed:
                         return JSONResponse(status_code=403, content={"detail": "workspace role does not permit this action"})
                     if actor.role == "viewer" and path == "/v1/knowledge-bases" and method == "POST":
                         return JSONResponse(status_code=403, content={"detail": "viewers cannot create knowledge bases"})
-                    match = re.fullmatch(r"/v1/meetings/([0-9a-f-]+)(?:/transcript)?", path)
+                    match = re.fullmatch(r"/v1/meetings/([0-9a-f-]+)(?:/transcript|/leave)?", path)
                     if match:
                         try:
                             meeting = repository.get_meeting(UUID(match.group(1)))

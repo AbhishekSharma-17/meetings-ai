@@ -11,6 +11,7 @@ import { WorkspaceBrief } from "./workspace-brief";
 import { OperationsCard, RetentionCard } from "./workspace-admin-cards";
 import { ActivityCard } from "./workspace-activity";
 import { WorkspaceTeams } from "./workspace-teams";
+import { WorkspaceLeavePolicy } from "./workspace-leave-policy";
 
 type SectionLink = { id: string; label: string; adminOnly?: boolean };
 const sectionLinks: SectionLink[] = [
@@ -19,6 +20,7 @@ const sectionLinks: SectionLink[] = [
   { id: "settings-teams", label: "Teams" },
   { id: "settings-workspaces", label: "Your workspaces" },
   { id: "settings-brief", label: "Company profile" },
+  { id: "settings-leave", label: "Leaving calls" },
   { id: "settings-retention", label: "Data retention", adminOnly: true },
   { id: "settings-operations", label: "Operations", adminOnly: true },
   { id: "settings-activity", label: "Recent activity", adminOnly: true },
@@ -97,6 +99,7 @@ export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceC
           onTeamsChange={(teams) => setTeamNames(new Map(teams.map((team) => [team.id, team.name])))} />
         <WorkspaceDirectory workspaces={workspaces} account={account} canManage={canManage} onSwitchWorkspace={onSwitchWorkspace} onCreateWorkspace={onCreateWorkspace} onWorkspacesChange={onWorkspacesChange} />
         <WorkspaceBrief workspaceId={workspace.id} canManage={canManage} />
+        <WorkspaceLeavePolicy key={workspace.id} onSaved={(text) => { setError(null); setMessage(text); }} />
         {canManage ? <RetentionCard onSaved={setMessage} /> : null}
         {canManage ? <OperationsCard meetingTitles={meetingTitles} /> : null}
         {canManage ? <ActivityCard members={members} meetingTitles={meetingTitles} baseNames={baseNames} teamNames={teamNames} /> : null}

@@ -50,7 +50,7 @@ test.describe("demo mode", () => {
     // A live meeting keeps its transcript updating.
     await nav(page, "Meetings");
     await page.getByRole("button", { name: /weekly delivery sync/ }).first().click();
-    await expect(page.getByRole("button", { name: "Stop assistant" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Leave now" })).toBeVisible();
     await expect(page.getByText(/indexed about eleven hundred pages/).first()).toBeVisible();
 
     // Calendar with three connected accounts.

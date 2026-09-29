@@ -108,5 +108,5 @@ def test_version_25_database_upgrades_to_26_with_the_change_table(tmp_path) -> N
     database.migrate()
     assert "calendar_event_changes" in inspect(database.engine).get_table_names()
     with database.engine.connect() as connection:
-        assert max(connection.execute(select(SchemaVersionRow.version)).scalars().all()) == 26
+        assert max(connection.execute(select(SchemaVersionRow.version)).scalars().all()) == Database.SCHEMA_VERSION
     database.engine.dispose()
