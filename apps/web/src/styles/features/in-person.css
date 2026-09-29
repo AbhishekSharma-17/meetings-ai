@@ -1,0 +1,176 @@
+/* In-person recording: the full-screen recorder (setup, recording, finalizing), the "In person" chip,
+   the meeting page's recording line and speaker naming card, and the resume banner.
+   Phone-first: 48px touch targets and thumb-reachable controls at the bottom. Layout only; tokens only. */
+
+/* ---------- Full-screen recorder ---------- */
+.ip-backdrop { position:fixed; inset:0; z-index:80; background:var(--background); }
+.ip-popup { position:fixed; inset:0; z-index:81; display:flex; flex-direction:column; overflow:hidden; background:var(--background); color:var(--foreground); outline:none; }
+.ip-popup .button { height:48px; padding:0 18px; font-size:15px; border-radius:var(--radius-lg); }
+.ip-popup .button.sm { height:40px; padding:0 14px; font-size:14px; }
+.ip-popup .button .lucide { width:18px; height:18px; }
+.ip-popup .alert { flex-wrap:wrap; font-size:14px; }
+.ip-popup .alert-actions { flex-wrap:wrap; margin-left:0; width:100%; }
+.ip-popup .alert-body { flex:1 1 220px; }
+.ip-screen { display:flex; flex-direction:column; flex:1; min-height:0; width:100%; }
+.ip-title { font-size:22px; font-weight:600; letter-spacing:-.015em; line-height:1.25; }
+.ip-intro { margin-top:6px; color:var(--text-secondary); font-size:14.5px; line-height:1.55; }
+.ip-actions {
+  display:flex; justify-content:flex-end; gap:10px; padding:12px max(16px, calc((100vw - 720px) / 2)) max(12px, env(safe-area-inset-bottom));
+  border-top:1px solid var(--border); background:var(--card);
+}
+
+/* ---------- Setup and consent ---------- */
+.ip-setup-head, .ip-setup-body { width:100%; max-width:720px; margin:0 auto; padding-left:16px; padding-right:16px; }
+.ip-setup-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding-top:max(20px, env(safe-area-inset-top)); padding-bottom:4px; }
+.ip-setup-head .eyebrow .lucide { width:13px; height:13px; }
+.ip-close { width:48px; height:48px; margin:-8px -8px 0 0; }
+.ip-close .lucide { width:20px; height:20px; }
+.ip-setup-body { flex:1; min-height:0; overflow-y:auto; display:grid; align-content:start; gap:20px; padding-top:16px; padding-bottom:24px; }
+.ip-setup-body input:not([type=checkbox]) { min-height:44px; font-size:16px; }
+.ip-mic { display:grid; gap:10px; padding:16px; border:1px solid var(--border); border-radius:var(--radius-lg); background:var(--card); }
+.ip-mic h3 { font-size:14px; font-weight:600; }
+.ip-mic-idle { display:grid; gap:10px; justify-items:start; }
+.ip-consent { display:grid; gap:14px; padding:16px; border:1px solid var(--border); border-radius:var(--radius-lg); background:var(--card); }
+.ip-consent legend { float:left; width:100%; margin-bottom:2px; font-size:14px; }
+.ip-consent-check { align-items:center; min-height:48px; padding:8px 12px; border:1px solid var(--border-strong); border-radius:var(--radius); font-size:15px; font-weight:500; }
+.ip-consent-check input[type=checkbox] { width:22px; height:22px; margin:0; }
+.ip-consent-check:has(input:checked) { border-color:var(--brand); background:var(--brand-subtle); }
+.ip-notice { margin:0; padding:16px 18px; border-left:3px solid var(--brand); border-radius:var(--radius); background:var(--muted); font-size:clamp(19px, 5vw, 24px); font-weight:500; line-height:1.45; }
+.ip-install { display:flex; align-items:center; gap:12px; padding:12px 14px; border:1px solid var(--brand-border); border-radius:var(--radius-lg); background:var(--brand-subtle); }
+.ip-install > .lucide { flex:none; width:20px; height:20px; color:var(--brand); }
+.ip-install p { display:grid; gap:2px; flex:1; min-width:0; font-size:13px; line-height:1.45; }
+.ip-install p span { color:var(--text-secondary); }
+
+/* ---------- Level meter ---------- */
+.ip-level { position:relative; height:10px; overflow:hidden; border-radius:999px; background:var(--muted-strong); }
+.ip-level-fill { position:absolute; inset:0; transform-origin:left center; background:var(--success); transition:transform 90ms linear; }
+.ip-level[data-paused] .ip-level-fill { background:var(--text-disabled); }
+
+/* ---------- Recording ---------- */
+.ip-live-bar {
+  display:flex; align-items:center; gap:10px; min-height:52px; padding:max(8px, env(safe-area-inset-top)) max(16px, calc((100vw - 720px) / 2)) 8px;
+  background:var(--destructive); color:var(--destructive-foreground);
+}
+.ip-live-bar[data-state=held] { background:var(--foreground); color:var(--background); }
+.ip-live-dot { flex:none; width:10px; height:10px; border-radius:50%; background:currentColor; animation:pulse-dot 1.4s ease-in-out infinite; }
+.ip-live-bar[data-state=held] .ip-live-dot { animation:none; opacity:.6; }
+.ip-live-title { flex:none; font-size:15px; font-weight:600; letter-spacing:.01em; }
+.ip-live-meeting { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; opacity:.85; font-size:14px; }
+.ip-recording-body { flex:1; min-height:0; overflow-y:auto; display:grid; align-content:start; gap:16px; width:100%; max-width:720px; margin:0 auto; padding:20px 16px 24px; }
+.ip-meter-block { display:grid; gap:12px; justify-items:stretch; text-align:center; }
+.ip-timer { font-size:clamp(48px, 16vw, 72px); font-weight:600; letter-spacing:-.03em; line-height:1; }
+.ip-upload { display:inline-flex; align-items:center; justify-content:center; gap:6px; color:var(--success-text); font-size:14px; font-weight:500; }
+.ip-upload .lucide { width:16px; height:16px; }
+.ip-upload[data-state=offline], .ip-upload[data-state=retrying] { color:var(--warning-text); }
+.ip-upload[data-state=error] { color:var(--destructive-text); }
+.ip-upload[data-state=uploading] { color:var(--text-secondary); }
+.ip-upload-detail { margin-top:-6px; }
+.ip-meter-block > .button { justify-self:center; }
+.ip-notes { display:grid; gap:10px; }
+.ip-moments h3 { margin-bottom:6px; color:var(--text-secondary); font-size:12.5px; font-weight:500; }
+.ip-moments ul { list-style:none; display:flex; flex-wrap:wrap; gap:6px; }
+.ip-moments li { display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 10px; border:1px solid var(--border); border-radius:999px; background:var(--card); font-size:13px; }
+.ip-moments li .lucide { width:14px; height:14px; color:var(--brand); }
+.ip-moments small { color:var(--text-tertiary); }
+.ip-captions .card-header h3 { font-size:13.5px; font-weight:600; }
+.ip-caption-list { list-style:none; display:grid; gap:10px; max-height:min(36dvh, 320px); overflow-y:auto; padding:14px 20px; }
+.ip-caption-list:empty { display:none; }
+.ip-caption-list li { display:grid; grid-template-columns:44px minmax(0,1fr); gap:10px; font-size:15px; line-height:1.5; }
+.ip-caption-time { color:var(--text-tertiary); font-size:12.5px; padding-top:2px; }
+.ip-caption-empty { display:flex; align-items:center; gap:8px; padding:16px 20px; color:var(--text-secondary); font-size:14px; }
+.ip-caption-empty .lucide { width:16px; height:16px; flex:none; }
+.ip-toast { position:fixed; left:50%; bottom:calc(96px + env(safe-area-inset-bottom)); z-index:82; transform:translateX(-50%); padding:10px 14px; border-radius:999px; background:var(--foreground); color:var(--background); font-size:14px; font-weight:500; box-shadow:var(--elevation-overlay); white-space:nowrap; }
+.ip-controls {
+  display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:10px;
+  padding:12px max(16px, calc((100vw - 720px) / 2)) max(12px, env(safe-area-inset-bottom)); border-top:1px solid var(--border); background:var(--card);
+}
+.ip-controls .button { width:100%; }
+.ip-finishing { grid-column:1 / -1; display:flex; align-items:center; justify-content:center; gap:10px; min-height:48px; color:var(--text-secondary); font-size:14.5px; }
+.ip-confirm-backdrop { z-index:84; }
+.ip-confirm { z-index:85; }
+.ip-confirm .dialog-footer .button { height:44px; }
+
+/* ---------- Finalizing ---------- */
+.ip-finalizing-body { flex:1; min-height:0; overflow-y:auto; display:grid; align-content:center; justify-items:center; gap:14px; width:100%; max-width:560px; margin:0 auto; padding:32px 16px; text-align:center; }
+.ip-finalizing-icon { display:grid; place-items:center; width:56px; height:56px; border-radius:var(--radius-lg); background:var(--brand-subtle); color:var(--brand); }
+.ip-finalizing-icon .lucide { width:26px; height:26px; }
+.ip-progress { position:relative; width:100%; height:8px; overflow:hidden; border-radius:999px; background:var(--muted-strong); }
+.ip-progress span { position:absolute; inset:0; transform-origin:left center; background:var(--brand); transition:transform var(--duration-slow) ease; }
+.ip-stage { font-size:15px; font-weight:500; }
+.ip-steps { list-style:none; display:grid; gap:8px; width:100%; max-width:320px; text-align:left; }
+.ip-steps li { display:flex; align-items:center; gap:10px; color:var(--text-tertiary); font-size:14px; }
+.ip-steps li[data-state=done] { color:var(--text-secondary); }
+.ip-steps li[data-state=current] { color:var(--foreground); font-weight:500; }
+.ip-steps .lucide { width:16px; height:16px; color:var(--success); }
+.ip-step-dot { width:16px; height:16px; flex:none; border:2px solid var(--border-strong); border-radius:50%; }
+.ip-steps li[data-state=current] .ip-step-dot { border-color:var(--brand); background:var(--brand-subtle); }
+.ip-leave-copy { color:var(--text-secondary); font-size:14px; line-height:1.55; }
+.ip-finalizing-body .alert { width:100%; text-align:left; }
+
+/* ---------- Chip, meeting page line, resume banner ---------- */
+.ip-chip { display:inline-flex; align-items:center; gap:4px; height:22px; padding:0 8px; border:1px solid var(--border); border-radius:999px; background:var(--muted); color:var(--text-secondary); font-size:12px; font-weight:500; vertical-align:middle; white-space:nowrap; }
+.ip-chip .lucide { width:12px; height:12px; }
+.ip-chip.inline { height:18px; padding:0 6px; font-size:11.5px; }
+.ip-record-meta { display:inline-flex; align-items:center; flex-wrap:wrap; gap:6px 14px; min-width:0; max-width:100%; }
+.ip-consent-record { display:inline-flex; align-items:center; gap:5px; color:var(--text-secondary); }
+.ip-consent-record .lucide { width:14px; height:14px; color:var(--success-text); flex:none; }
+.ip-inline-progress { font-weight:500; }
+.ip-resume-region { width:100%; max-width:1200px; margin:0 auto; padding:20px 32px 0; }
+.ip-resume { flex-wrap:wrap; }
+.ip-resume .alert-actions { flex-wrap:wrap; }
+.ip-member-stack { gap:20px; }
+
+/* ---------- Name the speakers ---------- */
+.ip-name-list { list-style:none; display:grid; gap:12px; }
+.ip-name-row { display:grid; gap:12px; padding:14px 16px; border:1px solid var(--border); border-radius:var(--radius-lg); background:var(--card); }
+.ip-name-row[data-state=approved] { border-color:var(--success-border); }
+.ip-name-row[data-state=dismissed] { background:var(--muted); }
+.ip-name-head { display:flex; align-items:flex-start; gap:12px; }
+.ip-name-head .badge { margin-left:auto; flex:none; }
+.ip-name-copy { display:grid; gap:2px; min-width:0; flex:1; }
+.ip-name-copy b { font-size:14px; font-weight:600; }
+.ip-name-copy small { color:var(--text-secondary); font-size:12.5px; }
+.ip-name-copy .text-button { font-size:12.5px; }
+.ip-name-sample { margin-top:4px; color:var(--text-secondary); font-size:13.5px; line-height:1.5; overflow-wrap:anywhere; }
+.ip-suggestion { display:grid; gap:6px; padding:12px 14px; border-radius:var(--radius); background:var(--muted); }
+.ip-suggestion-name { display:flex; align-items:center; flex-wrap:wrap; gap:8px; font-size:14.5px; }
+.ip-suggestion-name .lucide { width:16px; height:16px; color:var(--brand); }
+.ip-suggestion-reason { color:var(--text-secondary); font-size:13.5px; }
+.ip-evidence { list-style:none; display:grid; gap:8px; margin-top:4px; }
+.ip-evidence li { display:flex; gap:8px; font-size:13.5px; line-height:1.5; }
+.ip-evidence li > .lucide { width:14px; height:14px; flex:none; margin-top:3px; color:var(--text-tertiary); }
+.ip-evidence span { display:grid; gap:1px; min-width:0; }
+.ip-evidence q { overflow-wrap:anywhere; }
+.ip-evidence small { color:var(--text-tertiary); font-size:12px; }
+.ip-evidence .text-button { font-size:12px; }
+.ip-name-actions { flex-wrap:wrap; }
+.ip-name-form { display:grid; gap:10px; }
+
+@media (min-width: 641px) {
+  .ip-setup-head { padding-top:32px; }
+  .ip-controls { grid-template-columns:repeat(3, auto); justify-content:center; }
+  .ip-controls .button { min-width:150px; }
+}
+
+@media (max-width: 640px) {
+  .ip-controls .button { flex-direction:column; gap:4px; height:auto; min-height:60px; padding:8px 6px; font-size:13px; white-space:normal; text-align:center; line-height:1.2; }
+  .ip-actions .button { flex:1; }
+  .ip-name-head { flex-wrap:wrap; }
+  .ip-name-copy { flex:1 1 calc(100% - 56px); }
+  .ip-name-head .badge { margin-left:44px; }
+  .ip-name-actions .button { flex:1 1 auto; }
+  .ip-resume-region { padding:12px 16px 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ip-level-fill, .ip-progress span { transition:none; }
+  .ip-live-dot { animation:none; }
+}
+
+/* ---------- Calendar marks for events recorded in person ---------- */
+.ip-calendar-mark { display:inline-flex; align-items:center; gap:4px; margin-left:6px; padding:0 6px; height:18px; border:1px solid var(--border); border-radius:999px; background:var(--muted); color:var(--text-secondary); font-size:11px; font-weight:500; white-space:nowrap; }
+.ip-calendar-mark .lucide { width:11px; height:11px; }
+.ip-calendar-mark[data-status=failed] { border-color:var(--destructive-border); background:var(--destructive-subtle); color:var(--destructive-text); }
+.ip-event-link { display:grid; gap:8px; justify-items:start; }
+.ip-event-link-status { display:flex; align-items:center; flex-wrap:wrap; gap:8px; font-size:13.5px; }
+.ip-event-link[data-status=failed] .ip-event-link-status b { color:var(--destructive-text); }

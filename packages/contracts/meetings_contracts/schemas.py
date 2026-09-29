@@ -224,6 +224,8 @@ class MeetingPlatform(str, Enum):
     TEAMS = "teams"
     ZOOM = "zoom"
     JITSI = "jitsi"
+    # Recorded face to face from a phone or laptop browser; never joined by a bot (no meeting link).
+    IN_PERSON = "in_person"
 
 
 class MeetingStatus(str, Enum):

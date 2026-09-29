@@ -7,7 +7,7 @@ export type Meeting = {
   duration: string;
   participants: number;
   status: MeetingStatus;
-  platform: "Google Meet" | "Zoom" | "Microsoft Teams";
+  platform: "Google Meet" | "Zoom" | "Microsoft Teams" | "In person";
   /** Where the minutes are once drafted; null until then (older APIs omit it). */
   minutesStatus?: MinutesStatus | null;
 };

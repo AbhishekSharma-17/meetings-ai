@@ -978,6 +978,60 @@ class ApolloCacheRow(Base):
     __table_args__ = (UniqueConstraint("organization_id", "kind", "cache_key", name="uq_apollo_cache_entry"),)
 
 
+class InPersonSessionRow(Base):
+    """A face-to-face meeting being recorded from a phone or laptop browser (v30).
+
+    Consent (everyone present agreed, who recorded, when, and whether the on-screen notice was
+    shown) is kept with the meeting for good. Captions and audio live only in ``in_person_chunks``
+    and are deleted once the final transcript is saved.
+    """
+
+    __tablename__ = "in_person_sessions"
+
+    meeting_id: Mapped[str] = mapped_column(String(36), ForeignKey("meetings.id"), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+    recorded_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    device: Mapped[str] = mapped_column(String(20), nullable=False)  # phone | laptop | unknown
+    mime_type: Mapped[str] = mapped_column(String(40), nullable=False)  # audio/webm | audio/mp4 | audio/ogg
+    consent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consent_notice_shown: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)  # recording | paused | finalizing | done | failed
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_activity_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    last_seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    received_chunks: Mapped[int] = mapped_column(Integer, nullable=False)
+    duration_ms: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    total_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    expected_people: Mapped[list] = mapped_column(JSON, nullable=False)
+    moments: Mapped[list] = mapped_column(JSON, nullable=False)
+    finalize_stage: Mapped[str | None] = mapped_column(String(20))
+    finalize_message: Mapped[str | None] = mapped_column(String(300))
+    parts_total: Mapped[int] = mapped_column(Integer, nullable=False)
+    parts_done: Mapped[int] = mapped_column(Integer, nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    speaker_labels: Mapped[str | None] = mapped_column(String(20))  # diarized | single
+    name_suggestions: Mapped[list] = mapped_column(JSON, nullable=False)
+    error: Mapped[str | None] = mapped_column(Text)
+
+
+class InPersonChunkRow(Base):
+    """One numbered piece of browser-recorded audio (v30); deleted after the final transcript is saved."""
+
+    __tablename__ = "in_person_chunks"
+
+    meeting_id: Mapped[str] = mapped_column(String(36), ForeignKey("meetings.id"), primary_key=True)
+    seq: Mapped[int] = mapped_column(Integer, primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+    mime_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    stream_start: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    bytes: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    duration_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    preview_text: Mapped[str | None] = mapped_column(Text)
+
+
 class SchemaVersionRow(Base):
     __tablename__ = "schema_version"
 
@@ -1033,6 +1087,7 @@ SCHEMA_TABLES_BY_VERSION: dict[int, tuple[str, ...]] = {
     27: ("organization_leave_policies", "meeting_leave_state"),
     28: ("meeting_coverage",),
     29: ("workspace_integrations", "apollo_cache"),
+    30: ("in_person_sessions", "in_person_chunks"),
 }
 
 SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
@@ -1103,6 +1158,8 @@ SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
     "meeting_coverage": ("meeting_id", "user_id", "organization_id", "role", "decision", "handed_to_meeting_id", "receive_recap", "decided_at", "decided_by"),
     "workspace_integrations": ("id", "organization_id", "provider", "connected_account_id", "hint", "status", "created_by", "created_at", "updated_at", "last_checked_at", "last_error"),
     "apollo_cache": ("id", "organization_id", "kind", "cache_key", "payload", "fetched_at", "expires_at"),
+    "in_person_sessions": ("meeting_id", "organization_id", "recorded_by", "device", "mime_type", "consent_at", "consent_notice_shown", "status", "started_at", "stopped_at", "last_activity_at", "last_seq", "received_chunks", "duration_ms", "total_bytes", "expected_people", "moments", "finalize_stage", "finalize_message", "parts_total", "parts_done", "attempts", "speaker_labels", "name_suggestions", "error"),
+    "in_person_chunks": ("meeting_id", "seq", "organization_id", "mime_type", "stream_start", "bytes", "byte_size", "duration_ms", "received_at", "preview_text"),
 }
 
 
@@ -1185,7 +1242,7 @@ def _migrate_to_v22(connection) -> None:
 class Database:
     """Upgrades known schemas and rejects unknown or incomplete ones."""
 
-    SCHEMA_VERSION = 29
+    SCHEMA_VERSION = 30
 
     def __init__(self, url: str) -> None:
         engine_options: dict[str, object] = {"pool_pre_ping": True}

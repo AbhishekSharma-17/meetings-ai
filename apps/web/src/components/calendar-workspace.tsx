@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Popover } from "@base-ui/react/popover";
 import { Tabs } from "@base-ui/react/tabs";
-import { CalendarDays, CalendarRange, ChevronLeft, ChevronRight, Plug, Plus, RefreshCw } from "lucide-react";
+import { CalendarDays, CalendarRange, ChevronLeft, ChevronRight, Mic, Plug, Plus, RefreshCw } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
 import type { CachedCalendarEvent, CalendarConnection, CalendarSchedule, CalendarSnapshot } from "@/lib/types";
 import type { CalendarSelection } from "./calendar-import-dialog";
@@ -20,6 +20,9 @@ import { formatDateTime, formatDayHeading, todayKey, useTimePreferences } from "
 import { Alert } from "./ui/feedback";
 import { PageHeader } from "./ui/page-header";
 import { UiSelect } from "./ui-select";
+import type { InPersonSeed } from "@/lib/in-person-types";
+import { BLANK_SEED, inPersonSeedFromEvent } from "./in-person-seed";
+import { InPersonCalendarMark, InPersonEventLink, useInPersonCalendarLinks } from "./in-person-calendar";
 
 const AUTO_REFRESH_AFTER_MS = 5 * 60_000;
 const shortDate: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
@@ -70,7 +73,7 @@ function formatDay(key: string): string {
   return validDate(key) ? formatDayHeading(key, shortDate) : "—";
 }
 
-export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onPreferredConnectionApplied, canSchedule = true, onChoose, onPrepare, onNewMeeting, onOpenMeeting }: {
+export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onPreferredConnectionApplied, canSchedule = true, onChoose, onPrepare, onNewMeeting, onOpenMeeting, onRecordInPerson, inPersonRevision = 0 }: {
   calendarIdentity: string;
   preferredConnectionId?: string | null;
   onPreferredConnectionApplied?(): void;
@@ -81,6 +84,10 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
   onNewMeeting?(): void;
   /** Opens a meeting record (a teammate's assistant this person shares). */
   onOpenMeeting?(id: string): void;
+  /** Opens the in-person recorder, from the header (blank) or an event (prefilled and linked). */
+  onRecordInPerson?(seed: InPersonSeed): void;
+  /** Bumped when an in-person recording starts or finishes, so event marks reload. */
+  inPersonRevision?: number;
 }) {
   const storageKey = `meetings-ai:calendar-view:${calendarIdentity}`;
   const [initial] = useState(() => initialPreferences(storageKey));
@@ -108,6 +115,8 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
   const rangeValid = Number.isFinite(rangeDays) && rangeDays >= 1 && rangeDays <= 90;
   // Teammates' assistants for calls on this calendar (who brings the assistant).
   const coordination = useCalendarCoordination(startDate, endDate, snapshot.syncs.map((item) => item.last_synced_at).join("|"));
+  // In-person recordings started from these events ("Recorded in person" marks).
+  const inPersonLinks = useInPersonCalendarLinks(`${startDate}:${endDate}:${inPersonRevision}:${snapshot.syncs.map((item) => item.last_synced_at).join("|")}`);
 
   useEffect(() => {
     if (preferredConnectionId) onPreferredConnectionApplied?.();
@@ -288,6 +297,7 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
       description="Meetings from your connected calendars, saved between visits."
       actions={<>
         <button type="button" className="button secondary" title={`Sync ${syncScope}`} disabled={syncing || !active.length || !rangeValid} onClick={() => void sync()}><RefreshCw aria-hidden="true" className={busy ? "calendar-spin" : undefined} /> {busy ? "Syncing…" : "Sync now"}</button>
+        {onRecordInPerson ? <button type="button" className={onNewMeeting && canSchedule ? "button secondary" : "button primary"} onClick={() => onRecordInPerson(BLANK_SEED)}><Mic aria-hidden="true" /> Record in person</button> : null}
         {onNewMeeting && canSchedule ? <button type="button" className="button primary" onClick={onNewMeeting}><Plus aria-hidden="true" /> New meeting</button> : null}
       </>}
     />
@@ -319,9 +329,10 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
         <div className="calendar-layout">
           <MonthGrid month={month} days={monthDays} selectedDay={selectedDay} entriesByDay={entriesByDay} connections={connections} onSelectDay={(key) => { setSelectedDay(key); setSelectedEvent(null); }} />
           <div className="calendar-side">
-            <DayAgenda selectedDay={selectedDay} dayEntries={dayEntries} rangeEntries={visibleEntries} selectedEventId={selectedEvent?.id ?? null} hasAccounts={active.length > 0} connections={connections} query={query} searchedCount={rangeEntries.length} onClearQuery={() => setQuery("")} onSelectEntry={(entry) => setSelectedEvent(entry.event)} onJumpToEntry={(entry) => { setSelectedDay(eventDay(entry.event.starts_at, timezone)); setSelectedEvent(entry.event); }} markFor={(entry) => <CalendarCoordinationMark item={coordination.forEntry(entry)} />} />
+            <DayAgenda selectedDay={selectedDay} dayEntries={dayEntries} rangeEntries={visibleEntries} selectedEventId={selectedEvent?.id ?? null} hasAccounts={active.length > 0} connections={connections} query={query} searchedCount={rangeEntries.length} onClearQuery={() => setQuery("")} onSelectEntry={(entry) => setSelectedEvent(entry.event)} onJumpToEntry={(entry) => { setSelectedDay(eventDay(entry.event.starts_at, timezone)); setSelectedEvent(entry.event); }} markFor={(entry) => <><InPersonCalendarMark link={inPersonLinks.forEntry(entry)} /><CalendarCoordinationMark item={coordination.forEntry(entry)} /></>} />
             <EventDetail entry={selectedEntry} connections={connections} canSchedule={canSchedule} alreadyScheduled={selectedScheduled} onSchedule={() => { if (selectedEvent) scheduleSelected(selectedEvent); }} onPrepare={() => { if (selectedEvent) onPrepare(selectedEvent); }}
-              coordination={<EventCoordination key={`coordination-${selectedEntry?.id ?? "none"}`} item={coordination.forEntry(selectedEntry)} onShared={() => void coordination.reload()} onOpenMeeting={onOpenMeeting} />} />
+              onRecordInPerson={onRecordInPerson ? () => { if (selectedEvent) onRecordInPerson(inPersonSeedFromEvent(selectedEvent, eventDay(selectedEvent.starts_at, timezone), timezone)); } : undefined}
+              coordination={<><InPersonEventLink link={inPersonLinks.forEntry(selectedEntry)} onOpenMeeting={onOpenMeeting} /><EventCoordination key={`coordination-${selectedEntry?.id ?? "none"}`} item={coordination.forEntry(selectedEntry)} onShared={() => void coordination.reload()} onOpenMeeting={onOpenMeeting} /></>} />
           </div>
         </div>
       </Tabs.Panel>

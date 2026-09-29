@@ -24,8 +24,9 @@ function Metadata({ label, value }: { label: string; value: string }) {
   return <div><dt>{label}</dt><dd>{value}</dd></div>;
 }
 
-function routeLabel(route: TranscriptionRoute): string {
+function routeLabel(route: TranscriptionRoute, inPerson: boolean): string {
   if (route.mode === "profile") return `${route.profile_name} · ${route.model} · ${route.endpoint_host}`;
+  if (inPerson) return "Chosen when the recording is transcribed";
   return route.mode === "vexa_deployment" ? "Vexa deployment default" : "Chosen when the assistant joins";
 }
 
@@ -34,22 +35,23 @@ function RouteMark({ route }: { route: TranscriptionRoute }) {
   return brand ? <ProviderBrandIcon brand={brand} size="xs" /> : null;
 }
 
-export function MeetingDetailsCard({ meeting, route }: { meeting: MeetingDetail; route: TranscriptionRoute | null }) {
+/** `inPerson`: a meeting recorded from a phone or laptop, with no assistant in a call. */
+export function MeetingDetailsCard({ meeting, route, inPerson }: { meeting: MeetingDetail; route: TranscriptionRoute | null; inPerson?: { recordedOn: string } }) {
   return <section className="card" aria-labelledby="meeting-details-title">
     <div className="card-header"><div><h2 id="meeting-details-title">Meeting details</h2></div></div>
     <div className="card-body">
       <dl className="meta-list">
         <Metadata label="Platform" value={meeting.platform} />
-        <Metadata label="Assistant" value={meeting.botName} />
-        <Metadata label="Joined" value={formatTimestamp(meeting.joinedAt)} />
+        {inPerson ? <Metadata label="Recording" value={inPerson.recordedOn} /> : <Metadata label="Assistant" value={meeting.botName} />}
+        <Metadata label={inPerson ? "Started" : "Joined"} value={formatTimestamp(meeting.joinedAt)} />
         <Metadata label="Stopped" value={formatTimestamp(meeting.stoppedAt)} />
         <Metadata label="Duration" value={meeting.duration} />
         <Metadata label="Last update" value={formatTimestamp(meeting.updatedAt)} />
       </dl>
       {route ? <section className="record-runtime" aria-label="Transcription runtime route">
         <h3>Transcription runtime</h3>
-        <p className="provider-route">{route.mode === "profile" ? <RouteMark route={route} /> : null}<span>{routeLabel(route)}</span></p>
-        <p className="field-hint">Fixed for this bot run. New provider defaults apply to the next join.</p>
+        <p className="provider-route">{route.mode === "profile" ? <RouteMark route={route} /> : null}<span>{routeLabel(route, Boolean(inPerson))}</span></p>
+        <p className="field-hint">{inPerson ? "Uses the workspace's speech-to-text profile." : "Fixed for this bot run. New provider defaults apply to the next join."}</p>
       </section> : null}
     </div>
   </section>;

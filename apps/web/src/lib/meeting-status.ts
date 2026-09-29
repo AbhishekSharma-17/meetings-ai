@@ -41,6 +41,7 @@ export const attentionStatuses: ReadonlySet<MeetingStatus> = new Set(["failed", 
 
 /** Short platform monogram used in list rows; avoids per-meeting colour. */
 export function platformMonogram(platform: Meeting["platform"] | string): string {
+  if (platform === "In person" || platform === "in_person") return "IP";
   if (/zoom/i.test(platform)) return "Zm";
   if (/teams/i.test(platform)) return "Tm";
   if (/jitsi/i.test(platform)) return "Ji";

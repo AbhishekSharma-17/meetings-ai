@@ -13,6 +13,7 @@ from meetings_contracts import (
     MeetingPublic,
     MeetingParticipant,
     MeetingParticipantsResponse,
+    MeetingPlatform,
     MeetingStatus,
     MeetingTranscriptResponse,
     MeetingTranscriptSegment,
@@ -144,6 +145,9 @@ class MeetingService:
 
     async def join(self, meeting_id: UUID) -> Meeting:
         meeting = self.repository.get_meeting(meeting_id)
+        if meeting.platform is MeetingPlatform.IN_PERSON:
+            # Recorded from a phone or laptop browser: there is never an assistant to send (or Vexa to call).
+            raise MeetingConflictError("in-person meetings are recorded from a browser; there is no assistant to join")
         if meeting.status not in {MeetingStatus.CREATED, MeetingStatus.FAILED}:
             raise MeetingConflictError(
                 f"meeting cannot join while status is {meeting.status.value}"
@@ -243,6 +247,8 @@ class MeetingService:
         meeting = self.repository.get_meeting(meeting_id)
         if meeting.status in {MeetingStatus.STOPPING, *_TERMINAL_STATUSES}:
             return meeting
+        if meeting.platform is MeetingPlatform.IN_PERSON:
+            raise MeetingConflictError("stop an in-person recording on the device that is recording it")
         if meeting.vexa_meeting_id is None:
             raise MeetingConflictError("meeting has not been joined yet")
         try:
@@ -279,6 +285,13 @@ class MeetingService:
     async def transcript(self, meeting_id: UUID, *, allow_cached: bool = True) -> MeetingTranscriptResponse:
         """Fresh transcript from Vexa; with ``allow_cached`` a Vexa outage falls back to the saved copy."""
         meeting = self.repository.get_meeting(meeting_id)
+        if meeting.platform is MeetingPlatform.IN_PERSON:
+            # The final pass saves the transcript; live captions are not part of it.
+            stored = self.repository.get_transcript(meeting.id)
+            return MeetingTranscriptResponse(
+                meeting_id=meeting.id, vexa_meeting_id=None, status=meeting.status,
+                segments=stored, segment_count=len(stored),
+            )
         if meeting.vexa_meeting_id is None:
             cached = self.repository.get_transcript(meeting.id)
             if meeting.status is MeetingStatus.COMPLETED and cached:

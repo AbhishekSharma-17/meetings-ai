@@ -15,6 +15,7 @@ import { CoverageChip, useCoverageSummaries } from "./coordination-chips";
 import type { CoverageSummary } from "@/lib/coordination";
 import { FilterInput, NoMatches } from "./scroll-panel";
 import { matchesQuery } from "@/lib/search";
+import { InPersonChip, isInPerson } from "./in-person-meeting-panels";
 
 type Filter = "all" | "scheduled" | "live" | "review" | "reviewed" | "attention" | "completed";
 
@@ -54,7 +55,7 @@ function formatWhen(value: string): string {
   return Number.isNaN(date.getTime()) ? value : formatFullDateTime(date);
 }
 
-export function MeetingsLibrary({ identity, meetings, onOpen, onNew, onCalendar }: { identity: string; meetings: Meeting[]; onOpen(id: string): void; onNew(): void; onCalendar(): void }) {
+export function MeetingsLibrary({ identity, meetings, onOpen, onNew, onCalendar, onRecordInPerson }: { identity: string; meetings: Meeting[]; onOpen(id: string): void; onNew(): void; onCalendar(): void; onRecordInPerson?(): void }) {
   const [schedules, setSchedules] = useState<CalendarSchedule[]>([]);
   const [filter, setFilter] = useUiPreference(`meetings-ai:meeting-filter:${identity}`, "all" as Filter, (value): value is Filter => filters.includes(value as Filter));
   const [query, setQuery] = useUiPreference(`meetings-ai:meeting-query:${identity}`, "", (value): value is string => typeof value === "string" && value.length <= 120, "session");
@@ -70,7 +71,7 @@ export function MeetingsLibrary({ identity, meetings, onOpen, onNew, onCalendar 
       titleId="meetings-title"
       title="Meetings"
       description="Scheduled assistants and past captures, all in one place."
-      actions={<><button className="button secondary" onClick={onCalendar}><CalendarClock aria-hidden="true" /> Calendar</button><button className="button primary" onClick={onNew}><Plus aria-hidden="true" /> New meeting</button></>}
+      actions={<><button className="button secondary" onClick={onCalendar}><CalendarClock aria-hidden="true" /> Calendar</button>{onRecordInPerson ? <button className="button secondary" onClick={onRecordInPerson}><Mic aria-hidden="true" /> Record in person</button> : null}<button className="button primary" onClick={onNew}><Plus aria-hidden="true" /> New meeting</button></>}
     />
     <div className="library-toolbar">
       <div className="segmented library-filters" role="group" aria-label="Filter meetings">
@@ -98,7 +99,7 @@ function LibraryRow({ meeting, schedule, coverage, onOpen }: { meeting: Meeting;
   return <li>
     <button type="button" className="library-row" aria-label={`Open ${meeting.title}`} onClick={onOpen}>
       <span className="library-platform" aria-hidden="true">{platformMonogram(meeting.platform)}</span>
-      <span className="library-row-copy"><b>{meeting.title}</b><small>{meeting.platform} · {when}{meeting.participants ? ` · ${meeting.participants} participant${meeting.participants === 1 ? "" : "s"}` : ""}</small></span>
+      <span className="library-row-copy"><b>{meeting.title}</b><small>{isInPerson(meeting) ? <InPersonChip className="inline" /> : meeting.platform} · {when}{meeting.participants ? ` · ${meeting.participants} participant${meeting.participants === 1 ? "" : "s"}` : ""}</small></span>
       <span className="library-row-duration">{meeting.duration === "—" ? "" : meeting.duration}</span>
       <span className="library-row-status">
         <CoverageChip summary={coverage} />

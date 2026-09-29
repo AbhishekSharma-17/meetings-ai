@@ -6,13 +6,16 @@ import { ArrowRight, CalendarDays, CircleAlert, CircleCheck, FileText, Mic, Plus
 import { ProvidersIcon } from "./ui-icons";
 import { PageHeader } from "./ui/page-header";
 import { EmptyState } from "./ui/feedback";
+import { InPersonChip, isInPerson } from "./in-person-meeting-panels";
 
 const RECENT_LIMIT = 6;
 
-export function Dashboard({ meetings, account, onNewMeeting, onOpenCalendar, onOpenProviders, onOpenKnowledge, onOpenMeetings, onOpenMeeting }: {
+export function Dashboard({ meetings, account, onNewMeeting, onRecordInPerson, onOpenCalendar, onOpenProviders, onOpenKnowledge, onOpenMeetings, onOpenMeeting }: {
   meetings: Meeting[];
   account: CurrentAccount | null;
   onNewMeeting(): void;
+  /** Opens the in-person recorder (face-to-face meetings recorded from this device). */
+  onRecordInPerson?(): void;
   onOpenCalendar(): void;
   onOpenProviders(): void;
   onOpenKnowledge(): void;
@@ -31,7 +34,7 @@ export function Dashboard({ meetings, account, onNewMeeting, onOpenCalendar, onO
         titleId="dashboard-title"
         title={greeting}
         description="Capture the meeting, review what matters and move decisions forward."
-        actions={<><button className="button secondary" onClick={onOpenCalendar}><CalendarDays /> Calendar</button><button className="button primary" onClick={onNewMeeting}><Plus /> New meeting</button></>}
+        actions={<><button className="button secondary" onClick={onOpenCalendar}><CalendarDays /> Calendar</button>{onRecordInPerson ? <button className="button secondary" onClick={onRecordInPerson}><Mic /> Record in person</button> : null}<button className="button primary" onClick={onNewMeeting}><Plus /> New meeting</button></>}
       />
 
       <div className="stat-grid dashboard-stats" aria-label="Meeting summary">
@@ -85,7 +88,7 @@ function MeetingRow({ meeting, onOpen }: { meeting: Meeting; onOpen(): void }) {
   return <li>
     <button type="button" className="dashboard-meeting" aria-label={`Open ${meeting.title}`} onClick={onOpen}>
       <span className="platform-tile" aria-hidden="true">{platformMonogram(meeting.platform)}</span>
-      <span className="dashboard-meeting-copy"><b>{meeting.title}</b><small>{meeting.platform} · {meeting.startsAt}{meeting.participants ? ` · ${meeting.participants} participant${meeting.participants === 1 ? "" : "s"}` : ""}</small></span>
+      <span className="dashboard-meeting-copy"><b>{meeting.title}</b><small>{isInPerson(meeting) ? <InPersonChip className="inline" /> : meeting.platform} · {meeting.startsAt}{meeting.participants ? ` · ${meeting.participants} participant${meeting.participants === 1 ? "" : "s"}` : ""}</small></span>
       <MeetingBadge meeting={meeting} />
       <span className="dashboard-meeting-duration">{meeting.duration === "—" ? "" : meeting.duration}</span>
       <ArrowRight className="row-arrow" aria-hidden="true" />

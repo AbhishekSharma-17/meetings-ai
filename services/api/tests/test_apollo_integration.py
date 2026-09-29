@@ -302,12 +302,16 @@ def test_v28_database_upgrades_to_v29_with_apollo_tables(tmp_path) -> None:
     with database.engine.begin() as connection:
         connection.execute(text("DROP TABLE workspace_integrations"))
         connection.execute(text("DROP TABLE apollo_cache"))
-        connection.execute(text("DELETE FROM schema_version WHERE version = 29"))
+        # Back to a real v28 database: later versions' tables go too (v30: in-person recording).
+        connection.execute(text("DROP TABLE in_person_chunks"))
+        connection.execute(text("DROP TABLE in_person_sessions"))
+        connection.execute(text("DELETE FROM schema_version WHERE version >= 29"))
     database.engine.dispose()
     upgraded = Database(url)
     upgraded.migrate()
     with upgraded.session_factory() as session:
-        assert max(session.execute(select(SchemaVersionRow.version)).scalars().all()) == 29 == Database.SCHEMA_VERSION
+        # Later versions (v30+) are applied on top in the same upgrade.
+        assert max(session.execute(select(SchemaVersionRow.version)).scalars().all()) == Database.SCHEMA_VERSION >= 29
     with upgraded.engine.connect() as connection:
         names = set(upgraded.engine.dialect.get_table_names(connection))
     assert {"workspace_integrations", "apollo_cache"} <= names

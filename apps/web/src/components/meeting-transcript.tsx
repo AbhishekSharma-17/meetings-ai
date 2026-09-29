@@ -11,6 +11,9 @@ import { EmptyState } from "./ui/feedback";
 import { FilterInput, Highlight, NoMatches, SearchToolbar } from "./scroll-panel";
 import { matchesQuery, shouldOfferSearch } from "@/lib/search";
 
+/** Plain words for attribution sources that are not self-explanatory (in-person recordings). */
+const attributionLabel: Record<string, string> = { in_person_diarized: "Voice separated", in_person_single: "Speakers not separated" };
+
 export const UNIDENTIFIED_SPEAKER = "Unidentified speaker";
 
 export function transcriptSeconds(value: string | number | null): number {
@@ -115,7 +118,7 @@ export function MeetingTranscript({ meetingTitle, assistantName, segments, focus
     const at = transcriptSeconds(segment.startedAt);
     const flags = <>
       {!segment.isFinal ? <span className="turn-flag">Provisional</span> : null}
-      {segment.speakerReviewed ? <span className="turn-flag reviewed">Reviewed</span> : segment.attributionSource ? <span className="turn-flag">{segment.attributionSource}</span> : null}
+      {segment.speakerReviewed ? <span className="turn-flag reviewed">Reviewed</span> : segment.attributionSource ? <span className="turn-flag">{attributionLabel[segment.attributionSource] ?? segment.attributionSource}</span> : null}
       {segment.rawSpeaker && segment.rawSpeaker !== segment.speaker && segment.speaker === UNIDENTIFIED_SPEAKER ? <span className="turn-flag">Capture label: {segment.rawSpeaker}</span> : null}
     </>;
     const review = <button className="text-button neutral" type="button" onClick={() => { setEditingSpeakerId(segment.segmentId); setSpeakerName(segment.speaker === UNIDENTIFIED_SPEAKER ? "" : segment.speaker); setApplyToSameLabel(false); }}>Review speaker</button>;

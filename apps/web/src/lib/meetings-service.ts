@@ -293,6 +293,7 @@ class ApiError extends Error {
 }
 
 function platformFrom(value: string | null | undefined, url: string): Meeting["platform"] {
+  if ((value ?? "").toLowerCase() === "in_person") return "In person";
   const source = `${value ?? ""} ${url}`.toLowerCase();
   if (source.includes("zoom")) return "Zoom";
   if (source.includes("teams") || source.includes("microsoft")) return "Microsoft Teams";

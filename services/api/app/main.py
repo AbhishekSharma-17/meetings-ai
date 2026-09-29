@@ -30,6 +30,7 @@ from meetings_contracts import (
     MeetingListResponse,
     MeetingMinutesDraft,
     MeetingMinutesPublic,
+    MeetingPlatform,
     MeetingPublic,
     MeetingStatus,
     MeetingParticipantsResponse,
@@ -111,6 +112,8 @@ from .provider_balances import ProviderBalanceService
 from .routes_balances import register_balance_routes
 from .apollo_integration import ApolloIntegrationService
 from .routes_integrations import register_integration_routes
+from .in_person_wiring import install_in_person
+from .routes_in_person import in_person_route_allowed
 from .stt_route import STTRouteError
 from .tenant import tenant_scope
 from .workspace_service import WorkspacePatch, WorkspacePublic, WorkspaceMemberPublic, WorkspaceService
@@ -244,6 +247,9 @@ def create_app(
         # Every PROVIDER_BALANCE_CHECK_HOURS (default 6, 0 = off): low-credit alerts for saved keys.
         if balances.interval_seconds > 0:
             tasks.append(asyncio.create_task(balances.run()))
+        # In-person audio cleanup (abandoned 24 h, interrupted final passes); on unless set to 0.
+        if os.getenv("IN_PERSON_CLEANUP_ENABLED", "1") != "0":
+            tasks.append(asyncio.create_task(in_person_finalizer.run()))
         return tasks
 
     @asynccontextmanager
@@ -353,6 +359,11 @@ def create_app(
     app.state.apollo = meeting_prep.apollo = balances.apollo = apollo_integration
     register_integration_routes(app, apollo=apollo_integration)
     register_balance_routes(app, balances=balances)
+    # Recording face-to-face meetings from a phone or laptop browser (platform in_person).
+    in_person_finalizer = install_in_person(
+        app, database=database, repository=repository, meeting_service=meeting_service, providers=service,
+        calendar_schedule=calendar_schedule, call_coordination=call_coordination, jobs=app.state.background_jobs,
+    )
 
     @app.middleware("http")
     async def require_admin(request: Request, call_next):
@@ -420,6 +431,7 @@ def create_app(
                         or (method in {"GET", "POST", "DELETE"} and re.fullmatch(r"/v1/documents(?:/url|/[0-9a-f-]{36}(?:/reindex)?)?", path))
                         or (method == "GET" and re.fullmatch(r"/v1/meetings/[0-9a-f-]+(?:/transcript|/leave)?", path))
                         or member_route_allowed(method, path)
+                        or in_person_route_allowed(method, path, actor.role)
                     )
                     if not allowed:
                         return JSONResponse(status_code=403, content={"detail": "workspace role does not permit this action"})
@@ -1273,7 +1285,7 @@ def create_app(
     ) -> MeetingTranscriptResponse:
         try:
             meeting = repository.get_meeting(meeting_id)
-            if meeting.vexa_meeting_id is None:
+            if meeting.vexa_meeting_id is None and meeting.platform is not MeetingPlatform.IN_PERSON:
                 raise MeetingConflictError("meeting has no transcript")
             repository.correct_speaker(
                 meeting_id, segment_id,

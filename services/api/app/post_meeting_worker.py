@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from meetings_contracts import MeetingStatus
+from meetings_contracts import MeetingPlatform, MeetingStatus
 
 from .notification_events import NO_EVENTS
 from .repository import MinutesNotFoundError
@@ -60,7 +60,7 @@ class PostMeetingWorker:
                 raise PostMeetingJobConflictError("automatic drafting is not enabled for this meeting")
             if meeting.status is not MeetingStatus.COMPLETED:
                 raise PostMeetingJobConflictError("meeting capture must complete before retrying MOM drafting")
-            if meeting.vexa_meeting_id is None:
+            if meeting.vexa_meeting_id is None and meeting.platform is not MeetingPlatform.IN_PERSON:
                 raise PostMeetingJobConflictError("meeting has no capture to process")
             try:
                 self.repository.get_minutes(meeting_id)
@@ -77,12 +77,14 @@ class PostMeetingWorker:
 
     async def _process_locked(self, meeting_id: UUID) -> None:
         meeting = self.repository.get_meeting(meeting_id)
-        if meeting.vexa_meeting_id is None:
+        # In-person recordings never have a Vexa capture: their final pass completes the meeting.
+        in_person = meeting.platform is MeetingPlatform.IN_PERSON
+        if meeting.vexa_meeting_id is None and not in_person:
             return
         job = self.repository.get_post_meeting_job(meeting.id)
         if job is None:
             return  # Historical meetings are not auto-processed on upgrade.
-        if meeting.status in ACTIVE:
+        if meeting.status in ACTIVE and not in_person:
             try:
                 meeting = await self.meetings.refresh(meeting.id)
             except Exception as exc:

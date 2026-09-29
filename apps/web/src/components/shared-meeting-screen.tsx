@@ -12,6 +12,8 @@ import { KnowledgeEvidenceScreen } from "./knowledge-evidence-screen";
 import { TranscriptTurn } from "./meeting-transcript";
 import { PageHeader } from "./ui/page-header";
 import { EmptyState, LoadingRow } from "./ui/feedback";
+import { inPersonService } from "@/lib/in-person-service";
+import { InPersonMemberMeeting } from "./in-person-member-meeting";
 
 const POLL_MS = 15_000;
 const LIVE = new Set<MeetingDetail["status"]>(["joining", "waiting_room", "live", "needs_attention", "stopping", "processing"]);
@@ -29,13 +31,17 @@ export function MemberMeetingScreen({ meetingId, focusSegmentId, backLabel, onBa
   meetingId: string; focusSegmentId: string | null; backLabel: string; onBack(): void; onBackToKnowledge(): void;
 }) {
   const [coverage, setCoverage] = useState<MeetingCoordination | null | undefined>(undefined);
+  // A meeting this person recorded in person (only the recorder can read its recording session).
+  const [recorded, setRecorded] = useState<boolean | undefined>(undefined);
   useEffect(() => {
     let active = true;
     void coordinationService.forMeeting(meetingId).then((view) => { if (active) setCoverage(view.your_role ? view : null); })
       .catch(() => { if (active) setCoverage(null); });
+    void inPersonService.get(meetingId).then((session) => { if (active) setRecorded(session.is_recorder); }).catch(() => { if (active) setRecorded(false); });
     return () => { active = false; };
   }, [meetingId]);
-  if (coverage === undefined) return <section className="page narrow"><LoadingRow>Opening meeting…</LoadingRow></section>;
+  if (recorded) return <InPersonMemberMeeting meetingId={meetingId} backLabel={backLabel} onBack={onBack} />;
+  if (coverage === undefined || recorded === undefined) return <section className="page narrow"><LoadingRow>Opening meeting…</LoadingRow></section>;
   if (!coverage) return <KnowledgeEvidenceScreen meetingId={meetingId} focusSegmentId={focusSegmentId} onBack={onBackToKnowledge} />;
   return <SharedMeetingScreen meetingId={meetingId} coverage={coverage} backLabel={backLabel} onBack={onBack} />;
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { CalendarDays, ChevronRight, Clock, NotebookPen } from "lucide-react";
+import { CalendarDays, ChevronRight, Clock, Mic, NotebookPen } from "lucide-react";
 import type { CalendarConnection, CalendarInvitee } from "@/lib/types";
 import { dayKeyIn } from "@/lib/time-format";
 import { Avatar } from "./ui/avatar";
@@ -138,8 +138,10 @@ export function DayAgenda({ selectedDay, dayEntries, rangeEntries, selectedEvent
 }
 
 /** Everything known about one meeting, every account it came from, plus the next step. */
-export function EventDetail({ entry, connections, canSchedule, alreadyScheduled, onSchedule, onPrepare, coordination }: {
+export function EventDetail({ entry, connections, canSchedule, alreadyScheduled, onSchedule, onPrepare, onRecordInPerson, coordination }: {
   entry: CalendarEntry | null;
+  /** Records this meeting in person from this device (title, invitees and the event link carry over). */
+  onRecordInPerson?(): void;
   /** Optional block about teammates' assistants for this call (call coordination). */
   coordination?: ReactNode;
   connections: CalendarConnection[];
@@ -188,6 +190,7 @@ export function EventDetail({ entry, connections, canSchedule, alreadyScheduled,
       {canSchedule ? alreadyScheduled
         ? <Badge tone="success" dot>Assistant already scheduled</Badge>
         : <button type="button" className="button secondary" onClick={onSchedule}>Set up assistant</button> : null}
+      {onRecordInPerson ? <button type="button" className="button secondary" onClick={onRecordInPerson}><Mic aria-hidden="true" /> Record in person</button> : null}
       <button type="button" className="button primary" onClick={onPrepare}><NotebookPen aria-hidden="true" /> Prepare for meeting</button>
     </div>
     <small className="calendar-sync-meta">Last synced {formatDateTime(lastSynced)}</small>

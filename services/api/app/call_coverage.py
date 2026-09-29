@@ -95,7 +95,9 @@ def load_records(session: Session, organization_id: str, *, platform: str | None
                  meeting_ids: list[str] | None = None) -> list[AssistantRecord]:
     """Assistant records of one workspace (optionally one platform or a set of meetings)."""
     query = select(MeetingRow).join(MeetingTenantRow, MeetingTenantRow.meeting_id == MeetingRow.id).where(
-        MeetingTenantRow.organization_id == organization_id)
+        MeetingTenantRow.organization_id == organization_id,
+        # In-person recordings have no call to share or double-join; coordination never considers them.
+        MeetingRow.platform != "in_person")
     if platform:
         query = query.where(MeetingRow.platform == platform)
     if meeting_ids is not None:

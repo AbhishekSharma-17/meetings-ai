@@ -195,8 +195,12 @@ test("demo mode: Apollo is connected with sample credits and briefing data, and 
     return route.fulfill({ status: 599, json: { detail: "A demo request reached the network." } });
   });
   await page.goto("/");
+  // The signed-out session check (run twice by React in development) happens before the demo
+  // starts; only requests made after entering the demo count as leaks.
+  const explore = page.getByRole("button", { name: "Explore the demo" });
+  await explore.waitFor();
   allowSessionCheck = false;
-  await page.getByRole("button", { name: "Explore the demo" }).click();
+  await explore.click();
   const nav = (name: string) => page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name, exact: true }).click();
 
   await nav("Meeting prep");

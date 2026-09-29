@@ -29,7 +29,8 @@ Confidence = Literal["high", "medium", "low"]
 CandidateSource = Literal["invite", "organizer", "workspace_member"]
 
 _EMAIL = re.compile(r"[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+")
-_GENERIC_SPEAKER = re.compile(r"^(?:speaker|participant|guest|unknown|user|seg|person|caller)[\s_-]*\d*$")
+# "Speaker 2", "guest", and the in-person diarization labels "Speaker A" / "Speaker AB".
+_GENERIC_SPEAKER = re.compile(r"^(?:speaker|participant|guest|unknown|user|seg|person|caller)(?:[\s_-]*\d*|\s[a-z]{1,2})$")
 _HONORIFICS = frozenset({"mr", "mrs", "ms", "miss", "dr", "prof", "sir"})
 _MIN_PREFIX = 3
 _MAX_ALTERNATIVES = 5
