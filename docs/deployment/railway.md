@@ -51,10 +51,29 @@ service names:
 ```sh
 railway whoami
 railway status
-railway up --service meetings-ai-vexa --detach
-railway up --service meetings-ai-api --detach
+railway up --service meetings-ai-vexa --detach   # only when Vexa changed
+railway up --service meetings-ai-api --detach    # wait for SUCCESS before the web
 railway up --service meetings-ai-web --detach
 ```
+
+Deploy settings for the API and web services live in
+[`.railway/railway.ts`](../../.railway/railway.ts) (Railway Infrastructure as Code; the older
+`railway.json` config-as-code is deprecated and stops being read on 2026-12-01). Both services
+use a health check, so a release only takes traffic once it answers (`/ready` for the API,
+which also requires a reachable database at the current schema version; `/` for the web). A
+release that never becomes healthy fails and the previous one keeps serving. The web keeps the
+old release for 15 s after the switch (`overlapSeconds`). The API uses no overlap and a short
+10 s drain because its in-process background loops assume a single running instance (see
+below). Deploy the API before the web so the previous web release never talks to an older API.
+
+The file is a *named partial* (`export const partial = "app-services"`) that declares only
+the web and API services. Keep that line: without it Railway treats the file as the whole
+project and `railway config apply` would delete the Vexa service and both databases. Variables
+appear only as `preserve()`, so values never enter Git, and builds keep using each service's
+Dockerfile through its `RAILWAY_DOCKERFILE_PATH` variable. To check for drift, run
+`npm install --no-save railway@3` and then `railway config plan` (it should report the
+configuration is already up to date). Change a setting by editing the file, reviewing
+`railway config plan`, then running `railway config apply`.
 
 Deploy Vexa first when changing its image or STT contract. The API should
 have one replica while the calendar scheduler, MOM, knowledge-index, and
