@@ -1179,7 +1179,7 @@ def create_app(
     @app.get("/v1/meetings/{meeting_id}", response_model=MeetingPublic)
     async def get_meeting(meeting_id: UUID) -> MeetingPublic:
         try:
-            return meeting_service.to_public(await meeting_service.get(meeting_id))
+            return meeting_service.to_public_with_minutes(await meeting_service.get(meeting_id))
         except MEETING_EXCEPTIONS as exc:
             raise api_error(exc) from exc
 

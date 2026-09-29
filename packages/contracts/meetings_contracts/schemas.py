@@ -344,6 +344,8 @@ class MeetingPublic(BaseModel):
     joined_at: datetime | None
     stopped_at: datetime | None
     last_refreshed_at: datetime | None
+    # Where the minutes are (draft, approved, sent); None until drafted. Filled in meeting lists.
+    minutes_status: "MinutesStatus | None" = None
 
 
 class MeetingListResponse(BaseModel):
@@ -523,3 +525,8 @@ class EmailDeliveryPublic(BaseModel):
     error: str | None
     created_at: datetime
     groups: list[DeliveryGroupUsed] = Field(default_factory=list)
+
+
+# MeetingPublic refers to MinutesStatus, which is defined further down this module.
+MeetingPublic.model_rebuild()
+MeetingListResponse.model_rebuild()

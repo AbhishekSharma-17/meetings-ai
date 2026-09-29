@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { CurrentAccount, Meeting } from "@/lib/types";
-import { attentionStatuses, inProgressStatuses, meetingStatusLabel, platformMonogram } from "@/lib/meeting-status";
+import { attentionStatuses, inProgressStatuses, needsReview, platformMonogram } from "@/lib/meeting-status";
+import { MeetingBadge } from "./meeting-badge";
 import { ArrowRight, CalendarDays, CircleAlert, CircleCheck, FileText, Mic, Plus, Radio, BrainCircuit, Video } from "lucide-react";
 import { ProvidersIcon } from "./ui-icons";
 import { PageHeader } from "./ui/page-header";
@@ -18,7 +19,7 @@ export function Dashboard({ meetings, account, onNewMeeting, onOpenCalendar, onO
   onOpenMeetings(): void;
   onOpenMeeting(id: string): void;
 }) {
-  const readyCount = meetings.filter((meeting) => meeting.status === "ready").length;
+  const readyCount = meetings.filter(needsReview).length;
   const liveCount = meetings.filter((meeting) => inProgressStatuses.has(meeting.status)).length;
   const attentionCount = meetings.filter((meeting) => attentionStatuses.has(meeting.status)).length;
   const firstName = account?.display_name.trim().split(/\s+/)[0];
@@ -85,7 +86,7 @@ function MeetingRow({ meeting, onOpen }: { meeting: Meeting; onOpen(): void }) {
     <button type="button" className="dashboard-meeting" aria-label={`Open ${meeting.title}`} onClick={onOpen}>
       <span className="platform-tile" aria-hidden="true">{platformMonogram(meeting.platform)}</span>
       <span className="dashboard-meeting-copy"><b>{meeting.title}</b><small>{meeting.platform} · {meeting.startsAt}{meeting.participants ? ` · ${meeting.participants} participant${meeting.participants === 1 ? "" : "s"}` : ""}</small></span>
-      <span className={`status ${meeting.status}`}>{meetingStatusLabel[meeting.status]}</span>
+      <MeetingBadge meeting={meeting} />
       <span className="dashboard-meeting-duration">{meeting.duration === "—" ? "" : meeting.duration}</span>
       <ArrowRight className="row-arrow" aria-hidden="true" />
     </button>

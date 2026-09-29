@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { FileText, MessageSquareText } from "lucide-react";
 import { coordinationService, firstName, possessive, type MeetingCoordination } from "@/lib/coordination";
 import { meetingsService } from "@/lib/meetings-service";
-import { meetingStatusLabel } from "@/lib/meeting-status";
+import { MeetingBadge } from "./meeting-badge";
 import type { MeetingDetail, MeetingMinutes, TranscriptSegment } from "@/lib/types";
 import { formatFullDateTime } from "@/lib/time-preferences";
 import { CallCoordinationPanel } from "./call-coordination-panel";
@@ -74,7 +74,7 @@ function SharedMeetingScreen({ meetingId, coverage, backLabel, onBack }: { meeti
   return <section className="page narrow shared-meeting" aria-labelledby="shared-meeting-title">
     <PageHeader back={{ label: backLabel, onClick: onBack }} eyebrow={`Shared by ${owner?.display_name ?? "a teammate"}`} titleId="shared-meeting-title"
       title={meeting?.title ?? (error ? "Meeting unavailable" : <span className="skeleton record-title-skeleton" aria-hidden="true" />)}
-      badge={meeting ? <span className={`status ${meeting.status}`}>{meetingStatusLabel[meeting.status]}</span> : undefined}
+      badge={meeting ? <MeetingBadge meeting={meeting} /> : undefined}
       description={meeting ? `${meeting.platform} · ${meeting.joinedAt ? `Joined ${formatFullDateTime(meeting.joinedAt)}` : `${possessive(firstName(owner))} assistant hasn't joined yet`}` : undefined} />
     {error ? <p className="form-error" role="alert">{error}</p> : null}
     <CallCoordinationPanel meetingId={meetingId} onChanged={() => void coordinationService.forMeeting(meetingId).catch(() => onBack())} />

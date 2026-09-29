@@ -337,6 +337,16 @@ class SQLAlchemyRepository:
             cloud_profile_id=UUID(row.cloud_profile_id) if row.cloud_profile_id else None,
         )
 
+    def minutes_statuses(self, meeting_ids: list[UUID]) -> dict[str, str]:
+        """Minutes status by meeting id, in one query (meetings without minutes are absent)."""
+        if not meeting_ids:
+            return {}
+        with self.database.session_factory() as session:
+            rows = session.query(MeetingMinutesRow.meeting_id, MeetingMinutesRow.status).filter(
+                MeetingMinutesRow.meeting_id.in_([str(item) for item in meeting_ids])
+            ).all()
+        return {meeting_id: status for meeting_id, status in rows}
+
     def list_meetings(self) -> list[Meeting]:
         with self.database.session_factory() as session:
             rows = session.query(MeetingRow).join(

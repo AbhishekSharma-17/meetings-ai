@@ -1,4 +1,4 @@
-import type { AccountLinkPreview, AuditEvent, BriefDocument, CalendarConnection, CalendarEvent, CalendarPeriod, CalendarSchedule, CalendarSnapshot, Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeTextProfile, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, MomGuidance, OrganizationBrief, PostMeetingJob, PrepReport, AiSettingsInput, AiSettingsView, CredentialTestResult, ModelCatalog, ModelCatalogQuery, ProfileKeyChoice, ProfileKind, ProviderProfile, ResendStatus, VaultCredential, VaultCredentialInput, VaultProviderType, RetentionPolicy, SpeakerIdentity, SpeakerSuggestion, Team, TeamInput, TextModelCatalog, TranscriptSegment, TranscriptionRoute, UsageSummary, Workspace, WorkspaceCalendarConnection, WorkspaceMember, WorkspaceOperations, WorkspaceOption } from "./types";
+import type { AccountLinkPreview, AuditEvent, BriefDocument, CalendarConnection, CalendarEvent, CalendarPeriod, CalendarSchedule, CalendarSnapshot, Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeTextProfile, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, MinutesStatus, MomGuidance, OrganizationBrief, PostMeetingJob, PrepReport, AiSettingsInput, AiSettingsView, CredentialTestResult, ModelCatalog, ModelCatalogQuery, ProfileKeyChoice, ProfileKind, ProviderProfile, ResendStatus, VaultCredential, VaultCredentialInput, VaultProviderType, RetentionPolicy, SpeakerIdentity, SpeakerSuggestion, Team, TeamInput, TextModelCatalog, TranscriptSegment, TranscriptionRoute, UsageSummary, Workspace, WorkspaceCalendarConnection, WorkspaceMember, WorkspaceOperations, WorkspaceOption } from "./types";
 import { formatDateTime } from "./time-store";
 
 export interface MeetingsService {
@@ -145,6 +145,7 @@ type BackendDefault = {
 
 type BackendMeeting = {
   id: string;
+  minutes_status?: string | null;
   title?: string | null;
   meeting_url?: string | null;
   url?: string | null;
@@ -312,6 +313,10 @@ function meetingStatus(value: string | null | undefined): MeetingStatus {
   return "created";
 }
 
+function minutesStatusFrom(value: string | null | undefined): MinutesStatus | null {
+  return value === "draft" || value === "approved" || value === "sent" ? value : null;
+}
+
 function timestamp(value: string | number | null | undefined): string | number | null {
   if (value === null || value === undefined || value === "") return null;
   if (typeof value === "number") return value;
@@ -343,6 +348,7 @@ function toMeetingDetail(meeting: BackendMeeting): MeetingDetail {
     tags: meeting.tags ?? [],
     knowledgeEnabled: meeting.knowledge_enabled ?? false,
     knowledgeBaseId: meeting.knowledge_base_id ?? null,
+    minutesStatus: minutesStatusFrom(meeting.minutes_status),
     startsAt: relativeTimestamp(createdAt),
     duration: meeting.duration || "—",
     participants: meeting.participant_count ?? meeting.participants ?? 0,

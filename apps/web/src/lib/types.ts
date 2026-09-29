@@ -8,6 +8,8 @@ export type Meeting = {
   participants: number;
   status: MeetingStatus;
   platform: "Google Meet" | "Zoom" | "Microsoft Teams";
+  /** Where the minutes are once drafted; null until then (older APIs omit it). */
+  minutesStatus?: MinutesStatus | null;
 };
 
 export type MeetingDetail = Meeting & {

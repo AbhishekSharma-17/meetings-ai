@@ -56,6 +56,11 @@ class FakeTextAdapter:
         )
 
 
+def _listed_minutes_status(client: TestClient, meeting_id: str) -> str | None:
+    listed = client.get("/v1/meetings").json()["items"]
+    return next(item for item in listed if item["id"] == meeting_id)["minutes_status"]
+
+
 def test_generate_review_approve_and_send_minutes() -> None:
     sent_payloads: list[dict[str, object]] = []
 
@@ -124,8 +129,10 @@ def test_generate_review_approve_and_send_minutes() -> None:
             ],
         )
 
+        assert _listed_minutes_status(client, meeting_id) is None  # no minutes yet
         generated = client.post(f"/v1/meetings/{meeting_id}/minutes/generate")
         assert generated.status_code == 200
+        assert _listed_minutes_status(client, meeting_id) == "draft"
         assert generated.json()["status"] == "draft"
         assert generated.json()["action_items"][0]["owner"] == "Abhishek"
         assert generated.json()["provider"] == "fake-openai"
@@ -156,6 +163,7 @@ def test_generate_review_approve_and_send_minutes() -> None:
         approved = client.post(f"/v1/meetings/{meeting_id}/minutes/approve")
         assert approved.status_code == 200
         assert approved.json()["status"] == "approved"
+        assert _listed_minutes_status(client, meeting_id) == "approved"
 
         delivered = client.post(
             f"/v1/meetings/{meeting_id}/minutes/send",
@@ -180,6 +188,9 @@ def test_generate_review_approve_and_send_minutes() -> None:
 
         final = client.get(f"/v1/meetings/{meeting_id}/minutes")
         assert final.json()["status"] == "sent"
+        # The meetings list shows the recap as sent, not still "ready to review".
+        assert _listed_minutes_status(client, meeting_id) == "sent"
+        assert client.get(f"/v1/meetings/{meeting_id}").json()["minutes_status"] == "sent"
         assert final.json()["sent_at"] is not None
 
 

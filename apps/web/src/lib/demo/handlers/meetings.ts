@@ -96,6 +96,11 @@ function source(store: DemoStore, seed: MeetingSeed): CalendarEvent | null {
   };
 }
 
+/** The meeting as the API returns it, with where its minutes are (see MeetingPublic.minutes_status). */
+function withMinutesStatus(store: DemoStore, meeting: MeetingSeed["meeting"]) {
+  return { ...meeting, minutes_status: store.minutes[meeting.id]?.status ?? null };
+}
+
 function withSeed(handler: (seed: MeetingSeed, request: DemoRequest) => Response) {
   return (request: DemoRequest) => {
     const seed = findSeed(request.store, request.params.id);
@@ -105,14 +110,14 @@ function withSeed(handler: (seed: MeetingSeed, request: DemoRequest) => Response
 
 export function registerMeetings(router: DemoRouter): void {
   router
-    .on("GET", "/v1/meetings", ({ store }) => { advanceMeetings(store); return json({ items: store.seeds.map((seed) => seed.meeting), count: store.seeds.length }); })
+    .on("GET", "/v1/meetings", ({ store }) => { advanceMeetings(store); return json({ items: store.seeds.map((seed) => withMinutesStatus(store, seed.meeting)), count: store.seeds.length }); })
     .on("POST", "/v1/meetings", ({ store, body }) => json(createMeeting(store, body).meeting, 201))
     .on("POST", "/v1/meetings/schedules", ({ store, body }) => {
       const seed = createMeeting(store, (body.meeting as Record<string, unknown>) ?? {});
       notify("Demo: the assistant is scheduled in this sample only — it will not join a real call.");
       return json({ meeting: seed.meeting }, 201);
     })
-    .on("GET", "/v1/meetings/:id", withSeed((seed) => json(seed.meeting)))
+    .on("GET", "/v1/meetings/:id", withSeed((seed, { store }) => json(withMinutesStatus(store, seed.meeting))))
     .on("DELETE", "/v1/meetings/:id", withSeed((seed, { store }) => {
       if (!["created", "completed", "failed"].includes(seed.meeting.status)) return problem(409, "Stop the assistant before deleting this meeting.");
       store.seeds = store.seeds.filter((item) => item.meeting.id !== seed.meeting.id);

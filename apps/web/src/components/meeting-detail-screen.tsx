@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { ExternalLink, LogIn, LogOut, RefreshCw } from "lucide-react";
 import { leaveService, meetingsService } from "@/lib/meetings-service";
-import { meetingStatusLabel } from "@/lib/meeting-status";
+import { MeetingBadge } from "./meeting-badge";
 import type { CalendarEvent, CalendarSchedule, MeetingDetail, MeetingParticipants, SpeakerIdentity, TranscriptSegment, TranscriptionRoute } from "@/lib/types";
 import { MinutesPanel } from "./minutes-panel";
 import { MeetingTranscript, namedSpeakersOf, relativeTime, transcriptSeconds } from "./meeting-transcript";
@@ -226,7 +226,7 @@ export function MeetingDetailScreen({ meetingId, focusSegmentId, backLabel = "Al
       back={back}
       titleId="meeting-record-title"
       title={meeting.title}
-      badge={<span className={`status ${scheduled ? "scheduled" : meeting.status}`}>{scheduled ? "Scheduled" : meetingStatusLabel[meeting.status]}</span>}
+      badge={scheduled ? <span className="status scheduled">Scheduled</span> : <MeetingBadge meeting={meeting} />}
       description={<span className="record-meta">
         <span>{meeting.platform}</span>
         {meeting.meetingUrl ? <span><a className="record-link" href={meeting.meetingUrl} target="_blank" rel="noopener noreferrer"><span>{meeting.meetingUrl}</span><ExternalLink aria-hidden="true" /></a></span> : <span>No meeting link recorded</span>}

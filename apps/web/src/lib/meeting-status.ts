@@ -14,6 +14,28 @@ export const meetingStatusLabel: Record<MeetingStatus, string> = {
   failed: "Needs attention",
 };
 
+/**
+ * The badge a meeting shows. Once the call is over, the minutes' progress is what matters, so a
+ * finished meeting reads "Minutes approved" or "Recap sent" instead of staying "Ready to review".
+ */
+export function meetingBadge(meeting: Pick<Meeting, "status" | "minutesStatus">): { tone: string; label: string } {
+  if (isReviewed(meeting)) {
+    return meeting.minutesStatus === "sent" ? { tone: "sent", label: "Recap sent" } : { tone: "approved", label: "Minutes approved" };
+  }
+  return { tone: meeting.status, label: meetingStatusLabel[meeting.status] };
+}
+
+/** The call is over and its minutes were approved or sent: nothing is left to review. */
+export function isReviewed(meeting: Pick<Meeting, "status" | "minutesStatus">): boolean {
+  return (meeting.status === "ready" || meeting.status === "stopped")
+    && (meeting.minutesStatus === "approved" || meeting.minutesStatus === "sent");
+}
+
+/** Captured and processed, with minutes still to draft or review. */
+export function needsReview(meeting: Pick<Meeting, "status" | "minutesStatus">): boolean {
+  return meeting.status === "ready" && !isReviewed(meeting);
+}
+
 export const inProgressStatuses: ReadonlySet<MeetingStatus> = new Set(["joining", "waiting_room", "live", "stopping", "processing"]);
 export const attentionStatuses: ReadonlySet<MeetingStatus> = new Set(["failed", "needs_attention"]);
 
