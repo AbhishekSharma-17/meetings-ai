@@ -148,13 +148,13 @@ test("the demo workspace has notifications and a demo briefing runs as a backgro
   await page.goto("/");
   await page.getByRole("button", { name: "Explore the demo" }).click();
   await expect(page.getByRole("heading", { name: "Welcome back, Alex" })).toBeVisible();
-  await expect(bell(page)).toHaveAccessibleName("Notifications, 5 unread");
+  await expect(bell(page)).toHaveAccessibleName("Notifications, 6 unread");
   await bell(page).click();
   const panel = page.getByRole("dialog", { name: "Notifications" });
   await expect(panel.getByText("Assistant is waiting in the lobby")).toBeVisible();
   await panel.getByRole("button", { name: /^Assistant joined “Acme Robotics — weekly delivery sync”/ }).click();
   await expect(page.getByRole("heading", { name: "Acme Robotics — weekly delivery sync" })).toBeVisible();
-  await expect(bell(page)).toHaveAccessibleName("Notifications, 4 unread");
+  await expect(bell(page)).toHaveAccessibleName("Notifications, 5 unread");
 
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Meeting prep" }).click();
   await page.getByRole("list").getByRole("button", { name: /Discovery call: Fabrikam Health/ }).click();

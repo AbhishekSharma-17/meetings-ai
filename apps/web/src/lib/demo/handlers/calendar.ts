@@ -1,6 +1,7 @@
 import type { CachedCalendarEvent, CalendarConnection, CalendarEvent, CalendarSchedule } from "../../types";
 import { DEMO_CALENDARS_KEY, DEMO_PENDING_NOTICE_KEY } from "../../demo-mode";
 import { calendarEventId, localTime } from "../fixtures/ids";
+import { demoMove } from "../fixtures/calendar";
 import { json, noContent, notify, problem, str, strList, wait } from "../http";
 import type { DemoRouter } from "../router";
 import type { AddedCalendar, DemoStore } from "../store";
@@ -125,6 +126,17 @@ export function registerCalendar(router: DemoRouter): void {
       return json(snapshot(store, str(body.start_date), str(body.end_date), str(body.timezone) ?? "UTC"));
     })
     .on("GET", "/v1/calendar/schedules", ({ store }) => json(store.schedules))
+    .on("GET", "/v1/meetings/:id/schedule/changes", ({ store, params }) => {
+      const record = store.schedules.find((item) => item.meeting_id === params.id);
+      if (!record) return problem(404, "scheduled meeting not found");
+      return json({ items: demoMove(store.clock, record, { meeting_id: record.meeting_id }), provider: record.provider ?? null, last_checked_at: record.last_checked_at ?? null });
+    })
+    .on("GET", "/v1/calendar/events/:id/changes", ({ store, params }) => {
+      const event = store.events.find((item) => item.id === params.id);
+      if (!event) return problem(404, "saved calendar event not found");
+      const meetingId = store.schedules.find((item) => item.event_id === event.event_id && item.connection_id === event.connection_id)?.meeting_id ?? null;
+      return json({ items: demoMove(store.clock, event, { meeting_id: meetingId, cache_event_id: event.id }), provider: event.provider, last_checked_at: null });
+    })
     .on("GET", "/v1/calendar/schedules/:id", ({ store, params }) => {
       const record = store.schedules.find((item) => item.meeting_id === params.id);
       return record ? json(record) : problem(404, "schedule not found");

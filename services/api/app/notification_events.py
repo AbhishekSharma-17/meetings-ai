@@ -28,7 +28,7 @@ from .database import (
 )
 from .notifications import NotificationService
 from .tenant import current_organization_id
-from .time_display import TimePreferences, format_datetime, format_time
+from .time_display import TimePreferences, format_datetime, format_day_time, format_time
 
 logger = logging.getLogger(__name__)
 REMINDER_LEAD = timedelta(minutes=10)
@@ -182,6 +182,72 @@ class NotificationEvents:
                 dedupe_key=f"schedule:{meeting_id}:{_utc(starts_at).isoformat()}:reminder",
             )
         return sent
+
+    # ----- calendar changes (calendar_watch) -----------------------------------------------
+    @_safe
+    def calendar_event_moved(self, organization_id: UUID | str, *, title: str | None, old_start: datetime,
+                             new_start: datetime, dedupe_key: str, meeting_id: UUID | str | None = None,
+                             owner_id: UUID | str | None = None, cache_event_id: UUID | str | None = None) -> int:
+        """A followed event moved. With ``meeting_id`` the meeting audience hears that the assistant
+        follows the new time; otherwise only the calendar owner hears about their synced event."""
+        name = _title(title)
+
+        def headline(reader: TimePreferences) -> str:
+            return f"{name} moved to {format_datetime(new_start, reader)}"
+
+        if meeting_id is not None:
+            def body(reader: TimePreferences) -> str:
+                was = f"Was {format_day_time(old_start, reader)}."
+                if _utc(new_start) <= datetime.now(UTC):
+                    return f"{was} The new start time has already passed."
+                return f"{was} The assistant will join at the new time."
+            return self.notifications.notify_meeting(
+                organization_id, meeting_id, kind="calendar.event_moved", severity="info",
+                title=headline, body=body, dedupe_key=dedupe_key)
+        return self.notifications.notify(
+            organization_id, user_ids=[owner_id], kind="calendar.event_moved", severity="info", title=headline,
+            body=lambda reader: f"Was {format_day_time(old_start, reader)}. No assistant is scheduled for this meeting.",
+            link_view="prep" if cache_event_id else None, link_id=cache_event_id, dedupe_key=dedupe_key)
+
+    @_safe
+    def calendar_event_cancelled(self, organization_id: UUID | str, meeting_id: UUID | str, *, title: str | None,
+                                 provider_name: str, reason: str | None, dedupe_key: str) -> int:
+        name = _title(title)
+        if reason == "link_removed":
+            headline, body = (f"{name} no longer has a meeting link — the assistant won't join",
+                              f"The event in {provider_name} has no supported meeting link any more. The meeting record is kept.")
+        elif reason == "rescheduled_elsewhere":
+            headline, body = (f"{name} was rescheduled in {provider_name} — the assistant won't join the old time",
+                              "The new booking wasn't found in the next 90 days. Schedule the assistant for it from Calendar.")
+        else:
+            headline, body = (f"{name} was cancelled in {provider_name} — the assistant won't join",
+                              "The scheduled join was cancelled. The meeting record is kept.")
+        return self.notifications.notify_meeting(
+            organization_id, meeting_id, kind="calendar.event_cancelled", severity="warning",
+            title=headline, body=body, dedupe_key=dedupe_key)
+
+    @_safe
+    def calendar_link_changed(self, organization_id: UUID | str, meeting_id: UUID | str, *, title: str | None,
+                              platform_name: str, applied: bool, dedupe_key: str) -> int:
+        body = (f"The assistant will use the new {platform_name} link." if applied else
+                "The assistant had already joined, so it kept the link it was using.")
+        return self.notifications.notify_meeting(
+            organization_id, meeting_id, kind="calendar.link_changed", severity="info",
+            title=f"Meeting link changed for {_title(title)}", body=body, dedupe_key=dedupe_key)
+
+    @_safe
+    def calendar_check_failed(self, organization_id: UUID | str, meeting_id: UUID | str, *, title: str | None,
+                              provider_name: str, starts_at: datetime, owner_left: bool, dedupe_key: str) -> int:
+        name = _title(title)
+        if owner_left:
+            headline = f"Couldn't re-check {name}: the person who scheduled it left this workspace"
+        else:
+            headline = f"Couldn't re-check {name}: reconnect your calendar"
+        return self.notifications.notify_meeting(
+            organization_id, meeting_id, kind="calendar.check_failed", severity="warning", title=headline,
+            body=lambda reader: (f"The assistant will still join at {format_datetime(starts_at, reader)}, but changes "
+                                 f"made in {provider_name} can't be detected until the calendar is reconnected."),
+            dedupe_key=dedupe_key)
 
     # ----- minutes and delivery ------------------------------------------------------------
     @_safe

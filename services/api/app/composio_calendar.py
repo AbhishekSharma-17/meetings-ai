@@ -30,6 +30,11 @@ _TOOL = {
 _VERSION_DEFAULT = {"googlecalendar": "20260915_00", "outlook": "20260922_00", "calendly": "20260915_00", "zoom": "20260903_00"}
 _PROVIDER_NAME = {"googlecalendar": "Google Calendar", "outlook": "Outlook Calendar", "calendly": "Calendly", "zoom": "Zoom"}
 _TIMEZONE_ALIASES = {"Asia/Calcutta": "Asia/Kolkata"}
+
+
+def provider_name(provider: str) -> str:
+    """``Google Calendar``, ``Outlook Calendar``… for user-facing text."""
+    return _PROVIDER_NAME.get(provider, "your calendar")
 _URL = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 
 
@@ -79,6 +84,13 @@ class CalendarEvent(BaseModel):
     agenda: str | None = None
     organizer: str | None = None
     invitees: list["CalendarInvitee"] = Field(default_factory=list)
+    # True when this id stands for a whole recurring series rather than one occurrence (a Zoom
+    # recurring meeting, which Zoom lists once, at its next occurrence).
+    series: bool = False
+
+
+# Zoom meeting types 3 (recurring, no fixed time) and 8 (recurring, fixed time) share one id.
+_ZOOM_SERIES_TYPES = {3, 8}
 
 
 class CalendarInvitee(BaseModel):
@@ -93,6 +105,10 @@ class CalendarEventsResponse(BaseModel):
     range_end: datetime
     timezone: str
     truncated: bool = False
+    # Only filled for watcher lookups: ids the provider reports as cancelled (include_cancelled),
+    # and ids that are still on the calendar but no longer carry a supported meeting link or time.
+    cancelled_ids: list[str] = Field(default_factory=list)
+    skipped_ids: list[str] = Field(default_factory=list)
 
 
 def calendar_window(preset: CalendarRange, timezone: str, now: datetime | None = None) -> tuple[datetime, datetime]:
@@ -244,8 +260,17 @@ def _people(item: dict) -> list[CalendarInvitee]:
     return unique[:100]
 
 
+def _is_cancelled(item: dict) -> bool:
+    return item.get("status") in {"cancelled", "canceled"} or item.get("isCancelled") is True or item.get("is_cancelled") is True
+
+
+def _item_id(item: dict) -> str | None:
+    value = item.get("id") or item.get("event_id") or item.get("uri")
+    return str(value) if value is not None else None
+
+
 def _event(item: dict, connection: CalendarConnection, timezone: str) -> CalendarEvent | None:
-    if item.get("status") == "cancelled" or item.get("isCancelled") is True or item.get("is_cancelled") is True:
+    if _is_cancelled(item):
         return None
     link = _meeting_link(item)
     starts_at = _event_time(item.get("start") or item.get("start_time") or item.get("start_datetime"), timezone)
@@ -265,6 +290,7 @@ def _event(item: dict, connection: CalendarConnection, timezone: str) -> Calenda
         starts_at=starts_at, ends_at=ends_at, meeting_url=link[0], platform=link[1],
         agenda=_plain(item.get("description") or item.get("body") or item.get("meeting_notes_plain") or item.get("meeting_notes_html") or item.get("agenda")),
         organizer=_plain(organizer, 160), invitees=_people(item),
+        series=connection.provider == "zoom" and item.get("type") in _ZOOM_SERIES_TYPES,
     )
 
 
@@ -279,6 +305,8 @@ class ComposioCalendar:
             "calendly": os.getenv("COMPOSIO_CALENDLY_AUTH_CONFIG_ID", ""),
             "zoom": os.getenv("COMPOSIO_ZOOM_AUTH_CONFIG_ID", ""),
         }
+        # Calendly's user URI never changes for a connected account; the watcher polls often.
+        self._calendly_users: dict[str, str] = {}
         self.versions = {
             "googlecalendar": os.getenv("COMPOSIO_GOOGLE_CALENDAR_VERSION") or _VERSION_DEFAULT["googlecalendar"],
             "outlook": os.getenv("COMPOSIO_OUTLOOK_VERSION") or _VERSION_DEFAULT["outlook"],
@@ -403,30 +431,69 @@ class ComposioCalendar:
         start, end = calendar_window(preset, timezone)
         return await self.events_for_window(actor, connection_id, start, end, timezone, upcoming_only=True)
 
-    async def events_for_window(
-        self, actor: Actor, connection_id: str, start: datetime, end: datetime,
-        timezone: str, *, upcoming_only: bool = False,
-    ) -> CalendarEventsResponse:
-        timezone = _TIMEZONE_ALIASES.get(timezone, timezone)
-        connection = next((item for item in await self.connections(actor) if item.id == connection_id), None)
+    async def _calendly_user(self, actor: Actor, connection: CalendarConnection) -> str:
+        cached = self._calendly_users.get(connection.id)
+        if cached:
+            return cached
+        identity = await self._execute(actor, connection, "CALENDLY_WHO_AM_I", {})
+        user = identity.get("uri") or (identity.get("data") or {}).get("uri")
+        if not isinstance(user, str) or not user.startswith("https://api.calendly.com/users/"):
+            raise CalendarError("Calendly could not identify the connected user")
+        self._calendly_users[connection.id] = user
+        return user
+
+    async def _list_arguments(self, actor: Actor, connection: CalendarConnection, start: datetime, end: datetime,
+                              timezone: str, include_cancelled: bool) -> dict:
+        if connection.provider == "googlecalendar":
+            return {"calendarId": "primary", "timeMin": start.isoformat(), "timeMax": end.isoformat(),
+                    "singleEvents": True, "orderBy": "startTime", "maxResults": 100, "showDeleted": include_cancelled}
+        if connection.provider == "outlook":
+            return {"start_datetime": start.isoformat(), "end_datetime": end.isoformat(), "timezone": timezone, "top": 100}
+        if connection.provider == "calendly":
+            return {"user": await self._calendly_user(actor, connection), "min_start_time": start.astimezone(UTC).isoformat(),
+                    "max_start_time": end.astimezone(UTC).isoformat(), "status": "active", "count": 100}
+        return {"user_id": "me", "type": "upcoming", "page_size": 100}
+
+    async def calendly_invitees(self, actor: Actor, connection: CalendarConnection, event_id: str,
+                                status: str | None = "active") -> list[dict]:
+        """Raw Calendly invitee records for one booking (``status=None``: active and cancelled)."""
+        event_uuid = event_id.rstrip("/").rsplit("/", 1)[-1]
+        arguments: dict = {"uuid": event_uuid, "count": 100, **({"status": status} if status else {})}
+        people = await self._execute(actor, connection, "CALENDLY_LIST_EVENT_INVITEES", arguments)
+        collection = people.get("collection")
+        return [item for item in collection if isinstance(item, dict)] if isinstance(collection, list) else []
+
+    async def enrich_calendly(self, actor: Actor, connection: CalendarConnection, events: list[CalendarEvent],
+                              limit: int = 40) -> None:
+        """Add each booking's invitees (in place, first ``limit`` events)."""
+        for event in events[:limit]:
+            try:
+                people = await self.calendly_invitees(actor, connection, event.event_id)
+                event.invitees = _people({"invitees": [*([person.model_dump() for person in event.invitees]), *people]})
+            except CalendarError:
+                logger.warning("Calendly invitees unavailable for a discovered event")
+
+    async def _resolve_connection(self, actor: Actor, connection_id: str,
+                                  connection: CalendarConnection | None) -> CalendarConnection:
+        if connection is None or connection.id != connection_id:
+            connection = next((item for item in await self.connections(actor) if item.id == connection_id), None)
         if connection is None or connection.status != "ACTIVE":
             raise CalendarError("choose an active calendar connection owned by your account")
-        if connection.provider == "googlecalendar":
-            arguments = {"calendarId": "primary", "timeMin": start.isoformat(), "timeMax": end.isoformat(),
-                         "singleEvents": True, "orderBy": "startTime", "maxResults": 100, "showDeleted": False}
-        elif connection.provider == "outlook":
-            arguments = {"start_datetime": start.isoformat(), "end_datetime": end.isoformat(),
-                         "timezone": timezone, "top": 100}
-        elif connection.provider == "calendly":
-            identity = await self._execute(actor, connection, "CALENDLY_WHO_AM_I", {})
-            user = identity.get("uri") or (identity.get("data") or {}).get("uri")
-            if not isinstance(user, str) or not user.startswith("https://api.calendly.com/users/"):
-                raise CalendarError("Calendly could not identify the connected user")
-            arguments = {"user": user, "min_start_time": start.astimezone(UTC).isoformat(),
-                         "max_start_time": end.astimezone(UTC).isoformat(), "status": "active", "count": 100}
-        else:
-            arguments = {"user_id": "me", "type": "upcoming", "page_size": 100}
+        return connection
+
+    async def events_for_window(
+        self, actor: Actor, connection_id: str, start: datetime, end: datetime,
+        timezone: str, *, upcoming_only: bool = False, connection: CalendarConnection | None = None,
+        include_cancelled: bool = False, enrich_invitees: bool = True,
+    ) -> CalendarEventsResponse:
+        """Events in ``[start, end)``. The watcher passes an already-resolved ``connection`` (saves a
+        call), asks for cancelled ids (Google ``showDeleted``) and skips Calendly invitee enrichment."""
+        timezone = _TIMEZONE_ALIASES.get(timezone, timezone)
+        connection = await self._resolve_connection(actor, connection_id, connection)
+        arguments = await self._list_arguments(actor, connection, start, end, timezone, include_cancelled)
         records: list[CalendarEvent] = []
+        cancelled: list[str] = []
+        skipped: list[str] = []
         token: str | None = None
         truncated = False
         for page in range(3):
@@ -437,30 +504,28 @@ class ComposioCalendar:
             if not isinstance(items, list):
                 raise CalendarError("calendar provider returned an invalid event list")
             for item in items:
-                event = _event(item, connection, timezone) if isinstance(item, dict) else None
-                if event and (not upcoming_only or event.ends_at.astimezone(UTC) > datetime.now(UTC)) and start <= event.starts_at.astimezone(start.tzinfo) < end:
+                if not isinstance(item, dict):
+                    continue
+                event = _event(item, connection, timezone)
+                if event is None:
+                    item_id = _item_id(item)
+                    if item_id:
+                        (cancelled if _is_cancelled(item) else skipped).append(item_id)
+                    continue
+                if (not upcoming_only or event.ends_at.astimezone(UTC) > datetime.now(UTC)) and start <= event.starts_at.astimezone(start.tzinfo) < end:
                     records.append(event)
             token = data.get("nextPageToken") or data.get("next_page_token") or (data.get("pagination") or {}).get("next_page_token")
             if not token:
                 break
             if page == 2:
                 truncated = True
-        if connection.provider == "calendly":
-            enriched = []
-            for event in records:
-                event_uuid = event.event_id.rstrip("/").rsplit("/", 1)[-1]
-                if len(enriched) < 40:
-                    try:
-                        people = await self._execute(actor, connection, "CALENDLY_LIST_EVENT_INVITEES", {"uuid": event_uuid, "count": 100, "status": "active"})
-                        event.invitees = _people({"invitees": [*([person.model_dump() for person in event.invitees]), *(people.get("collection") or [])]})
-                    except CalendarError:
-                        logger.warning("Calendly invitees unavailable for a discovered event")
-                enriched.append(event)
-            records = enriched
+        if connection.provider == "calendly" and enrich_invitees:
+            await self.enrich_calendly(actor, connection, records)
             if len(records) > 40:
                 truncated = True
         unique = {(event.event_id, event.starts_at): event for event in records}
         return CalendarEventsResponse(
             events=sorted(unique.values(), key=lambda event: event.starts_at),
             range_start=start, range_end=end, timezone=timezone, truncated=truncated,
+            cancelled_ids=list(dict.fromkeys(cancelled)), skipped_ids=list(dict.fromkeys(skipped)),
         )

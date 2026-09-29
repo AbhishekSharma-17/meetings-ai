@@ -1,4 +1,4 @@
-import type { CachedCalendarEvent, CalendarConnection, CalendarInvitee, CalendarSchedule, CalendarSyncState, WorkspaceCalendarConnection } from "../../types";
+import type { CachedCalendarEvent, CalendarConnection, CalendarEventChange, CalendarInvitee, CalendarSchedule, CalendarSyncState, WorkspaceCalendarConnection } from "../../types";
 import { calendarEventId, type Clock, localTime, minutesFrom } from "./ids";
 import type { MeetingSeed } from "./meetings";
 import { DOMAIN, team } from "./people";
@@ -35,7 +35,13 @@ type Platform = keyof typeof LINK;
 type EventSpec = {
   title: string; day: number; hour: number; minute?: number; length?: number; platform: Platform; connections: string[];
   invitees?: CalendarInvitee[]; agenda?: string; organizer?: string; at?: Date;
+  /** The start before the organizer moved it (shows the "Rescheduled" state in the demo). */
+  movedFrom?: Date;
 };
+
+/** The scheduled meeting that was moved in the demo, and where it was before. */
+export const DEMO_RESCHEDULED_KEY = "initech-scoping";
+export const demoOriginalStart = (clock: Clock): Date => localTime(clock, 0, 16);
 
 const who = (name: string, email: string, response: string | null = "accepted"): CalendarInvitee => ({ name, email, response_status: response });
 const internal = [who("Alex Morgan", `alex.morgan@${DOMAIN}`), who("Priya Shah", `priya.shah@${DOMAIN}`), who("Daniel Kim", `daniel.kim@${DOMAIN}`), who("Sofia Alvarez", `sofia.alvarez@${DOMAIN}`, "tentative"), who("Marcus Reed", `marcus.reed@${DOMAIN}`)];
@@ -88,6 +94,7 @@ function fromMeetings(seeds: MeetingSeed[], clock: Clock): EventSpec[] {
     return {
       title: seed.meeting.title, day: 0, hour: 0, at: start, length: Number.parseInt(seed.meeting.duration ?? "45", 10) || 45,
       platform: seed.meeting.platform as Platform, connections: connectionFor(seed), invitees: seed.invitees, agenda: seed.agenda, organizer: seed.organizer,
+      movedFrom: seed.key === DEMO_RESCHEDULED_KEY ? demoOriginalStart(clock) : undefined,
     };
   });
 }
@@ -121,6 +128,7 @@ export function calendarEvents(clock: Clock, seeds: MeetingSeed[]): CachedCalend
         id: calendarEventId(index), synced_at: syncedAt, connection_id: connectionId, provider, event_id: `evt-${index}`,
         title: spec.title, starts_at: start.toISOString(), ends_at: end.toISOString(), meeting_url: LINK[spec.platform], platform: spec.platform,
         agenda: spec.agenda ?? null, organizer: spec.organizer ?? `alex.morgan@${DOMAIN}`, invitees: spec.invitees ?? [],
+        rescheduled_from: spec.movedFrom?.toISOString() ?? null,
       });
     }
   }
@@ -134,9 +142,22 @@ export function calendarSyncs(clock: Clock, connectionIds: string[]): CalendarSy
   }));
 }
 
-export function calendarSchedules(seeds: MeetingSeed[], events: CachedCalendarEvent[]): CalendarSchedule[] {
+export function calendarSchedules(seeds: MeetingSeed[], events: CachedCalendarEvent[], clock: Clock): CalendarSchedule[] {
   return seeds.filter((seed) => seed.meeting.status === "created").flatMap((seed) => {
     const event = events.find((item) => item.title === seed.meeting.title);
-    return event ? [{ meeting_id: seed.meeting.id, connection_id: event.connection_id, event_id: event.event_id, starts_at: event.starts_at, ends_at: event.ends_at, provider: event.provider, status: "pending" as const, last_error: null }] : [];
+    return event ? [{ meeting_id: seed.meeting.id, connection_id: event.connection_id, event_id: event.event_id, starts_at: event.starts_at, ends_at: event.ends_at, provider: event.provider, status: "pending" as const, last_error: null,
+      rescheduled_from: event.rescheduled_from ?? null, last_checked_at: minutesFrom(clock, -2) }] : [];
   });
+}
+
+/** The demo's detected change for a schedule or synced event that has `rescheduled_from`. */
+export function demoMove(clock: Clock, item: { starts_at: string; ends_at: string; provider?: string | null; rescheduled_from?: string | null }, ids: { meeting_id?: string | null; cache_event_id?: string | null }): CalendarEventChange[] {
+  if (!item.rescheduled_from) return [];
+  const length = new Date(item.ends_at).getTime() - new Date(item.starts_at).getTime();
+  return [{
+    id: `${(ids.meeting_id ?? ids.cache_event_id ?? "change").slice(0, 24)}-moved`, kind: "moved", provider: item.provider ?? "googlecalendar", source: "watcher",
+    detected_at: minutesFrom(clock, -95), old_starts_at: item.rescheduled_from, new_starts_at: item.starts_at,
+    old_ends_at: new Date(new Date(item.rescheduled_from).getTime() + length).toISOString(), new_ends_at: item.ends_at,
+    old_meeting_url: null, new_meeting_url: null, meeting_id: ids.meeting_id ?? null, cache_event_id: ids.cache_event_id ?? null,
+  }];
 }

@@ -9,6 +9,7 @@ import { attentionStatuses, inProgressStatuses, meetingStatusLabel, platformMono
 import type { CalendarSchedule, Meeting } from "@/lib/types";
 import { PageHeader } from "./ui/page-header";
 import { EmptyState } from "./ui/feedback";
+import { RescheduledBadge } from "./calendar-change-history";
 import { FilterInput, NoMatches } from "./scroll-panel";
 import { matchesQuery } from "@/lib/search";
 
@@ -80,6 +81,7 @@ export function MeetingsLibrary({ identity, meetings, onOpen, onNew, onCalendar 
 /** What a person would search a meeting by: title, platform, status, source and the date as shown. */
 function meetingSearchFields(meeting: Meeting, schedule: CalendarSchedule | undefined) {
   return [meeting.title, meeting.platform, meeting.status, meetingStatusLabel[meeting.status], schedule?.status === "pending" ? "Scheduled" : null,
+    schedule?.rescheduled_from ? "Rescheduled" : null,
     schedule ? [sourceNames[schedule.provider ?? ""] ?? schedule.provider, formatWhen(schedule.starts_at)] : meeting.startsAt];
 }
 
@@ -91,7 +93,10 @@ function LibraryRow({ meeting, schedule, onOpen }: { meeting: Meeting; schedule:
       <span className="library-platform" aria-hidden="true">{platformMonogram(meeting.platform)}</span>
       <span className="library-row-copy"><b>{meeting.title}</b><small>{meeting.platform} · {when}{meeting.participants ? ` · ${meeting.participants} participant${meeting.participants === 1 ? "" : "s"}` : ""}</small></span>
       <span className="library-row-duration">{meeting.duration === "—" ? "" : meeting.duration}</span>
-      <span className={`status ${scheduled ? "scheduled" : meeting.status}`}>{scheduled ? "Scheduled" : meetingStatusLabel[meeting.status]}</span>
+      <span className="library-row-status">
+        {scheduled && schedule?.rescheduled_from ? <RescheduledBadge from={schedule.rescheduled_from} /> : null}
+        <span className={`status ${scheduled ? "scheduled" : meeting.status}`}>{scheduled ? "Scheduled" : meetingStatusLabel[meeting.status]}</span>
+      </span>
       <ArrowRight className="library-row-arrow" aria-hidden="true" />
     </button>
   </li>;

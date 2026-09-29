@@ -1,0 +1,38 @@
+/* ---------- Calendar changes: rescheduled markers, "last checked" hints, change history ---------- */
+.rescheduled-badge { gap:5px; }
+.rescheduled-badge .lucide { width:12px; height:12px; }
+.moved-from { color:var(--text-secondary); font-size:12.5px; font-variant-numeric:tabular-nums; }
+.moved-from time { color:var(--foreground); }
+.last-checked { color:var(--text-tertiary); font-size:12px; }
+
+/* The watch line under a scheduled join's alert. */
+.schedule-watch { display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px; margin-top:6px; }
+
+/* Library rows: badge and status side by side. */
+.library-row-status { display:inline-flex; align-items:center; justify-content:flex-end; gap:6px; flex-wrap:wrap; }
+
+/* Calendar event detail and agenda rows. */
+.calendar-detail-moved { margin-top:-6px; }
+.calendar-event-moved { color:var(--warning-text); font-weight:500; }
+.prep-summary-facts .moved-from { margin-left:6px; }
+
+/* History list. */
+.change-history { display:grid; gap:10px; min-width:0; }
+.change-search { width:100%; }
+.change-list { list-style:none; display:grid; gap:0; margin:0; padding:0; }
+.change-row { display:flex; align-items:flex-start; gap:10px; padding:9px 0; min-width:0; }
+.change-row + .change-row { border-top:1px solid var(--border); }
+.change-icon { display:inline-grid; place-items:center; flex:none; width:26px; height:26px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--muted); color:var(--text-secondary); }
+.change-icon .lucide { width:14px; height:14px; }
+.change-icon[data-kind=moved] { border-color:var(--warning-border); background:var(--warning-subtle); color:var(--warning-text); }
+.change-icon[data-kind=cancelled] { border-color:var(--destructive-border); background:var(--destructive-subtle); color:var(--destructive-text); }
+.change-icon[data-kind=link_changed] { border-color:var(--info-border); background:var(--info-subtle); color:var(--info-text); }
+.change-copy { display:grid; gap:1px; min-width:0; }
+.change-copy b { font-size:13px; font-weight:500; overflow-wrap:anywhere; }
+.change-copy small { color:var(--text-secondary); font-size:12px; overflow-wrap:anywhere; }
+.event-changes .change-row { padding:7px 0; }
+.prep-summary-card .event-changes { margin-top:4px; }
+
+@media (max-width: 640px) {
+  .library-row .library-row-status { grid-column:2; justify-self:start; justify-content:flex-start; }
+}

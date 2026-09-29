@@ -132,7 +132,7 @@ export function createStore(): DemoStore {
     workspace: workspaceRecord(clock, orgId), members: memberRecords(orgId), brief: organizationBrief(clock), briefDocuments: briefDocuments(clock), retention: defaultRetention,
     companyIdentity: null,
     seeds, minutes, guidance, delivery, jobs, identities, joinRequests: {},
-    connections, events, syncs: calendarSyncs(clock, [CAL_GOOGLE, CAL_OUTLOOK, CAL_CALENDLY]), schedules: calendarSchedules(seeds, events),
+    connections, events, syncs: calendarSyncs(clock, [CAL_GOOGLE, CAL_OUTLOOK, CAL_CALENDLY]), schedules: calendarSchedules(seeds, events, clock),
     reports: prep.reports, prepInputs: prep.inputs, prepDocuments: prep.documents,
     bases, conversations: conversations(clock, seeds), reindexedAt: {},
     profiles: profiles(), defaults: providerDefaults(), credentials: credentials(clock), ai: aiSettings(clock),

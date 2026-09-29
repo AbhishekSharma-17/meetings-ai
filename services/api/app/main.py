@@ -50,6 +50,9 @@ from .adapters.base import ProviderExecutionError
 from .composio_calendar import CalendarConnection, WorkspaceCalendarConnection, CalendarConnectRequest, CalendarAliasRequest, CalendarConnectResponse, CalendarEvent, CalendarEventsResponse, CalendarError, CalendarProvider, CalendarRange, ComposioCalendar, calendar_callback_url
 from .calendar_schedule import CalendarScheduleError, CalendarSchedulePublic, CalendarScheduleService, ManualScheduleCreate, ScheduleCreate
 from .calendar_cache import CalendarCacheService, CalendarSyncRequest, CalendarSyncResponse, CachedCalendarResponse
+from .calendar_watch import CalendarWatchService, WatchSettings
+from .calendar_watch_apply import CalendarChangeApplier
+from .routes_calendar_changes import register_calendar_change_routes
 from .meeting_prep import OrganizationBriefService, OrganizationBrief, BriefDocument, MeetingPrepService, PrepError
 from .routes_prep import register_prep_routes
 from .organization_identity import OrganizationIdentityService
@@ -194,6 +197,11 @@ def create_app(
                                       usage=usage, vault=vault, ai_settings=ai_settings,
                                       retriever=chunk_retriever, identities=organization_identity)
     calendar_schedule = CalendarScheduleService(database, calendar, meeting_service)
+    calendar_changes = CalendarChangeApplier(database)
+    calendar_watch = CalendarWatchService(database, calendar, calendar_changes, WatchSettings.from_env())
+    # Scheduled joins re-verify with the calendar first; manual syncs report moved events.
+    calendar_schedule.watcher = calendar_watch
+    calendar_cache.changes = calendar_watch
     document_service = DocumentService(database, VisionService(database, service, ai_settings), chunk_store)
     ai_settings.vision = document_service.vision
     indexing_worker = IndexingWorker(database, document_service, chunk_store, knowledge_index, service)
@@ -207,12 +215,14 @@ def create_app(
         index_task = asyncio.create_task(indexing_worker.run()) if os.getenv("AUTO_KNOWLEDGE_INDEX_ENABLED") == "1" else None
         retention_task = asyncio.create_task(retention.run()) if os.getenv("AUTO_RETENTION_ENABLED") == "1" else None
         schedule_task = asyncio.create_task(calendar_schedule.run()) if os.getenv("AUTO_CALENDAR_SCHEDULE_ENABLED") == "1" else None
+        watch_task = asyncio.create_task(calendar_watch.run()) \
+            if os.getenv("AUTO_CALENDAR_SCHEDULE_ENABLED") == "1" and calendar_watch.enabled else None
         await start_background_services(app)
         try:
             yield
         finally:
             await stop_background_services(app)
-            for running in (task, index_task, retention_task, schedule_task):
+            for running in (task, index_task, retention_task, schedule_task, watch_task):
                 if running:
                     running.cancel()
                     try:
@@ -248,6 +258,9 @@ def create_app(
     app.state.organization_brief = organization_brief
     app.state.meeting_prep = meeting_prep
     app.state.calendar_schedule = calendar_schedule
+    app.state.calendar_watch = calendar_watch
+    register_calendar_change_routes(app, database=database, calendar_schedule=calendar_schedule,
+                                    calendar_cache=calendar_cache)
     storage = StorageService(database, vexa)
     app.state.storage = storage
     register_usage_routes(app, usage=usage, database=database)
@@ -279,6 +292,7 @@ def create_app(
         minutes_service=minutes_service, post_meeting_worker=worker, calendar_schedule=calendar_schedule,
         knowledge_index=knowledge_index, knowledge_bases=knowledge_bases, indexing_worker=indexing_worker,
     )
+    calendar_changes.events = app.state.notification_events
 
     @app.middleware("http")
     async def require_admin(request: Request, call_next):
@@ -332,6 +346,7 @@ def create_app(
                         or (method in {"GET", "POST"} and re.fullmatch(r"/v1/calendar/events/[0-9a-f-]+/prep(?:/stream)?", path))
                         or (method in {"GET", "PUT"} and re.fullmatch(r"/v1/calendar/events/[0-9a-f-]+/prep/inputs", path))
                         or (method == "GET" and re.fullmatch(r"/v1/calendar/events/[0-9a-f-]+/prep/history", path))
+                        or (method == "GET" and re.fullmatch(r"/v1/calendar/events/[0-9a-f-]+/changes", path))
                         or (method == "POST" and re.fullmatch(r"/v1/calendar/events/[0-9a-f-]+/prep/whos-who", path))
                         or (method == "GET" and path == "/v1/workspace/identity")
                         or (method == "POST" and re.fullmatch(r"/v1/calendar/events/[0-9a-f-]+/prep/jobs", path))

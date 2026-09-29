@@ -97,3 +97,11 @@ def format_datetime(value: datetime, preferences: TimePreferences = UTC_PREFEREN
     now = datetime.now(local.tzinfo)
     day = f"{local:%a}, {local:%b} {local.day}" + (f", {local.year}" if local.year != now.year else "")
     return f"{day}, {_clock(local, uses_twelve_hour_clock(preferences))} {zone_abbreviation(local)}"
+
+
+def format_day_time(value: datetime, preferences: TimePreferences = UTC_PREFERENCES) -> str:
+    """``Mon 3:00 PM IST`` within a week of now, otherwise the full ``format_datetime`` form."""
+    local = localize(value, preferences)
+    if abs(local - datetime.now(local.tzinfo)).days >= 6:
+        return format_datetime(value, preferences)
+    return f"{local:%a} {_clock(local, uses_twelve_hour_clock(preferences))} {zone_abbreviation(local)}"

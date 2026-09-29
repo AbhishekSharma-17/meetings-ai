@@ -408,7 +408,8 @@ export type CalendarEvent = {
   title: string; starts_at: string; ends_at: string; meeting_url: string; platform: string;
   agenda?: string | null; organizer?: string | null; invitees?: CalendarInvitee[];
 };
-export type CachedCalendarEvent = CalendarEvent & { id: string; synced_at: string };
+/** `rescheduled_from`: the start before the first detected move, while the event is at another time now. */
+export type CachedCalendarEvent = CalendarEvent & { id: string; synced_at: string; rescheduled_from?: string | null };
 export type CalendarSyncState = { connection_id: string; last_synced_at: string; range_start: string; range_end: string; truncated: boolean };
 export type CalendarSnapshot = { events: CachedCalendarEvent[]; syncs: CalendarSyncState[]; errors?: Record<string, string> };
 export type OrganizationBrief = {
@@ -428,7 +429,18 @@ export type CalendarSchedule = {
   meeting_id: string; connection_id: string; event_id: string; starts_at: string; ends_at: string;
   provider?: string;
   status: "pending" | "joining" | "joined" | "failed" | "cancelled" | "missed"; last_error: string | null;
+  /** The start before the first detected reschedule (only while the join is at another time now). */
+  rescheduled_from?: string | null;
+  /** When the calendar watcher last confirmed this event with its calendar. */
+  last_checked_at?: string | null;
 };
+/** One detected change to a followed calendar event. Links carry no query string (passcodes stay out). */
+export type CalendarEventChange = {
+  id: string; kind: "moved" | "cancelled" | "link_changed" | "restored"; provider: string; source: "watcher" | "sync";
+  detected_at: string; old_starts_at: string | null; new_starts_at: string | null; old_ends_at: string | null; new_ends_at: string | null;
+  old_meeting_url: string | null; new_meeting_url: string | null; meeting_id: string | null; cache_event_id: string | null;
+};
+export type CalendarChangeHistory = { items: CalendarEventChange[]; provider: string | null; last_checked_at: string | null };
 
 export type MeetingDeliverySettings = {
   internal_recipients: string[];

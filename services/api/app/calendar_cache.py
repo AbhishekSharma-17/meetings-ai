@@ -1,12 +1,23 @@
-"""Workspace-isolated, per-account snapshots of discovered meeting events."""
+"""Workspace-isolated, per-account snapshots of discovered meeting events.
 
+A moved event keeps its cache row (and so its row id): the row is re-keyed in place to the new
+time, so briefings, prep inputs and prep uploads that reference the row stay attached.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from .accounts import Actor
+from .calendar_changes import first_moves
 from .composio_calendar import CalendarEvent, CalendarError, CalendarInvitee, ComposioCalendar, calendar_date_window
 from .database import CalendarEventCacheRow, CalendarSyncStateRow, Database, KnowledgeDocumentRow, MeetingPrepInputRow, MeetingPrepRow
 
@@ -22,6 +33,8 @@ class CalendarSyncRequest(BaseModel):
 class CachedCalendarEvent(CalendarEvent):
     id: UUID
     synced_at: datetime
+    # The start before the first detected move (only while the event is at another time now).
+    rescheduled_from: datetime | None = None
 
 
 CachedCalendarEvent.model_rebuild(_types_namespace={"CalendarInvitee": CalendarInvitee})
@@ -54,10 +67,113 @@ def _has_prep_work(session, event_row_id: str) -> bool:
         ).limit(1)).first())
 
 
+logger = logging.getLogger(__name__)
+
+
+def _utc(value: datetime) -> datetime:
+    return (value if value.tzinfo else value.replace(tzinfo=UTC)).astimezone(UTC)
+
+
+class _NoChangeHook:
+    async def cache_moved(self, *_args: Any, **_kwargs: Any) -> None:
+        return None
+
+
+@dataclass(frozen=True)
+class CacheMove:
+    """A synced event that the calendar now shows at another time; its row was re-keyed in place."""
+
+    cache_event_id: str
+    old_starts_at: datetime
+    old_ends_at: datetime
+    event: CalendarEvent
+
+
+def _write_event(row: CalendarEventCacheRow, event: CalendarEvent, now: datetime) -> None:
+    row.event_id = event.event_id
+    row.starts_at = _utc(event.starts_at)
+    row.ends_at = _utc(event.ends_at)
+    row.payload = event.model_dump(mode="json")
+    row.synced_at = now
+
+
+def rekey_cache_row(session: Session, row: CalendarEventCacheRow, event: CalendarEvent,
+                    now: datetime) -> CalendarEventCacheRow | None:
+    """Move ``row`` to ``event``'s identity and time; returns the row that now holds the event.
+
+    If a row already exists at the new time (a sync that ran before the move was noticed inserted
+    it), the one that carries prep work survives; with prep work on both, nothing changes (None).
+    """
+    other = session.execute(select(CalendarEventCacheRow).where(
+        CalendarEventCacheRow.organization_id == row.organization_id,
+        CalendarEventCacheRow.user_id == row.user_id,
+        CalendarEventCacheRow.connection_id == row.connection_id,
+        CalendarEventCacheRow.event_id == event.event_id,
+        CalendarEventCacheRow.starts_at == _utc(event.starts_at),
+        CalendarEventCacheRow.id != row.id,
+    )).scalars().first()
+    if other is not None:
+        ours, theirs = _has_prep_work(session, row.id), _has_prep_work(session, other.id)
+        if ours and theirs:
+            return None
+        if theirs:
+            session.delete(row)
+            _write_event(other, event, now)
+            return other
+        session.delete(other)
+        session.flush()
+    _write_event(row, event, now)
+    return row
+
+
+def rekey_moved_rows(session: Session, organization_id: str, user_id: str, connection_id: str,
+                     events: list[CalendarEvent], now: datetime) -> list[CacheMove]:
+    """Re-key cached rows whose event (matched by exact id) now starts at another time.
+
+    Ids listed more than once (a series under one id) or cached more than once are left to the
+    exact (id, start) matching so two occurrences are never confused.
+    """
+    fetched: dict[str, list[CalendarEvent]] = {}
+    for event in events:
+        fetched.setdefault(event.event_id, []).append(event)
+    if not fetched:
+        return []
+    rows = session.execute(select(CalendarEventCacheRow).where(
+        CalendarEventCacheRow.organization_id == organization_id,
+        CalendarEventCacheRow.user_id == user_id,
+        CalendarEventCacheRow.connection_id == connection_id,
+        CalendarEventCacheRow.event_id.in_(list(fetched)),
+    )).scalars().all()
+    cached: dict[str, list[CalendarEventCacheRow]] = {}
+    for row in rows:
+        cached.setdefault(row.event_id, []).append(row)
+    moves: list[CacheMove] = []
+    for event_id, candidates in fetched.items():
+        known = cached.get(event_id, [])
+        if len(candidates) != 1 or len(known) != 1 or _utc(known[0].starts_at) == _utc(candidates[0].starts_at):
+            continue
+        row, event = known[0], candidates[0]
+        old_start, old_end = _utc(row.starts_at), _utc(row.ends_at)
+        target = rekey_cache_row(session, row, event, now)
+        if target is not None:
+            moves.append(CacheMove(target.id, old_start, old_end, event))
+    return moves
+
+
 class CalendarCacheService:
+    # Receives re-keyed (moved) events after a manual sync; set to the calendar watcher in create_app.
+    changes: Any = _NoChangeHook()
+
     def __init__(self, database: Database, calendar: ComposioCalendar) -> None:
         self.database = database
         self.calendar = calendar
+
+    @staticmethod
+    def _public(row: CalendarEventCacheRow, moved_from: dict[str, datetime]) -> CachedCalendarEvent:
+        original = moved_from.get(row.id)
+        if original is not None and original == _utc(row.starts_at):
+            original = None
+        return CachedCalendarEvent(**row.payload, id=UUID(row.id), synced_at=row.synced_at, rescheduled_from=original)
 
     def list(self, actor: Actor, first: date, last: date, timezone: str) -> CachedCalendarResponse:
         start, end = calendar_date_window(first, last, timezone)
@@ -80,8 +196,9 @@ class CalendarCacheService:
                 CalendarSyncStateRow.organization_id == str(actor.organization_id),
                 CalendarSyncStateRow.user_id == str(actor.user_id),
             )).scalars().all()
+            moved_from = first_moves(session, str(actor.organization_id), cache_event_ids=[row.id for row in rows])
             return CachedCalendarResponse(
-                events=[CachedCalendarEvent(**row.payload, id=UUID(row.id), synced_at=row.synced_at) for row in rows],
+                events=[self._public(row, moved_from) for row in rows],
                 syncs=[CalendarSyncState(
                     connection_id=row.connection_id, last_synced_at=row.last_synced_at,
                     range_start=row.range_start, range_end=row.range_end, truncated=row.truncated,
@@ -93,7 +210,15 @@ class CalendarCacheService:
             row = session.get(CalendarEventCacheRow, str(event_id))
             if row is None or row.organization_id != str(actor.organization_id) or row.user_id != str(actor.user_id):
                 raise CalendarError("saved calendar event not found")
-            return CachedCalendarEvent(**row.payload, id=UUID(row.id), synced_at=row.synced_at)
+            return self._public(row, first_moves(session, str(actor.organization_id), cache_event_ids=[row.id]))
+
+    def get_row(self, actor: Actor, event_id: UUID) -> CalendarEventCacheRow:
+        """The actor's own cached row (organization and user checked) or CalendarError."""
+        with self.database.session_factory() as session:
+            row = session.get(CalendarEventCacheRow, str(event_id))
+            if row is None or row.organization_id != str(actor.organization_id) or row.user_id != str(actor.user_id):
+                raise CalendarError("saved calendar event not found")
+            return row
 
     def forget_connection(self, actor: Actor, connection_id: str) -> int:
         """Drop a disconnected account's cached events and sync state; returns rows removed.
@@ -128,6 +253,13 @@ class CalendarCacheService:
             ).distinct()).scalars())
         return sum(self.forget_connection(actor, connection_id) for connection_id in cached - active_ids)
 
+    async def _announce_moves(self, actor: Actor, connection_id: str, moves: list[CacheMove]) -> None:
+        try:
+            await self.changes.cache_moved(str(actor.organization_id), str(actor.user_id), connection_id,
+                                           moves[0].event.provider, moves, source="sync")
+        except Exception:  # recording the history must never fail the sync itself
+            logger.exception("could not record moved calendar events after a sync")
+
     async def sync(self, actor: Actor, request: CalendarSyncRequest) -> CalendarSyncResponse:
         timezone = request.timezone or "UTC"
         start, end = calendar_date_window(request.start_date, request.end_date, timezone)
@@ -149,6 +281,10 @@ class CalendarCacheService:
                 continue
             now = datetime.now(UTC)
             with self.database.session_factory.begin() as session:
+                # A moved event keeps its row (and every briefing that points at it).
+                moves = rekey_moved_rows(session, str(actor.organization_id), str(actor.user_id),
+                                         connection_id, found.events, now)
+                session.flush()
                 previous = session.execute(select(CalendarEventCacheRow).where(
                     CalendarEventCacheRow.organization_id == str(actor.organization_id),
                     CalendarEventCacheRow.user_id == str(actor.user_id),
@@ -195,5 +331,7 @@ class CalendarCacheService:
                     state.range_start = start.astimezone(UTC)
                     state.range_end = end.astimezone(UTC)
                     state.truncated = found.truncated
+            if moves:
+                await self._announce_moves(actor, connection_id, moves)
         snapshot = self.list(actor, request.start_date, request.end_date, timezone)
         return CalendarSyncResponse(**snapshot.model_dump(), errors=errors)

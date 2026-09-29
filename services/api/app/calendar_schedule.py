@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, update
 
 from .accounts import Actor
+from .calendar_changes import first_moves
 from .composio_calendar import CalendarError, CalendarEvent, CalendarRange, ComposioCalendar, calendar_date_window
 from .database import CalendarScheduleRow, Database, MeetingSourceRow
 from .adapters.vexa import VexaAPIError
@@ -47,24 +48,38 @@ class CalendarSchedulePublic(BaseModel):
     ends_at: datetime
     status: str
     last_error: str | None = None
+    # The start before the first detected reschedule (only while the join is at another time now).
+    rescheduled_from: datetime | None = None
+    # When the calendar watcher last confirmed this event with the calendar.
+    last_checked_at: datetime | None = None
 
 
 class CalendarScheduleError(ValueError):
     pass
 
 
-def _public(row: CalendarScheduleRow) -> CalendarSchedulePublic:
+def _utc(value: datetime) -> datetime:
+    return (value if value.tzinfo else value.replace(tzinfo=UTC)).astimezone(UTC)
+
+
+def _public(row: CalendarScheduleRow, moved_from: dict[str, datetime] | None = None,
+            checked: datetime | None = None) -> CalendarSchedulePublic:
+    original = (moved_from or {}).get(row.meeting_id)
     return CalendarSchedulePublic(
         meeting_id=UUID(row.meeting_id), event_id=row.event_id,
         connection_id=row.connection_id, provider=row.provider,
-        starts_at=row.starts_at, ends_at=row.ends_at,
+        starts_at=_utc(row.starts_at), ends_at=_utc(row.ends_at),
         status=row.status, last_error=row.last_error,
+        rescheduled_from=original if original is not None and original != _utc(row.starts_at) else None,
+        last_checked_at=checked,
     )
 
 
 class CalendarScheduleService:
     # Notification hooks (NotificationEvents); a no-op unless wired in create_app.
     events: Any = NO_EVENTS
+    # The calendar watcher (calendar_watch.CalendarWatchService); None when not wired.
+    watcher: Any = None
 
     def __init__(self, database: Database, calendar: ComposioCalendar, meetings: MeetingService):
         self.database, self.calendar, self.meetings = database, calendar, meetings
@@ -74,12 +89,19 @@ class CalendarScheduleService:
             rows = session.execute(select(CalendarScheduleRow).where(
                 CalendarScheduleRow.organization_id == str(actor.organization_id),
             ).order_by(CalendarScheduleRow.starts_at.desc())).scalars().all()
-            return [_public(row) for row in rows]
+            moved = first_moves(session, str(actor.organization_id), meeting_ids=[row.meeting_id for row in rows])
+            return [_public(row, moved, self._checked(row.meeting_id)) for row in rows]
+
+    def _checked(self, meeting_id: str) -> datetime | None:
+        return self.watcher.last_checked(meeting_id) if self.watcher is not None else None
 
     def get(self, actor: Actor, meeting_id: UUID) -> CalendarSchedulePublic | None:
         with self.database.session_factory() as session:
             row = session.get(CalendarScheduleRow, str(meeting_id))
-            return _public(row) if row and row.organization_id == str(actor.organization_id) else None
+            if row is None or row.organization_id != str(actor.organization_id):
+                return None
+            moved = first_moves(session, row.organization_id, meeting_ids=[row.meeting_id])
+            return _public(row, moved, self._checked(row.meeting_id))
 
     def source(self, actor: Actor, meeting_id: UUID) -> CalendarEvent | None:
         with self.database.session_factory() as session:
@@ -88,7 +110,7 @@ class CalendarScheduleService:
                 return None
             return CalendarEvent(
                 connection_id=row.connection_id, provider=row.provider, event_id=row.event_id,
-                title=row.title, starts_at=row.starts_at, ends_at=row.ends_at,
+                title=row.title, starts_at=_utc(row.starts_at), ends_at=_utc(row.ends_at),
                 meeting_url=row.meeting_url, platform=row.platform, agenda=row.agenda, organizer=row.organizer,
                 invitees=row.invitees,
             )
@@ -99,7 +121,7 @@ class CalendarScheduleService:
                 meeting_id=str(meeting_id), organization_id=str(actor.organization_id),
                 provider=event.provider, connection_id=event.connection_id, event_id=event.event_id,
                 title=event.title, meeting_url=event.meeting_url, platform=event.platform,
-                starts_at=event.starts_at, ends_at=event.ends_at,
+                starts_at=_utc(event.starts_at), ends_at=_utc(event.ends_at),
                 agenda=event.agenda, organizer=event.organizer,
                 invitees=[person.model_dump() for person in event.invitees], saved_at=datetime.now(UTC),
             ))
@@ -154,7 +176,7 @@ class CalendarScheduleService:
                 CalendarScheduleRow.organization_id == str(actor.organization_id),
                 CalendarScheduleRow.connection_id == payload.connection_id,
                 CalendarScheduleRow.event_id == event.event_id,
-                CalendarScheduleRow.starts_at == event.starts_at,
+                CalendarScheduleRow.starts_at == _utc(event.starts_at),
             )).scalar_one_or_none()
             if existing:
                 raise CalendarScheduleError("this calendar event already has a record in this workspace; delete that record before importing it again")
@@ -169,7 +191,7 @@ class CalendarScheduleService:
                 meeting_id=str(meeting.id), organization_id=str(actor.organization_id),
                 user_id=str(actor.user_id), connection_id=event.connection_id,
                 provider=event.provider, event_id=event.event_id,
-                starts_at=event.starts_at, ends_at=event.ends_at,
+                starts_at=_utc(event.starts_at), ends_at=_utc(event.ends_at),
                 status="pending", attempts=0, last_error=None,
                 created_at=now, updated_at=now,
             )
@@ -221,17 +243,37 @@ class CalendarScheduleService:
                 logger.exception("calendar schedule reconciliation failed")
             await asyncio.sleep(15)
 
+    async def _due_after_recheck(self, meeting_id: str, provider: str, now: datetime) -> tuple[datetime, datetime] | None:
+        """Re-verify a calendar-backed join with its calendar first (bounded; see calendar_watch).
+
+        Returns the (possibly moved) start and end, or None when it is no longer due or pending.
+        """
+        if self.watcher is None or provider == "manual":
+            return None
+        await self.watcher.verify_before_join(meeting_id, now)
+        with self.database.session_factory() as session:
+            row = session.get(CalendarScheduleRow, meeting_id)
+            if row is None or row.status != "pending" or _utc(row.starts_at) > now:
+                return None
+            return _utc(row.starts_at), _utc(row.ends_at)
+
     async def tick(self) -> None:
         now = datetime.now(UTC)
         self.events.schedule_reminders(now)
         with self.database.session_factory() as session:
-            rows = session.execute(select(CalendarScheduleRow.organization_id, CalendarScheduleRow.meeting_id, CalendarScheduleRow.starts_at, CalendarScheduleRow.ends_at).where(
+            rows = session.execute(select(CalendarScheduleRow.organization_id, CalendarScheduleRow.meeting_id, CalendarScheduleRow.starts_at, CalendarScheduleRow.ends_at, CalendarScheduleRow.provider).where(
                 CalendarScheduleRow.status == "pending",
                 CalendarScheduleRow.starts_at <= now,
             )).all()
-        for organization_id, meeting_id, starts_at, ends_at in rows:
+        for organization_id, meeting_id, starts_at, ends_at, provider in rows:
             starts_at = starts_at.replace(tzinfo=starts_at.tzinfo or UTC)
             ends_at = ends_at.replace(tzinfo=ends_at.tzinfo or UTC)
+            if self.watcher is not None and provider != "manual":
+                # The event may have moved (or been cancelled) since the last periodic check.
+                fresh = await self._due_after_recheck(meeting_id, provider, now)
+                if fresh is None:
+                    continue
+                starts_at, ends_at = fresh
             if now >= ends_at or now > starts_at + timedelta(minutes=10):
                 with self.database.session_factory.begin() as session:
                     session.execute(update(CalendarScheduleRow).where(
@@ -244,6 +286,7 @@ class CalendarScheduleService:
                 claimed = session.execute(update(CalendarScheduleRow).where(
                     CalendarScheduleRow.meeting_id == meeting_id,
                     CalendarScheduleRow.status == "pending",
+                    CalendarScheduleRow.starts_at <= now,  # not moved later in the meantime
                 ).values(status="joining", attempts=CalendarScheduleRow.attempts + 1, updated_at=now)).rowcount
             if not claimed:
                 continue

@@ -12,6 +12,7 @@ import { MeetingPeopleCard } from "./meeting-people-card";
 import { MeetingKnowledgeSettings } from "./meeting-knowledge-settings";
 import { MeetingDetailsCard, MeetingDangerZone, MeetingSourceCard, formatTimestamp } from "./meeting-record-cards";
 import { PageHeader } from "./ui/page-header";
+import { LastChecked, MovedFrom, RescheduledBadge, ScheduleChangesCard } from "./calendar-change-history";
 import { Alert, LoadingRow, Skeleton } from "./ui/feedback";
 
 const pollableStatuses = new Set<MeetingDetail["status"]>(["created", "joining", "waiting_room", "live", "stopping", "processing"]);
@@ -220,9 +221,14 @@ export function MeetingDetailScreen({ meetingId, focusSegmentId, backLabel = "Al
 
     <div className="record-alerts">
       {error ? <p className="form-error" role="alert">{error}</p> : null}
-      {schedule ? <Alert tone={scheduled ? "info" : schedule.status === "failed" || schedule.status === "missed" ? "warning" : "neutral"} title={`${schedule.provider === "manual" ? "Scheduled assistant" : "Calendar assistant"} · ${schedule.status}`}
+      {schedule ? <Alert tone={scheduled ? (schedule.last_error ? "warning" : "info") : schedule.status === "failed" || schedule.status === "missed" ? "warning" : "neutral"} title={`${schedule.provider === "manual" ? "Scheduled assistant" : "Calendar assistant"} · ${schedule.status}`}
         actions={scheduled ? <button className="button secondary sm" type="button" onClick={cancelSchedule}>Cancel auto-join</button> : undefined}>
-        Starts {formatTimestamp(schedule.starts_at)}. {scheduled ? "The assistant joins at the start time. Cancelling keeps this meeting." : schedule.last_error || "Review this meeting for capture updates."}
+        Starts {formatTimestamp(schedule.starts_at)}. {scheduled ? schedule.last_error || "The assistant joins at the start time. Cancelling keeps this meeting." : schedule.last_error || "Review this meeting for capture updates."}
+        {schedule.rescheduled_from || (scheduled && schedule.provider !== "manual") ? <span className="schedule-watch">
+          <RescheduledBadge from={schedule.rescheduled_from} />
+          <MovedFrom from={schedule.rescheduled_from} />
+          {scheduled ? <LastChecked provider={schedule.provider} at={schedule.last_checked_at} /> : null}
+        </span> : null}
       </Alert> : null}
       {failing ? <Alert tone="danger" title={lifecycleDetail[meeting.status]}>{meeting.errorMessage ?? undefined}</Alert>
         : meeting.errorMessage ? <Alert tone="warning" title="Adapter message">{meeting.errorMessage}</Alert> : null}
@@ -247,6 +253,7 @@ export function MeetingDetailScreen({ meetingId, focusSegmentId, backLabel = "Al
         <MeetingDetailsCard meeting={meeting} route={transcriptionRoute} />
         <MeetingPeopleCard meetingId={meetingId} participants={participants} assistantName={meeting.botName} namedSpeakers={namedSpeakers} speakerIdentities={speakerIdentities} source={source} onSaveIdentity={saveIdentity} onIdentitiesSaved={setSpeakerIdentities} />
         {source ? <MeetingSourceCard source={source} /> : null}
+        {schedule && schedule.provider && schedule.provider !== "manual" ? <ScheduleChangesCard meetingId={meetingId} provider={schedule.provider} reloadKey={`${schedule.starts_at}:${schedule.status}:${schedule.event_id}`} /> : null}
         <MeetingKnowledgeSettings key={meeting.id} meeting={meeting} onSaved={acceptMeeting} />
         {deletableStatuses.has(meeting.status) ? <MeetingDangerZone deleting={deleting} onDelete={() => void deleteMeeting()} /> : null}
       </aside>

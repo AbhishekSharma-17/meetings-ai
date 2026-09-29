@@ -10,6 +10,7 @@ import { CalendlyPill, PlatformMark, PlatformPill, SourceStack } from "./calenda
 import { entryMatches, findEntry, mergeCalendarEvents, viaCalendly, type CalendarEntry } from "./calendar-events";
 import { calendarProviderNames } from "./calendar-providers";
 import { MeetingPrepPanel } from "./prep-panel";
+import { EventChangeHistory, MovedFrom, RescheduledBadge } from "./calendar-change-history";
 import { PageHeader } from "./ui/page-header";
 import { EmptyState, LoadingRow, Skeleton } from "./ui/feedback";
 import { FilterInput, NoMatches } from "./scroll-panel";
@@ -120,12 +121,14 @@ function EventSummary({ entry }: { entry: CalendarEntry }) {
       {providers.length ? <span className="prep-summary-providers">{providers.map((provider) => <span key={provider}><CalendarBrandIcon provider={provider} size="xs" />{calendarProviderNames[provider]}</span>)}</span> : null}
       <PlatformPill event={event} />
       {viaCalendly(entry) ? <CalendlyPill /> : null}
+      <RescheduledBadge from={event.rescheduled_from} />
     </div>
     <h2>{event.title}</h2>
     <ul className="prep-summary-facts">
-      <li><Clock aria-hidden="true" />{formatDateTime(starts, { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })}</li>
+      <li><Clock aria-hidden="true" />{formatDateTime(starts, { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })}{event.rescheduled_from ? <MovedFrom from={event.rescheduled_from} /> : null}</li>
       <li><Users aria-hidden="true" />{invitees} invited {invitees === 1 ? "person" : "people"}</li>
     </ul>
     {event.agenda ? <p className="prep-summary-agenda"><b>Agenda</b>{event.agenda}</p> : null}
+    {event.rescheduled_from ? <EventChangeHistory key={event.id} eventId={event.id} /> : null}
   </header>;
 }

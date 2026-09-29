@@ -11,6 +11,7 @@ import { calendarProviderNames, platformLabel } from "./calendar-providers";
 import { Badge, EmptyState } from "./ui/feedback";
 import { FilterInput, NoMatches } from "./scroll-panel";
 import { useListSearch } from "./use-list-search";
+import { EventChangeHistory, MovedFrom, RescheduledBadge } from "./calendar-change-history";
 import { formatDate, formatDateTime, formatDayHeading, formatTime, todayKey } from "@/lib/time-preferences";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -109,6 +110,7 @@ export function DayAgenda({ selectedDay, dayEntries, rangeEntries, selectedEvent
                 <span className="calendar-meta-sep" aria-hidden="true">·</span>
                 <PlatformMark event={entry.event} decorative />
                 <span>{platform ? platformLabel(platform) : "No video link"}</span>
+                {entry.event.rescheduled_from ? <><span className="calendar-meta-sep" aria-hidden="true">·</span><span className="calendar-event-moved">Rescheduled</span></> : null}
               </small>
             </span>
             <ChevronRight className="row-arrow" aria-hidden="true" />
@@ -152,9 +154,11 @@ export function EventDetail({ entry, connections, canSchedule, alreadyScheduled,
     <div className="calendar-detail-head">
       <PlatformPill event={event} />
       {viaCalendly(entry) ? <CalendlyPill /> : null}
+      <RescheduledBadge from={event.rescheduled_from} />
     </div>
     <h2>{event.title}</h2>
     <p className="calendar-detail-time"><Clock aria-hidden="true" />{formatDate(starts, { weekday: "short", month: "short", day: "numeric" })}, {formatTime(starts)} – {eventTime(event.ends_at)}</p>
+    {event.rescheduled_from ? <p className="calendar-detail-moved"><MovedFrom from={event.rescheduled_from} /></p> : null}
     <dl className="calendar-detail-meta">
       <dt>{accounts.length > 1 ? "Calendars" : "Calendar"}</dt>
       <dd><ul className="calendar-detail-sources">{accounts.map((source) => {
@@ -166,6 +170,7 @@ export function EventDetail({ entry, connections, canSchedule, alreadyScheduled,
       })}</ul></dd>
       {event.organizer ? <><dt>Organizer</dt><dd>{event.organizer}</dd></> : null}
     </dl>
+    <EventChangeHistory key={event.id} eventId={event.id} />
     {event.agenda ? <div className="calendar-detail-block"><h3>Agenda</h3><p className="calendar-detail-agenda">{event.agenda}</p></div> : null}
     <div className="calendar-detail-block">
       <h3>Invited <span className="section-count">{invitees.length}</span></h3>

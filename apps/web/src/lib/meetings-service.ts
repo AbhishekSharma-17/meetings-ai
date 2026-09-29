@@ -1198,6 +1198,16 @@ type AppNotificationT = import("./types").AppNotification;
 type NotificationPageT = import("./types").NotificationPage;
 type BackgroundJobT = import("./types").BackgroundJob;
 
+/** Detected reschedules, cancellations and link changes of followed calendar events. */
+export const calendarChangeService = {
+  forMeeting(meetingId: string): Promise<import("./types").CalendarChangeHistory> {
+    return api<import("./types").CalendarChangeHistory>(`/v1/meetings/${meetingId}/schedule/changes`);
+  },
+  forCalendarEvent(eventId: string): Promise<import("./types").CalendarChangeHistory> {
+    return api<import("./types").CalendarChangeHistory>(`/v1/calendar/events/${eventId}/changes`);
+  },
+};
+
 export const notificationService = {
   list(options: { unread?: boolean; limit?: number; cursor?: string | null } = {}): Promise<NotificationPageT> {
     return api<NotificationPageT>(`/v1/notifications${usageQuery({}, { unread: options.unread ? "true" : null, limit: options.limit ?? 30, cursor: options.cursor ?? null })}`);
