@@ -5,8 +5,9 @@ import type { PrepSourceOrigin, PrepSourceV2 } from "@/lib/types";
 import { hostname, originLabels, safeHref } from "./prep-shared";
 import { FilterInput, NoMatches } from "./scroll-panel";
 import { useListSearch } from "./use-list-search";
+import { ProviderName } from "./provider-brand-icons";
 
-const originOrder: PrepSourceOrigin[] = ["provided_link", "web", "prep_upload", "our_documents", "organization_brief"];
+const originOrder: PrepSourceOrigin[] = ["provided_link", "apollo", "web", "prep_upload", "our_documents", "organization_brief"];
 
 /** Sources grouped by where they came from, so public evidence and our private material stay distinct. */
 export function PrepSources({ sources }: { sources: PrepSourceV2[] }) {
@@ -20,7 +21,7 @@ export function PrepSources({ sources }: { sources: PrepSourceV2[] }) {
     {search.noMatches ? <NoMatches query={search.query} noun="sources" onClear={search.clear} /> : null}
     <div className="prep-source-groups">
       {groups.map(([origin, items]) => <div key={origin} className="prep-source-group">
-        <h4>{originLabels[origin]}</h4>
+        <h4>{origin === "apollo" ? <ProviderName brand="apollo" label={originLabels[origin]} /> : originLabels[origin]}</h4>
         <ol>{items.map((source) => {
           const href = safeHref(source.url);
           const detail = [source.publisher || hostname(source.url), source.published_date].filter(Boolean).join(" · ");

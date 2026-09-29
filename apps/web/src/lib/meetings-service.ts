@@ -1199,6 +1199,23 @@ export const balanceService = {
   },
 };
 
+/** The workspace's Apollo research source (owners and admins). The API key is write-only. */
+export const apolloService = {
+  status(): Promise<import("./types").ApolloIntegration> {
+    return api<import("./types").ApolloIntegration>("/v1/workspace/integrations/apollo");
+  },
+  /** Connects or replaces: the key is tested with Apollo first; a rejected key is never stored. */
+  connect(apiKey: string): Promise<import("./types").ApolloIntegration> {
+    return api<import("./types").ApolloIntegration>("/v1/workspace/integrations/apollo", { method: "PUT", body: JSON.stringify({ api_key: apiKey }) });
+  },
+  test(): Promise<import("./types").ApolloIntegration> {
+    return api<import("./types").ApolloIntegration>("/v1/workspace/integrations/apollo/test", { method: "POST" });
+  },
+  disconnect(): Promise<void> {
+    return api<void>("/v1/workspace/integrations/apollo", { method: "DELETE" });
+  },
+};
+
 export const storageService = {
   summary(includeCapture = false): Promise<StorageSummaryT> {
     return api<StorageSummaryT>(`/v1/workspace/storage${includeCapture ? "?include_capture=true" : ""}`);

@@ -5,6 +5,8 @@ import type { PrepAttendee, PrepMatchConfidence, PrepPersona, PrepSourceV2 } fro
 import { Badge } from "./ui/feedback";
 import { Citations, safeHref } from "./prep-shared";
 import { Avatar } from "./ui/avatar";
+import { ApolloPersonFacts } from "./prep-apollo";
+import { ProviderName } from "./provider-brand-icons";
 import { FilterInput, NoMatches } from "./scroll-panel";
 import { useListSearch } from "./use-list-search";
 
@@ -33,20 +35,23 @@ export function PrepAttendees({ attendees, sources }: { attendees: PrepAttendee[
 function PersonCard({ person, sources }: { person: PrepAttendee; sources: Map<string, PrepSourceV2> }) {
   const match = matchCopy[person.match_confidence] ?? matchCopy.unconfirmed;
   const profile = safeHref(person.linkedin_url);
+  const title = person.title || person.apollo?.title;
   return <article className="prep-person" aria-label={person.name}>
     <header className="prep-person-head">
       <Avatar name={person.name} fallback={person.name.trim() ? undefined : "?"} />
       <div className="prep-person-id">
         <p className="prep-person-name">{person.name}</p>
-        <p className="prep-person-title" title={person.title || person.email || undefined}>{person.title || person.email || "Title not confirmed"}</p>
+        <p className="prep-person-title" title={title || person.email || undefined}>{title || person.email || "Title not confirmed"}</p>
       </div>
     </header>
     <div className="prep-person-badges">
       {person.side && sideLabels[person.side] ? <Badge tone="neutral">{sideLabels[person.side]}</Badge> : null}
       <Badge tone="brand">{personaLabels[person.persona] ?? person.persona}</Badge>
       <Badge tone={match.tone} dot>{match.label}</Badge>
+      {person.apollo ? <Badge tone="info" className="prep-person-verified"><ProviderName brand="apollo" label="Apollo" /></Badge> : null}
       {profile ? <a className="prep-person-link" href={profile} target="_blank" rel="noreferrer noopener" aria-label={`Public profile for ${person.name}`}>Profile <ExternalLink aria-hidden="true" /></a> : null}
     </div>
+    {person.apollo ? <ApolloPersonFacts person={person.apollo} sources={sources} /> : null}
     {person.background ? <p className="prep-person-text">{person.background} <Citations ids={person.source_ids} sources={sources} /></p> : null}
     {person.likely_interests.length ? <ul className="tag-list prep-person-interests" aria-label={`Likely interests of ${person.name}`}>
       {person.likely_interests.map((item) => <li key={item} className="tag">{item}</li>)}

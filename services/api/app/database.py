@@ -938,6 +938,46 @@ class MeetingCoverageRow(Base):
     decided_by: Mapped[str | None] = mapped_column(String(36))
 
 
+class WorkspaceIntegrationRow(Base):
+    """A workspace-level connection to an external data provider made through Composio (v29).
+
+    The provider's API key is sent to Composio once and never stored here: only the Composio
+    connected-account id, a masked hint (last 4 characters) and who connected it when.
+    """
+
+    __tablename__ = "workspace_integrations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(40), nullable=False)  # apollo
+    connected_account_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    hint: Mapped[str] = mapped_column(String(40), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)  # active | invalid | out_of_credit
+    created_by: Mapped[str | None] = mapped_column(String(36))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (UniqueConstraint("organization_id", "provider", name="uq_workspace_integrations_org_provider"),)
+
+
+class ApolloCacheRow(Base):
+    """Apollo results reused for 30 days per workspace (org | person | news | jobs | account | contact) (v29)."""
+
+    __tablename__ = "apollo_cache"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    cache_key: Mapped[str] = mapped_column(String(400), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+    __table_args__ = (UniqueConstraint("organization_id", "kind", "cache_key", name="uq_apollo_cache_entry"),)
+
+
 class SchemaVersionRow(Base):
     __tablename__ = "schema_version"
 
@@ -992,6 +1032,7 @@ SCHEMA_TABLES_BY_VERSION: dict[int, tuple[str, ...]] = {
     26: ("calendar_event_changes",),
     27: ("organization_leave_policies", "meeting_leave_state"),
     28: ("meeting_coverage",),
+    29: ("workspace_integrations", "apollo_cache"),
 }
 
 SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
@@ -1060,6 +1101,8 @@ SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
     "organization_leave_policies": ("organization_id", "silence_minutes", "quiet_after_end_minutes", "no_one_joined_minutes", "max_hours", "updated_by", "updated_at"),
     "meeting_leave_state": ("meeting_id", "organization_id", "keep_until", "kept_by", "warned_at", "warned_leave_at", "warned_reason", "end_reason", "ended_by", "ended_at", "quiet_since", "last_speech_at", "stop_attempts", "next_attempt_at", "last_error", "updated_at"),
     "meeting_coverage": ("meeting_id", "user_id", "organization_id", "role", "decision", "handed_to_meeting_id", "receive_recap", "decided_at", "decided_by"),
+    "workspace_integrations": ("id", "organization_id", "provider", "connected_account_id", "hint", "status", "created_by", "created_at", "updated_at", "last_checked_at", "last_error"),
+    "apollo_cache": ("id", "organization_id", "kind", "cache_key", "payload", "fetched_at", "expires_at"),
 }
 
 
@@ -1142,7 +1185,7 @@ def _migrate_to_v22(connection) -> None:
 class Database:
     """Upgrades known schemas and rejects unknown or incomplete ones."""
 
-    SCHEMA_VERSION = 28
+    SCHEMA_VERSION = 29
 
     def __init__(self, url: str) -> None:
         engine_options: dict[str, object] = {"pool_pre_ping": True}

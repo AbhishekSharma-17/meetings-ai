@@ -20,6 +20,7 @@
 @import "../styles/features/leave.css";
 @import "../styles/features/coordination.css";
 @import "../styles/features/provider-credits.css";
+@import "../styles/features/apollo.css";
 
 /* Meetings AI tokens. Cool slate neutrals, one deep-sea accent taken from the logo.
    Every token lives in three places: the light value here, the dark value in .dark,

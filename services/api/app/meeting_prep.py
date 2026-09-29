@@ -136,6 +136,8 @@ class PrepRequest(BaseModel):
     research_enabled: bool = True
     # Organizer corrections from the who's-who panel (kept with the saved briefing).
     attendee_sides: AttendeeSides = Field(default_factory=dict)
+    # Ask Apollo again instead of reusing its 30-day cache (spends Apollo credits).
+    apollo_refresh: bool = False
 
     @field_validator("attendee_sides")
     @classmethod
@@ -359,6 +361,7 @@ class MeetingPrepService:
         self.vault, self.ai_settings, self.retriever = vault, ai_settings, retriever
         self.exa_transport, self.environ, self.exa_sleep = exa_transport, environ, exa_sleep
         self.credit_alerts: Any | None = None  # set by create_app; alerts owners when Exa returns 402
+        self.apollo: Any | None = None  # ApolloIntegrationService, set by create_app
         # One running briefing per user and event (single API process; see deployment notes).
         self._active: set[tuple[str, str, str]] = set()
 
@@ -473,9 +476,11 @@ class MeetingPrepService:
         started = datetime.now(UTC)
         documents = await self._our_documents(actor, event_id, brief, inputs)
         pipeline = PrepResearchPipeline(self.providers)
+        apollo = self.apollo.research_for(actor, event_id, refresh=request.apollo_refresh) \
+            if self.apollo is not None and inputs.research_enabled else None
         run_args = dict(organization_id=actor.organization_id, actor_user_id=actor.user_id, event=event,
                         inputs=inputs, brief=brief, our_documents=documents, identity=identity, parties=parties,
-                        profile_id=profile_id, model_override=model_override, progress=emit)
+                        profile_id=profile_id, model_override=model_override, progress=emit, apollo=apollo)
         if exa_key:
             client_args: dict[str, Any] = {"ledger": self.usage, "transport": self.exa_transport, "usage": UsageContext(
                 organization_id=actor.organization_id, prep_event_id=event_id, actor_user_id=actor.user_id)}
@@ -497,7 +502,7 @@ class MeetingPrepService:
                 target_company=outcome.target.name or outcome.target.domain, company_website=outcome.target.website,
                 sources=outcome.sources, public_research_performed=outcome.exa_calls > 0,
                 research_steps=outcome.steps, usage=usage, started_at=started, generated_at=generated,
-                provider=outcome.provider, model=outcome.model, whos_who=parties,
+                provider=outcome.provider, model=outcome.model, whos_who=parties, apollo=outcome.apollo,
             )
             session.add(MeetingPrepRow(id=str(report_id), organization_id=str(actor.organization_id),
                 user_id=str(actor.user_id), calendar_event_id=str(event_id), context=inputs.notes,
@@ -586,10 +591,13 @@ class MeetingPrepService:
             totals = totals.model_copy(update={
                 "exa_calls": totals.exa_calls + (row.kind in {"search", "contents"}),
                 "llm_calls": totals.llm_calls + (row.kind == "llm"),
+                "apollo_calls": totals.apollo_calls + (row.kind == "apollo"),
                 "input_tokens": totals.input_tokens + (row.input_tokens or 0),
                 "output_tokens": totals.output_tokens + (row.output_tokens or 0),
                 "estimated_usd": round(totals.estimated_usd + (row.estimated_usd or 0.0), 6),
-                "unpriced_calls": totals.unpriced_calls + (row.estimated_usd is None and row.status == "succeeded"),
+                # Apollo bills in its own credits (shown under Provider credits), not dollars.
+                "unpriced_calls": totals.unpriced_calls + (row.estimated_usd is None and row.status == "succeeded"
+                                                           and row.kind != "apollo"),
             })
         return totals
 

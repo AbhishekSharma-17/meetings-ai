@@ -1,4 +1,5 @@
 import type { PrepReportV2, PrepSourceV2, PrepUsageTotals } from "../../types";
+import { acmeApollo, withApollo } from "./apollo";
 
 type Frame = { id: string; eventId: string; generatedAt: string; startedAt: string; usage: PrepUsageTotals };
 
@@ -20,7 +21,7 @@ const steps = (company: string): PrepReportV2["research_steps"] => [
 ];
 
 export function acmeReport(frame: Frame): PrepReportV2 {
-  return {
+  return withApollo({
     report_version: 2, id: frame.id, calendar_event_id: frame.eventId, target_company: "Acme Robotics", company_website: "https://www.acme-robotics.example",
     executive_brief: "Acme Robotics is scaling autonomous yard and warehouse logistics after its August MOU with the Port of Rotterdam. The December demo raises the stakes for maintenance at a new site with Dutch documentation. Lead with a short, evaluated extension of the FieldGuide pilot rather than a new programme, and give Asha Patel the architecture and security detail she will ask for.",
     company: {
@@ -78,7 +79,7 @@ export function acmeReport(frame: Frame): PrepReportV2 {
     public_research_performed: true, research_steps: steps("Acme Robotics"), usage: frame.usage,
     started_at: frame.startedAt, generated_at: frame.generatedAt, provider: "openrouter", model: "openai/gpt-6-sol",
     findings: [], relevant_offerings: ["Retrieval (RAG) assistants", "MLOps and model evaluation"], people_notes: [],
-  };
+  }, acmeApollo);
 }
 
 export function initechReport(frame: Frame): PrepReportV2 {

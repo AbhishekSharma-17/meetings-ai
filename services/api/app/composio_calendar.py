@@ -15,6 +15,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from .accounts import Actor
+from .composio_http import COMPOSIO_BASE_URL, ComposioHttpError, composio_request
 from .meeting_links import parse_meeting_url
 
 logger = logging.getLogger(__name__)
@@ -298,7 +299,7 @@ class ComposioCalendar:
     def __init__(self, api_key: str | None = None, *, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self.api_key = api_key if api_key is not None else os.getenv("COMPOSIO_API_KEY", "")
         self.transport = transport
-        self.base_url = "https://backend.composio.dev/api/v3.1"
+        self.base_url = COMPOSIO_BASE_URL
         self.auth_configs = {
             "googlecalendar": os.getenv("COMPOSIO_GOOGLE_CALENDAR_AUTH_CONFIG_ID", ""),
             "outlook": os.getenv("COMPOSIO_OUTLOOK_AUTH_CONFIG_ID", ""),
@@ -319,24 +320,17 @@ class ComposioCalendar:
         return bool(self.api_key and any(self.auth_configs.values()))
 
     async def _request(self, method: str, path: str, *, params: dict | None = None, body: dict | None = None) -> dict:
-        if not self.api_key:
-            raise CalendarError("Composio is not configured on the server")
         try:
-            async with httpx.AsyncClient(base_url=self.base_url, transport=self.transport, timeout=25) as client:
-                response = await client.request(method, path, params=params, json=body, headers={"x-api-key": self.api_key})
-                response.raise_for_status()
-                payload = response.json()
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 409 and (path.endswith("/link") or method == "PATCH"):
+            return await composio_request(self.api_key, method, path, params=params, body=body,
+                                          transport=self.transport, base_url=self.base_url)
+        except ComposioHttpError as exc:
+            if not self.api_key:
+                raise CalendarError("Composio is not configured on the server") from exc
+            if exc.status_code == 409 and (path.endswith("/link") or method == "PATCH"):
                 raise CalendarError("calendar alias already in use; choose another name") from exc
-            logger.warning("Composio calendar request failed: %s %s", method, path)
+            if str(exc) == "Composio returned an invalid response":
+                raise CalendarError("calendar provider returned an invalid response") from exc
             raise CalendarError("calendar provider request failed; please try again or reconnect") from exc
-        except (httpx.HTTPError, ValueError) as exc:
-            logger.warning("Composio calendar request failed: %s %s", method, path)
-            raise CalendarError("calendar provider request failed; please try again or reconnect") from exc
-        if not isinstance(payload, dict):
-            raise CalendarError("calendar provider returned an invalid response")
-        return payload
 
     async def connections(self, actor: Actor) -> list[CalendarConnection]:
         result = await self._request("GET", "/connected_accounts", params={"user_ids": _user_id(actor), "limit": 100})

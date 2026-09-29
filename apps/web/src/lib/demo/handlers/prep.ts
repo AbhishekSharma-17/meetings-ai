@@ -1,6 +1,7 @@
 import type { AttendeeSides, CachedCalendarEvent, OrganizationIdentity, PrepDocument, PrepGenerateInput, PrepHistory, PrepInputs, PrepReportV2, PrepUsageTotals, UsageEvent } from "../../types";
 import { newId } from "../fixtures/ids";
 import { generatedReport } from "../fixtures/prep-generate";
+import { genericApollo, withApollo } from "../fixtures/apollo";
 import { bool, json, noContent, notify, problem, sse, type SseFrame, str, strList, wait } from "../http";
 import type { DemoRequest, DemoRouter } from "../router";
 import type { DemoStore } from "../store";
@@ -22,7 +23,7 @@ function inputOf(body: Record<string, unknown>): PrepGenerateInput {
   return {
     context: str(body.context) ?? "", target_company: str(body.target_company), company_website: str(body.company_website),
     profile_urls: strList(body.profile_urls), text_profile_id: str(body.text_profile_id), research_enabled: bool(body.research_enabled, true),
-    attendee_sides: sidesOf(body.attendee_sides),
+    attendee_sides: sidesOf(body.attendee_sides), apollo_refresh: bool(body.apollo_refresh, false),
   };
 }
 
@@ -69,7 +70,16 @@ function recordUsage(store: DemoStore, eventId: string, title: string, usage: Pr
   const base = { created_at: now, provider: "openrouter", model: "openai/gpt-6-sol", unit_type: "tokens", price_source: "catalog_list_price", status: "succeeded", meeting_id: null, meeting_title: null, knowledge_base_id: null, knowledge_base_name: null, prep_event_id: eventId, prep_event_title: title, actor_user_id: store.members[0]?.user_id ?? null, actor_display_name: store.displayName, details: { profile_name: "GPT-6 via OpenRouter", endpoint_host: "openrouter.ai", request_type: "llm", execution_location: "cloud", demo: true } };
   const llm: UsageEvent = { ...base, id: newId(9), kind: "llm", purpose: "meeting_prep", input_tokens: usage.input_tokens, output_tokens: usage.output_tokens, units: null, estimated_usd: Math.round((usage.estimated_usd - usage.exa_calls * 0.005) * 1e6) / 1e6, duration_ms: 9_800 };
   const searches: UsageEvent[] = Array.from({ length: usage.exa_calls }, () => ({ ...base, id: newId(9), kind: "search", purpose: "meeting_prep_research", provider: "exa", model: "auto", input_tokens: null, output_tokens: null, units: 10, unit_type: "results", estimated_usd: 0.005, duration_ms: 900, details: { ...base.details, profile_name: "Exa research", endpoint_host: "api.exa.ai", request_type: "search" } }));
-  store.usage = [llm, ...searches, ...store.usage];
+  const apollo: UsageEvent[] = Array.from({ length: usage.apollo_calls ?? 0 }, (_, index) => ({ ...base, id: newId(9), kind: "apollo", purpose: "meeting_prep_research", provider: "apollo", model: index === 0 ? "apollo_organization_enrichment" : "apollo_bulk_people_enrichment", input_tokens: null, output_tokens: null, units: index === 0 ? 1 : 3, unit_type: "records", estimated_usd: null, price_source: null, duration_ms: 700, details: { ...base.details, profile_name: "Apollo", endpoint_host: "backend.composio.dev", request_type: "apollo" } }));
+  store.usage = [llm, ...searches, ...apollo, ...store.usage];
+}
+
+/** With the sample Apollo connection on, briefings carry Apollo facts (cached unless the visitor asks to refresh). */
+function withDemoApollo(store: DemoStore, report: PrepReportV2, input: PrepGenerateInput): PrepReportV2 {
+  if (!store.apollo.connected || !input.research_enabled) return report;
+  const calls = input.apollo_refresh ? 7 : 0;
+  if (report.apollo) return { ...report, apollo: { ...report.apollo, calls, cached_results: calls ? 0 : 6 }, usage: { ...report.usage, apollo_calls: calls } };
+  return withApollo(report, genericApollo(report), 5);
 }
 
 function buildReport(store: DemoStore, eventId: string, input: PrepGenerateInput): PrepReportV2 | null {
@@ -87,9 +97,10 @@ function buildReport(store: DemoStore, eventId: string, input: PrepGenerateInput
     .filter((person) => person.side !== "ours") as PrepReportV2["attendees"] };
   const known = store.reports[eventId]?.[0];
   // Known sample accounts keep their curated briefing content, refreshed with a new id and timestamp.
-  const next = known && !parties.warnings.length && (!input.target_company || known.target_company?.toLowerCase() === input.target_company.toLowerCase()) ? { ...known, id: report.id, generated_at: generatedAt, started_at: report.started_at, usage, public_research_performed: input.research_enabled, whos_who: parties } : report;
+  const chosen = known && !parties.warnings.length && (!input.target_company || known.target_company?.toLowerCase() === input.target_company.toLowerCase()) ? { ...known, id: report.id, generated_at: generatedAt, started_at: report.started_at, usage, public_research_performed: input.research_enabled, whos_who: parties } : report;
+  const next = withDemoApollo(store, chosen, input);
   store.reports = { ...store.reports, [eventId]: [next, ...(store.reports[eventId] ?? [])] };
-  recordUsage(store, eventId, event.title, usage);
+  recordUsage(store, eventId, event.title, next.usage);
   return next;
 }
 

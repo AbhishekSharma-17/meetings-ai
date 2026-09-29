@@ -23,12 +23,13 @@ export const originLabels: Record<PrepSourceOrigin, string> = {
   our_documents: "Our documents",
   prep_upload: "Uploaded for this meeting",
   organization_brief: "Our company profile",
+  apollo: "Apollo (verified B2B data)",
 };
 
 /** A source chip: a link for public URLs, an anchor to the source list for our own documents. */
 export function Citation({ id, source }: { id: string; source: CitableSource }) {
   const href = safeHref(source.url);
-  const internal = source.origin && source.origin !== "web" && source.origin !== "provided_link";
+  const internal = source.origin && source.origin !== "web" && source.origin !== "provided_link" && source.origin !== "apollo";
   if (href) return <a className="prep-citation" href={href} target="_blank" rel="noreferrer noopener" aria-label={`Source ${id}`} title={source.title}>{id}</a>;
   return <a className={internal ? "prep-citation internal" : "prep-citation"} href={`#prep-source-${id}`} aria-label={`Source ${id}`} title={source.title}>{id}</a>;
 }

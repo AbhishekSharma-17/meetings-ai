@@ -8,7 +8,7 @@ import { NoMatches, SearchToolbar } from "./scroll-panel";
 import { UiSelect } from "./ui-select";
 import { useListSearch } from "./use-list-search";
 import { BalanceChip, CheckedAt, useProviderBalances } from "./provider-balance-chip";
-import { balanceChipText, balanceProviderName, billingKeyInfo, formatDollars, sortByRemaining } from "./provider-balance";
+import { balanceChipText, balanceProviderName, billingKeyInfo, creditLineText, formatDollars, sortByRemaining } from "./provider-balance";
 import { ProviderBrandIcon } from "./provider-brand-icons";
 
 type SortChoice = "least" | "most" | "name";
@@ -25,7 +25,19 @@ function sorted(items: readonly ProviderBalance[], choice: SortChoice): Provider
 
 const amount = (value: number | null) => value === null ? "—" : formatDollars(value);
 
-/** Observability: remaining credit and spend for every saved OpenRouter, OpenAI and Exa key. */
+/** Apollo's per-type credits for the billing cycle; a line at or under 10% of its limit is flagged. */
+function CreditLines({ item }: { item: ProviderBalance }) {
+  const lines = item.credits ?? [];
+  if (!lines.length) return <p className="provider-credit-lines-empty field-hint">No credit balances reported.</p>;
+  return <dl className="provider-credit-figures provider-credit-lines">
+    {lines.map((line) => {
+      const state = line.limit && line.remaining !== null ? line.remaining <= 0 ? "exhausted" : line.remaining <= line.limit * 0.1 ? "low" : "ok" : "ok";
+      return <div key={line.credit_type} data-state={state}><dt>{line.label}</dt><dd>{creditLineText(line)}</dd></div>;
+    })}
+  </dl>;
+}
+
+/** Observability: remaining credit and spend for every saved OpenRouter, OpenAI and Exa key, plus Apollo credits. */
 export function ProviderCreditsCard({ refreshKey }: { refreshKey: number }) {
   const balances = useProviderBalances(true, refreshKey);
   const [sort, setSort] = useState<SortChoice>("least");
@@ -71,11 +83,11 @@ function CreditRow({ item }: { item: ProviderBalance }) {
       <span><b>{item.label}</b><small>{balanceProviderName[item.provider]} · {item.hint}</small></span>
     </span>
     <span className="provider-credit-status"><BalanceChip balance={item} /><small>{item.note}</small></span>
-    <dl className="provider-credit-figures">
+    {item.provider === "apollo" ? <CreditLines item={item} /> : <dl className="provider-credit-figures">
       <div><dt>Left</dt><dd>{amount(item.remaining_usd)}</dd></div>
       <div><dt>{spentLabel}</dt><dd>{amount(item.spent_usd)}</dd></div>
       <div><dt>Tracked here</dt><dd>{formatDollars(item.our_tracked_spend_usd)}</dd></div>
-    </dl>
+    </dl>}
     <span className="provider-credit-checked"><CheckedAt value={item.checked_at} /><a className="text-button" href={item.dashboard_url} target="_blank" rel="noreferrer">Billing</a></span>
   </li>;
 }

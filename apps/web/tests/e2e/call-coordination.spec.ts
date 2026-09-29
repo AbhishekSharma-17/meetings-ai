@@ -12,9 +12,15 @@ const TWO = "00000000-0000-4000-8000-000000000713";
 const CREATED = "00000000-0000-4000-8000-000000000714";
 const EVENT = "00000000-0000-4000-8000-000000000720";
 const LINK = "https://meet.google.com/abc-defg-hij";
-const stamp = new Date(Date.now() - 60 * 60_000).toISOString();
-const soon = (() => { const date = new Date(); date.setMinutes(0, 0, 0); date.setHours(date.getHours() + 2); return date.toISOString(); })();
+// A fixed clock: "two hours from now" must stay on the same calendar day whatever time the suite runs.
+const NOW = new Date("2026-09-29T09:00:00Z");
+const stamp = new Date(NOW.getTime() - 60 * 60_000).toISOString();
+const soon = new Date(NOW.getTime() + 2 * 60 * 60_000).toISOString();
 const plusHour = (iso: string) => new Date(new Date(iso).getTime() + 3_600_000).toISOString();
+
+
+test.use({ timezoneId: "UTC" });
+test.beforeEach(async ({ page }) => { await page.clock.setFixedTime(NOW); });
 
 const you = { user_id: USER, display_name: "Workspace owner", is_you: true };
 const asha = { user_id: ASHA, display_name: "Asha Patel", is_you: false };

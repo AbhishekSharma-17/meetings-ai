@@ -14,6 +14,8 @@ const purposeNames: Record<string, string> = {
   meeting_prep_planning: "Meeting prep planning",
   meeting_prep_repair: "Meeting prep brief repair",
   meeting_prep_research: "Meeting prep research",
+  apollo_connection_test: "Apollo connection check",
+  apollo_credit_check: "Apollo credit check",
   meeting_transcription: "Meeting transcription",
   document_vision: "Document reading (OCR)",
   document_embedding: "Document indexing",
@@ -34,6 +36,7 @@ const providerNames: Record<string, string> = {
   vexa: "Vexa",
   vexa_native: "Vexa",
   exa: "Exa",
+  apollo: "Apollo",
   unknown: "Unknown provider",
 };
 
@@ -44,16 +47,18 @@ const kindNames: Record<string, string> = {
   transcription: "Transcription",
   search: "Web search",
   contents: "Web page reading",
+  apollo: "Apollo data",
 };
 
 const kindTones: Record<string, Tone> = {
-  llm: "brand", embedding: "info", vision: "info", transcription: "warning", search: "success", contents: "success",
+  llm: "brand", embedding: "info", vision: "info", transcription: "warning", search: "success", contents: "success", apollo: "info",
 };
 
 const unitNames: Record<string, [string, string]> = {
   audio_seconds: ["second of audio", "seconds of audio"],
   results: ["result", "results"],
   pages: ["page", "pages"],
+  records: ["record", "records"],
   requests: ["request", "requests"],
   search_calls: ["search", "searches"],
   tokens: ["token", "tokens"],

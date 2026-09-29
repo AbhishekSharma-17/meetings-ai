@@ -4,14 +4,15 @@
  * and OpenAI-compatible routes are identified by their endpoint host (openrouter.ai is OpenRouter).
  */
 
-export type ProviderBrand = "openai" | "openrouter" | "exa";
+export type ProviderBrand = "openai" | "openrouter" | "exa" | "apollo";
 
-export const providerBrandNames: Record<ProviderBrand, string> = { openai: "OpenAI", openrouter: "OpenRouter", exa: "Exa" };
+export const providerBrandNames: Record<ProviderBrand, string> = { openai: "OpenAI", openrouter: "OpenRouter", exa: "Exa", apollo: "Apollo" };
 
 const BRAND_HOSTS: ReadonlyArray<readonly [string, ProviderBrand]> = [
   ["openrouter.ai", "openrouter"],
   ["openai.com", "openai"],
   ["exa.ai", "exa"],
+  ["apollo.io", "apollo"],
 ];
 
 /** Host of a URL or a bare host name ("openrouter.ai", "https://openrouter.ai/api/v1"); null when unparseable. */
@@ -39,6 +40,7 @@ export function providerBrand(provider: string | null | undefined, endpoint?: st
   if (byHost) return byHost;
   const key = (provider ?? "").toLowerCase().replace(/[^a-z]/g, "");
   if (key === "exa" || key === "exawebresearch") return "exa";
+  if (key === "apollo") return "apollo";
   if (key === "openrouter") return "openrouter";
   if (key === "openai") return host ? null : "openai";
   return null;

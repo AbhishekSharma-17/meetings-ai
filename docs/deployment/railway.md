@@ -91,6 +91,23 @@ chat, uploads) before scaling out. Do not attach a public domain to
 the Vexa or API services merely to test them; the web proxy and authenticated
 `/v1/integrations/vexa/health` endpoint cover the normal integration check.
 
+### Apollo (research source via Composio)
+
+Apollo is optional. Owners/admins paste the workspace's Apollo API key under AI providers →
+Research sources; the API registers it with Composio as a workspace connected account (Composio
+user id `meetings-ai:org:<organization_id>`) and stores only that account id and a masked hint.
+Set these on the **API** service (not in `.railway/railway.ts`; add them in the Railway UI):
+
+| Variable | Required | Default | Purpose |
+| --- | --- | --- | --- |
+| `COMPOSIO_API_KEY` | yes (already set for calendars) | — | Composio project key. |
+| `COMPOSIO_APOLLO_AUTH_CONFIG_ID` | recommended | unset | An API-key auth config for the `apollo` toolkit (`ac_…`). When unset, the API reuses or creates one named `Meetings AI Apollo` on the first connect. |
+| `COMPOSIO_APOLLO_VERSION` | no | `20260922_00` | Apollo toolkit version for `/tools/execute`. |
+| `APOLLO_MAX_CALLS_PER_PREP` | no | `15` | Apollo tool calls allowed per briefing (1–50). Results are cached per workspace for 30 days. |
+
+Apollo calls appear in Observability as kind `apollo` (no dollar price; Apollo bills credits), and
+the Apollo credit balances appear under Provider credits.
+
 ## Validation and remaining setup
 
 1. Confirm Railway lists `pgvector`, Vexa, API, and web as online.

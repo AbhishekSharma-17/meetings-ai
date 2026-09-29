@@ -12,9 +12,10 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from .apollo_models import CreditLine
 from .provider_balance_clients import ExaTeamReading, OpenRouterCredits, OpenRouterKeyReading, ProviderCallError
 
-BalanceProvider = Literal["openrouter", "openai", "exa"]
+BalanceProvider = Literal["openrouter", "openai", "exa", "apollo"]
 BalanceState = Literal["ok", "low", "exhausted", "unknown", "invalid_key", "error"]
 BalanceSource = Literal["provider_api", "admin_key", "our_ledger"]
 SpendPeriod = Literal["this_month", "all_time"]
@@ -27,8 +28,9 @@ DASHBOARD_URLS: dict[str, str] = {
     "openrouter": "https://openrouter.ai/settings/credits",
     "openai": "https://platform.openai.com/settings/organization/billing",
     "exa": "https://dashboard.exa.ai/billing",
+    "apollo": "https://app.apollo.io/#/settings/credits/current",
 }
-PROVIDER_NAMES: dict[str, str] = {"openrouter": "OpenRouter", "openai": "OpenAI", "exa": "Exa"}
+PROVIDER_NAMES: dict[str, str] = {"openrouter": "OpenRouter", "openai": "OpenAI", "exa": "Exa", "apollo": "Apollo"}
 
 
 class BalanceStatus(BaseModel):
@@ -47,6 +49,8 @@ class BalanceStatus(BaseModel):
     checked_at: datetime
     note: str
     dashboard_url: str
+    # Apollo reports credits (not dollars) per credit type for the billing cycle.
+    credits: list[CreditLine] = []
 
 
 @dataclass(frozen=True)
@@ -152,8 +156,22 @@ def exa_status(key: KeyRef, team: ExaTeamReading | ProviderCallError | None, mat
                  spent_period="this_month", status="unknown", source="admin_key", note=f"{lead}{budget}")
 
 
+def apollo_status(key: KeyRef, lines: list[CreditLine], checked_at: datetime) -> BalanceStatus:
+    """Low when any credit type has <= 10% of its limit left, exhausted when one has none left."""
+    limited = [line for line in lines if line.limit and line.limit > 0 and line.remaining is not None]
+    if any(line.remaining <= 0 for line in limited):  # type: ignore[operator]
+        state: BalanceState = "exhausted"
+    elif any(line.remaining <= line.limit * LOW_LIMIT_RATIO for line in limited):  # type: ignore[operator]
+        state = "low"
+    else:
+        state = "ok" if lines else "unknown"
+    note = ("Apollo credits for the current billing cycle." if lines
+            else "Apollo didn't report credit balances for this key.")
+    return _base(key, checked_at, status=state, source="provider_api", note=note, credits=lines)
+
+
 __all__ = [
-    "BalanceProvider", "BalanceSource", "BalanceState", "BalanceStatus", "DASHBOARD_URLS",
+    "apollo_status", "BalanceProvider", "BalanceSource", "BalanceState", "BalanceStatus", "DASHBOARD_URLS",
     "DEFAULT_LOW_BALANCE_USD", "KeyRef", "PROVIDER_NAMES", "classify", "exa_status", "failed_key_status",
     "match_exa_key", "openai_status", "openrouter_status",
 ]

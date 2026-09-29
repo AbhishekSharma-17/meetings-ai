@@ -538,7 +538,7 @@ export type VaultCredential = {
   billing_only?: boolean;
 };
 
-export type BalanceProvider = "openrouter" | "openai" | "exa";
+export type BalanceProvider = "openrouter" | "openai" | "exa" | "apollo";
 export type BalanceState = "ok" | "low" | "exhausted" | "unknown" | "invalid_key" | "error";
 
 /** Credit status of one saved key, as reported by the provider (or estimated from this app's own ledger). */
@@ -558,6 +558,36 @@ export type ProviderBalance = {
   checked_at: string;
   note: string;
   dashboard_url: string;
+  /** Apollo only: credits per credit type for the billing cycle (the `dialer` line is minutes). */
+  credits?: ApolloCreditLine[];
+};
+
+/* ---------- Apollo research source (workspace integration via Composio) ---------- */
+export type ApolloCreditLine = { credit_type: string; label: string; used: number | null; limit: number | null; remaining: number | null; unit: "credits" | "minutes" };
+/** GET/PUT /v1/workspace/integrations/apollo (owners/admins). The key itself is never returned. */
+export type ApolloIntegration = {
+  provider: "apollo"; available: boolean; connected: boolean; status: "active" | "invalid" | "out_of_credit" | null;
+  hint: string | null; connected_by: string | null; connected_at: string | null; updated_at: string | null;
+  last_checked_at: string | null; last_error: string | null; credits: ApolloCreditLine[];
+};
+export type ApolloCompany = {
+  apollo_id: string | null; name: string | null; domain: string | null; website: string | null; linkedin_url: string | null;
+  description: string | null; industry: string | null; employee_count: number | null; revenue_band: string | null;
+  total_funding: string | null; latest_funding_stage: string | null; latest_funding_date: string | null; latest_funding_amount: string | null;
+  headquarters: string | null; founded_year: number | null; tech_stack: string[]; source_id: string | null;
+};
+export type ApolloRole = { company: string | null; title: string | null; start_date: string | null; end_date: string | null; current: boolean };
+export type ApolloPerson = {
+  name: string; title: string | null; seniority: string | null; departments: string[]; company: string | null;
+  role_started: string | null; past_roles: ApolloRole[]; linkedin_url: string | null; location: string | null;
+  matched_by: "email" | "name"; source_id: string | null;
+};
+export type ApolloSnapshot = {
+  company: ApolloCompany | null; people: ApolloPerson[];
+  news: { title: string; url: string | null; published_at: string | null; snippet: string | null; source_id: string | null }[];
+  hiring: { open_roles: number; themes: { theme: string; count: number }[]; examples: { title: string; url: string | null; location: string | null; posted_at: string | null }[]; source_id: string | null } | null;
+  relationship: { account_name: string | null; stage: string | null; owner: string | null; last_activity_at: string | null; contacts: { name: string; title: string | null; stage: string | null; last_activity_at: string | null }[]; source_id: string | null } | null;
+  calls: number; cached_results: number; notice: string | null; fetched_at: string | null;
 };
 
 export type BillingKeyInfo = {
@@ -629,18 +659,20 @@ export type AiSettingsInput = {
 export type ProfileKeyChoice = { credentialId?: string | null; saveToVaultLabel?: string };
 
 /* ---------- Meeting prep v2 (report_version 2, Exa research) ---------- */
-export type PrepSourceOrigin = "web" | "provided_link" | "our_documents" | "prep_upload" | "organization_brief";
+export type PrepSourceOrigin = "web" | "provided_link" | "our_documents" | "prep_upload" | "organization_brief" | "apollo";
 export type PrepSourceV2 = { id: string; title: string; url: string | null; publisher: string | null; published_date: string | null; origin: PrepSourceOrigin };
 export type PrepCitedClaim = { statement: string; source_ids: string[] };
 export type PrepPersona = "technical" | "business" | "sales" | "executive" | "unknown";
 export type PrepMatchConfidence = "confirmed" | "likely" | "unconfirmed";
 export type PrepDevelopmentType = "deal" | "mou" | "partnership" | "funding" | "product" | "hiring" | "news";
-export type PrepUsageTotals = { exa_calls: number; llm_calls: number; input_tokens: number; output_tokens: number; estimated_usd: number; unpriced_calls: number };
+export type PrepUsageTotals = { exa_calls: number; llm_calls: number; input_tokens: number; output_tokens: number; estimated_usd: number; unpriced_calls: number; apollo_calls?: number };
 export type PrepAttendee = {
   name: string; email: string | null; title: string | null; linkedin_url: string | null; match_confidence: PrepMatchConfidence;
   background: string; likely_interests: string[]; persona: PrepPersona; angle: string; source_ids: string[];
   /** Set by the API's who's-who resolver (older reports omit it). */
   side?: Exclude<PartySide, "ours"> | null;
+  /** Verified work profile from Apollo, when the workspace has Apollo connected. */
+  apollo?: ApolloPerson | null;
 };
 /* Who's who: our company vs. the target, and which side each attendee is on. */
 export type PartySide = "ours" | "theirs" | "other_external" | "unknown";
@@ -668,10 +700,12 @@ export type PrepReportV2 = {
   meeting_narrative: { recommended_focus: string; by_persona: { persona: PrepPersona; focus: string }[]; opening: string; agenda_suggestions: string[] };
   talking_points: string[]; questions_to_ask: string[]; watchouts: string[];
   sources: PrepSourceV2[]; public_research_performed: boolean;
-  research_steps: { stage: string; purpose: string; query: string | null; category: string | null; results: number; status: "succeeded" | "failed" | "skipped" }[];
+  research_steps: { stage: string; purpose: string; query: string | null; category: string | null; results: number; status: "succeeded" | "failed" | "skipped"; note?: string | null }[];
   usage: PrepUsageTotals; started_at: string | null; generated_at: string; provider: string; model: string;
   findings: PrepCitedClaim[]; relevant_offerings: string[]; people_notes: string[];
   whos_who?: WhosWho | null;
+  /** Structured Apollo facts (older reports and workspaces without Apollo omit it). */
+  apollo?: ApolloSnapshot | null;
 };
 /** GET /prep returns either shape; v1 rows have no report_version. */
 export type AnyPrepReport = PrepReport | PrepReportV2;
@@ -679,7 +713,7 @@ export type PrepInputs = { target_company: string | null; company_website: strin
 export type PrepHistoryItem = { id: string; report_version: number; target_company: string | null; generated_at: string; provider: string; model: string; public_research_performed: boolean; usage: PrepUsageTotals };
 export type PrepHistory = { calendar_event_id: string; items: PrepHistoryItem[]; totals: PrepUsageTotals };
 export type PrepStage = "queued" | "planning" | "searching" | "reading" | "writing" | "done";
-export type PrepGenerateInput = { context: string; target_company: string | null; company_website: string | null; profile_urls: string[]; text_profile_id: string | null; research_enabled: boolean; attendee_sides?: AttendeeSides };
+export type PrepGenerateInput = { context: string; target_company: string | null; company_website: string | null; profile_urls: string[]; text_profile_id: string | null; research_enabled: boolean; attendee_sides?: AttendeeSides; apollo_refresh?: boolean };
 /** A document uploaded for one meeting's prep (POST /v1/documents, scope=prep). */
 export type PrepDocument = {
   id: string; scope: string; scope_id: string | null; filename: string; content_type: string; source_url: string | null;

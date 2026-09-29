@@ -6,7 +6,7 @@
 import type { BalanceProvider, BalanceState, BillingKeyType, ProviderBalance } from "@/lib/types";
 import type { Tone } from "./ui/feedback";
 
-export const balanceProviderName: Record<BalanceProvider, string> = { openrouter: "OpenRouter", openai: "OpenAI", exa: "Exa" };
+export const balanceProviderName: Record<BalanceProvider, string> = { openrouter: "OpenRouter", openai: "OpenAI", exa: "Exa", apollo: "Apollo" };
 
 export const balanceTone: Record<BalanceState, Tone> = {
   ok: "success", low: "warning", exhausted: "danger", invalid_key: "danger", error: "warning", unknown: "neutral",
@@ -30,12 +30,34 @@ export function balanceChipText(balance: ProviderBalance): string {
   const name = balanceProviderName[balance.provider];
   if (balance.status === "invalid_key") return "Invalid key";
   if (balance.status === "error") return "Couldn’t check";
+  if (balance.provider === "apollo") return apolloChipText(balance);
   if (balance.status === "exhausted") return balance.provider === "exa" && balance.limit_usd !== null ? "Over budget" : "Out of credits";
   if (balance.remaining_usd !== null) {
     const left = `${formatDollars(balance.remaining_usd)} left`;
     return balance.limit_usd !== null ? `${left} of ${formatDollars(balance.limit_usd)} limit` : left;
   }
   return balance.provider === "openrouter" ? "No key limit" : `Balance not shared by ${name}`;
+}
+
+/** Apollo reports credits per type, not dollars: "Credits OK", "Export credits low", "Out of credits". */
+function apolloChipText(balance: ProviderBalance): string {
+  if (balance.status === "exhausted") return "Out of credits";
+  const lines = balance.credits ?? [];
+  if (balance.status === "low") {
+    const low = lines.find((line) => line.limit && line.remaining !== null && line.remaining <= line.limit * 0.1);
+    return low ? `${low.label} low` : "Credits low";
+  }
+  return lines.length ? "Credits OK" : "Credits not reported";
+}
+
+/** "40 of 100 left" for one Apollo credit line (minutes for the dialer). */
+export function creditLineText(line: { remaining: number | null; limit: number | null; used: number | null; unit: "credits" | "minutes" }): string {
+  const unit = line.unit === "minutes" ? " min" : "";
+  const format = (value: number) => `${Math.round(value).toLocaleString()}${unit}`;
+  if (line.remaining !== null && line.limit !== null) return `${format(line.remaining)} of ${format(line.limit)} left`;
+  if (line.remaining !== null) return `${format(line.remaining)} left`;
+  if (line.used !== null) return `${format(line.used)} used`;
+  return "—";
 }
 
 /** Screen-reader and tooltip summary: provider, key, chip text and the plain-language note. */

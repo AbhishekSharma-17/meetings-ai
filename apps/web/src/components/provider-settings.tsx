@@ -11,6 +11,7 @@ import { SettingsToast, type SettingsNotice } from "./settings-toast";
 import { ProviderEditor } from "./provider-editor";
 import { ApiKeysCard } from "./provider-keys";
 import { WorkspaceAiCard } from "./ai-settings-card";
+import { ResearchSourcesCard } from "./research-sources-card";
 import { ProviderName } from "./provider-brand-icons";
 import { profileBrand } from "./provider-brand";
 import { connectionText, connectionTone, isUnsavedProfile, profileInfo, profileKinds } from "./provider-profile-info";
@@ -101,6 +102,7 @@ export function ProviderSettings({ identity, profiles, onProfilesChange }: { ide
     <div className="provider-overview">
       <ApiKeysCard credentials={credentials} loading={keysLoading} error={keysError} canManage={isOwner} onRefresh={refreshCredentials} onNotice={setNotice} />
       <WorkspaceAiCard view={aiSettings} error={aiError} profiles={textProfiles} exaKeys={credentials.filter((item) => item.provider_type === "exa")} keys={credentials} onProfileCreated={(created) => { onProfilesChange([...profiles.map((candidate) => created.isDefault && candidate.kind === created.kind ? { ...candidate, isDefault: false } : candidate), created]); void refreshCredentials(); void refreshAiSettings(); }} onSaved={(view) => { setAiSettings(view); void refreshCredentials(); }} onNotice={setNotice} />
+      <ResearchSourcesCard onNotice={setNotice} />
     </div>
     <div className="provider-layout">
       <div className="provider-groups">

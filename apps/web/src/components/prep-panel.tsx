@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { formatDateTime } from "@/lib/time-preferences";
 import { Tabs } from "@base-ui/react/tabs";
 import { FileSearch, History, KeyRound, NotebookPen, SlidersHorizontal } from "lucide-react";
-import { jobService, meetingsService, prepService, serviceErrorStatus } from "@/lib/meetings-service";
+import { apolloService, jobService, meetingsService, prepService, serviceErrorStatus } from "@/lib/meetings-service";
 import type { AnyPrepReport, AttendeeSides, BackgroundJob, CachedCalendarEvent, KnowledgeTextProfile, PrepGenerateInput, PrepHistory, PrepStage } from "@/lib/types";
 import { isReportV2, PrepReportView } from "./meeting-prep-report";
 import { PrepDocuments } from "./prep-documents";
@@ -58,6 +58,9 @@ export function MeetingPrepPanel({ event, canEdit = true, onOpenProviders, onOpe
   const [links, setLinks] = useState<string[]>([]);
   const [context, setContext] = useState("");
   const [researchEnabled, setResearchEnabled] = useState(true);
+  const [apolloRefresh, setApolloRefresh] = useState(false);
+  // Owners/admins only (onOpenProviders is passed for them): is Apollo connected for this workspace?
+  const [apolloConnected, setApolloConnected] = useState<boolean | null>(null);
   const [textProfiles, setTextProfiles] = useState<KnowledgeTextProfile[]>([]);
   const [textProfileId, setTextProfileId] = useState("");
   // Who's-who corrections (attendee key → ours/theirs); sent with the briefing and kept in it.
@@ -97,6 +100,15 @@ export function MeetingPrepPanel({ event, canEdit = true, onOpenProviders, onOpe
     void meetingsService.listKnowledgeTextProfiles().then(setTextProfiles).catch(() => undefined);
     loadHistory();
   }, [event.id, loadHistory]);
+
+  const canManageSources = Boolean(onOpenProviders);
+  useEffect(() => {
+    if (!canManageSources) return;
+    let active = true;
+    apolloService.status().then((view) => { if (active) setApolloConnected(view.connected && view.status !== "invalid" ? true : view.available ? false : null); })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [canManageSources]);
 
   const websiteProblem = websiteError(website);
 
@@ -146,7 +158,7 @@ export function MeetingPrepPanel({ event, canEdit = true, onOpenProviders, onOpe
     const input: PrepGenerateInput = {
       context, target_company: targetCompany.trim() || null, company_website: website.trim() || null,
       profile_urls: links.filter(isHttpsLink), text_profile_id: textProfileId || null, research_enabled: researchEnabled,
-      attendee_sides: sides,
+      attendee_sides: sides, apollo_refresh: apolloRefresh,
     };
     let background = false;
     try {
@@ -216,6 +228,8 @@ export function MeetingPrepPanel({ event, canEdit = true, onOpenProviders, onOpe
           <PrepDocuments eventId={event.id} canEdit={canEdit} />
           <div className="inset-panel prep-research-options">
             <SwitchField id="prep-research" label="Research the public web" description={<>Uses the workspace <ProviderName brand="exa" label="Exa" /> key. Searches send the company, your links and attendee names only — never emails, titles, agendas or documents.</>} checked={researchEnabled} onChange={setResearchEnabled} />
+            {apolloConnected || (report && isReportV2(report) && report.apollo) ? <SwitchField id="prep-apollo-refresh" label="Refresh from Apollo" description={<>Ask <ProviderName brand="apollo" label="Apollo" /> again instead of reusing company and people data saved in the last 30 days. Uses Apollo credits.</>} checked={apolloRefresh} onChange={setApolloRefresh} disabled={!researchEnabled} />
+              : apolloConnected === false ? <p className="prep-apollo-hint field-hint"><ProviderName brand="apollo" label="Connect Apollo" /> for verified company and people data. <button type="button" className="text-button" onClick={onOpenProviders}>Open research sources</button></p> : null}
             {textProfiles.length ? <UiSelect id="prep-model" label="Analysis provider" size="sm" value={textProfileId} onChange={setTextProfileId} options={[{ value: "", label: "Workspace default" }, ...textProfiles.map((item) => ({ value: item.id, label: item.name, icon: providerOptionIcon(providerBrand(item.provider_type, item.base_url)) }))]} /> : null}
           </div>
           {failure ? needsSetup

@@ -1,6 +1,7 @@
 import type { BalanceOverview, BillingKeyInfo, BillingKeyType, ProviderBalance, VaultCredential } from "../../types";
 import { KEY_EXA, KEY_OPENAI, KEY_OPENROUTER, OPENROUTER_URL } from "../fixtures/providers";
 import { json, wait } from "../http";
+import { demoCredits } from "../fixtures/apollo";
 import type { DemoRouter } from "../router";
 import type { DemoStore } from "../store";
 
@@ -13,6 +14,7 @@ const DASHBOARDS = {
   openrouter: "https://openrouter.ai/settings/credits",
   openai: "https://platform.openai.com/settings/organization/billing",
   exa: "https://dashboard.exa.ai/billing",
+  apollo: "https://app.apollo.io/#/settings/credits/current",
 } as const;
 
 const UNLOCKS: Record<BillingKeyType, [ProviderBalance["provider"], string]> = {
@@ -57,6 +59,15 @@ function balanceFor(item: VaultCredential, provider: ProviderBalance["provider"]
     note: `${name} doesn't share your remaining balance — check billing. Showing spend this app tracked. Add ${provider === "openai" ? "an OpenAI admin key" : "an Exa service key"} to see official spend.` };
 }
 
+const APOLLO_ID = "a9011000-0000-4000-8000-00000000a901";
+
+/** The sample Apollo connection: export credits are under 10% of the limit, so the row reads "low". */
+function apolloBalance(store: DemoStore, checked: string): ProviderBalance {
+  return { credential_id: APOLLO_ID, provider: "apollo", label: "Apollo (workspace)", hint: store.apollo.hint, checked_at: checked, dashboard_url: DASHBOARDS.apollo,
+    balance_usd: null, limit_usd: null, remaining_usd: null, spent_usd: null, spent_period: null, our_tracked_spend_usd: 0, status: "low", source: "provider_api",
+    note: "Apollo credits for the current billing cycle.", credits: demoCredits };
+}
+
 function overview(store: DemoStore, fresh: string | "all" | null): BalanceOverview {
   const billingKeys = store.credentials.filter((item) => item.provider_type in UNLOCKS);
   const billing = new Set<string>(billingKeys.map((item) => item.provider_type));
@@ -68,6 +79,7 @@ function overview(store: DemoStore, fresh: string | "all" | null): BalanceOvervi
     const key = billingKeys.find((item) => item.provider_type === type);
     return { provider_type: type, provider: UNLOCKS[type][0], configured: Boolean(key), credential_id: key?.id ?? null, label: key?.label ?? null, hint: key?.hint ?? null, unlocks: UNLOCKS[type][1] };
   });
+  if (store.apollo.connected) items.push(apolloBalance(store, stamp(store, "apollo", fresh === "all" || fresh === APOLLO_ID)));
   const latest = items.map((item) => item.checked_at).sort().at(-1) ?? null;
   return { items, billing_keys: info, low_balance_threshold_usd: 5, checked_at: latest };
 }

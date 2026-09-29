@@ -8,6 +8,7 @@ import { PrepAttendees, personaLabels } from "./prep-attendees";
 import { PrepSources } from "./prep-sources";
 import { WhosWhoView } from "./prep-whos-who-view";
 import { ProviderName, UsageProviderName } from "./provider-brand-icons";
+import { ApolloCompanyFacts, ApolloNotice, ApolloWhyNow } from "./prep-apollo";
 
 const developmentLabels: Record<PrepDevelopmentType, string> = {
   deal: "Deal", mou: "MOU", partnership: "Partnership", funding: "Funding", product: "Product", hiring: "Hiring", news: "News",
@@ -29,7 +30,7 @@ export function PrepReportV2View({ report }: { report: PrepReportV2 }) {
         <div className="prep-report-meta">
           <Badge tone="success" dot>Saved briefing</Badge>
           <small className="provider-route">{formatDateTime(report.generated_at, briefingTime)} · <UsageProviderName provider={report.provider} /> / {report.model}</small>
-          <small className="prep-report-usage">{formatTokens(usage.input_tokens, usage.output_tokens)} · {usage.exa_calls ? <ProviderName brand="exa" label={`${usage.exa_calls} Exa ${usage.exa_calls === 1 ? "search" : "searches"}`} /> : "0 searches"} · est. {formatUsd(usage.estimated_usd)}{usage.unpriced_calls ? " + unpriced" : ""}</small>
+          <small className="prep-report-usage">{formatTokens(usage.input_tokens, usage.output_tokens)} · {usage.exa_calls ? <ProviderName brand="exa" label={`${usage.exa_calls} Exa ${usage.exa_calls === 1 ? "search" : "searches"}`} /> : "0 searches"} · est. {formatUsd(usage.estimated_usd)}{usage.unpriced_calls ? " + unpriced" : ""}{usage.apollo_calls ? <> · <ProviderName brand="apollo" label={`${usage.apollo_calls} Apollo ${usage.apollo_calls === 1 ? "lookup" : "lookups"}`} /></> : null}</small>
         </div>
         <h2 id="prep-report-title">{title ? `Briefing: ${title}` : "Meeting briefing"}</h2>
       </div>
@@ -37,11 +38,13 @@ export function PrepReportV2View({ report }: { report: PrepReportV2 }) {
     <div className="card-body prep-report-body">
       <p className="prep-report-lead">{report.executive_brief}</p>
       {!report.public_research_performed ? <Alert tone="neutral" role="note">Context only. No public web research was run.</Alert> : null}
+      <ApolloNotice snapshot={report.apollo} />
       {report.whos_who ? <section className="prep-report-section" aria-labelledby="prep-whos-who-report-title">
         <h3 id="prep-whos-who-report-title"><span className="prep-section-icon" aria-hidden="true"><Scale /></span>Who’s who</h3>
         <WhosWhoView value={report.whos_who} />
       </section> : null}
       <CompanySnapshot report={report} sources={sources} />
+      {report.apollo ? <ApolloWhyNow snapshot={report.apollo} sources={sources} /> : null}
       <Developments report={report} sources={sources} />
       <AiLandscape report={report} sources={sources} />
       <Alignment report={report} sources={sources} />
@@ -66,7 +69,8 @@ function CompanySnapshot({ report, sources }: { report: PrepReportV2; sources: S
   const href = safeHref(website);
   const facts: [string, string][] = ([["Industry", company.industry], ["Size", company.size_signals], ["Headquarters", company.headquarters]] as [string, string][])
     .filter(([, value]) => value);
-  if (!company.what_they_do && !facts.length && !href) return null;
+  const apollo = report.apollo?.company ?? null;
+  if (!company.what_they_do && !facts.length && !href && !apollo) return null;
   return <section className="prep-report-section" aria-labelledby="prep-company-title">
     <h3 id="prep-company-title"><span className="prep-section-icon" aria-hidden="true"><Building2 /></span>Company snapshot</h3>
     <div className="inset-panel prep-snapshot">
@@ -75,6 +79,7 @@ function CompanySnapshot({ report, sources }: { report: PrepReportV2; sources: S
         {facts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
         {href ? <div><dt>Website</dt><dd><a href={href} target="_blank" rel="noreferrer noopener">{website?.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")} <ExternalLink aria-hidden="true" /></a></dd></div> : null}
       </dl> : null}
+      {apollo ? <ApolloCompanyFacts company={apollo} sources={sources} /> : null}
     </div>
   </section>;
 }

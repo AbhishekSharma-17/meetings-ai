@@ -45,6 +45,9 @@ from pydantic import BaseModel, Field, ValidationError
 from meetings_contracts import TextGenerationRequest
 
 from .adapters.base import ProviderExecutionError
+from .apollo_models import ApolloPerson, ApolloSnapshot
+from .apollo_research import ApolloPersonQuery, ApolloResearch, ApolloTargetQuery
+from .apollo_sources import add_apollo_sources
 from .exa_client import MISSING_KEY_MESSAGE, ExaClient, ExaError, ExaKeyMissingError, ExaResponse, ExaResult
 from .prep_parties import (
     FREE_MAIL_DOMAINS, RESEARCHABLE_SIDES, OurIdentity, PartyInputs, WhosWho, company_key, domain_root,
@@ -179,8 +182,8 @@ class _SourceBook:
     counters: dict[str, int] = field(default_factory=dict)
 
     def add(self, *, prefix: str, title: str, url: str | None, origin: str, excerpt: str,
-            published_date: str | None = None) -> str:
-        if url and url in self.by_url:
+            published_date: str | None = None, dedupe: bool = True) -> str:
+        if dedupe and url and url in self.by_url:
             existing = self.by_url[url]
             if len(excerpt) > len(self.excerpts.get(existing, "")):
                 self.excerpts[existing] = excerpt
@@ -192,7 +195,7 @@ class _SourceBook:
             publisher=publisher.removeprefix("www.") if publisher else None,
             published_date=(published_date or None) and published_date[:10], origin=origin))
         self.excerpts[source_id] = excerpt[:2500]
-        if url:
+        if url and dedupe:
             self.by_url[url] = source_id
         return source_id
 
@@ -207,6 +210,7 @@ class ResearchOutcome:
     model: str
     exa_calls: int
     llm_calls: int
+    apollo: ApolloSnapshot | None = None
 
 
 class _PlannedQuery(BaseModel):
@@ -313,6 +317,7 @@ class PrepResearchPipeline:
         self, *, organization_id: UUID, actor_user_id: UUID, event: Any, inputs: ResearchInputs,
         brief: Any, our_documents: list[OurDocument], identity: OurIdentity, parties: WhosWho,
         exa: ExaClient | None, profile_id: UUID | None, model_override: str | None, progress: Progress,
+        apollo: ApolloResearch | None = None,
     ) -> ResearchOutcome:
         target = target_of(parties)
         attendees = research_attendees(parties, target)
@@ -322,6 +327,13 @@ class PrepResearchPipeline:
         llm = _LlmBudget(self.providers, event.id, actor_user_id, profile_id, model_override)
         matches: dict[str, PersonMatch] = {}
         exa_calls = 0
+        snapshot: ApolloSnapshot | None = None
+        if inputs.research_enabled and apollo is not None:
+            await progress("planning", "Looking up verified company and people data in Apollo")
+            snapshot, apollo_steps = await apollo.run(ApolloTargetQuery(target.name, target.domain),
+                                                      apollo_queries(attendees, target), identity)
+            steps.extend(apollo_steps)
+            snapshot = add_apollo_sources(book, snapshot, target.label)
         if inputs.research_enabled and exa is not None and (target.label or any(p.searchable for p in attendees)):
             await progress("planning", "Planning research queries")
             plan = await self._plan(llm, sides, inputs, brief, attendees, event)
@@ -336,11 +348,13 @@ class PrepResearchPipeline:
             prefix = "B" if document.origin == "organization_brief" else "D"
             book.add(prefix=prefix, title=document.title, url=None, origin=document.origin, excerpt=document.excerpt)
         await progress("writing", "Writing the briefing")
-        output, provider, model = await self._synthesize(llm, event, sides, inputs, brief, attendees, matches, book)
+        apollo_people = {_normalize(person.name): person for person in (snapshot.people if snapshot else [])}
+        output, provider, model = await self._synthesize(llm, event, sides, inputs, brief, attendees, matches, book,
+                                                         apollo_people)
         services = [*getattr(brief, "services", []), *getattr(brief, "products", [])]
-        output = _apply_people(enforce_citations(output, book.sources, services), attendees, matches)
+        output = _apply_people(enforce_citations(output, book.sources, services), attendees, matches, apollo_people)
         return ResearchOutcome(output=output, sources=book.sources, steps=steps, target=target, provider=provider,
-                               model=model, exa_calls=exa_calls, llm_calls=llm.calls)
+                               model=model, exa_calls=exa_calls, llm_calls=llm.calls, apollo=snapshot)
 
     async def _plan(self, llm: "_LlmBudget", sides: "_Sides", inputs: ResearchInputs, brief: Any,
                     attendees: list[ResearchAttendee], event: Any) -> _PlanOutput:
@@ -463,12 +477,20 @@ class PrepResearchPipeline:
 
     async def _synthesize(self, llm: "_LlmBudget", event: Any, sides: "_Sides", inputs: ResearchInputs,
                           brief: Any, attendees: list[ResearchAttendee], matches: dict[str, PersonMatch],
-                          book: _SourceBook) -> tuple[SynthesisOutput, str, str]:
+                          book: _SourceBook, apollo_people: dict[str, ApolloPerson] | None = None,
+                          ) -> tuple[SynthesisOutput, str, str]:
+        apollo_people = apollo_people or {}
+
+        def apollo_of(person: ResearchAttendee) -> dict[str, Any] | None:
+            found = apollo_people.get(_normalize(person.name))
+            return {"source_id": found.source_id, "title": found.title, "seniority": found.seniority} if found else None
+
         def brief_of(side: str) -> list[dict[str, Any]]:
             return [{"name": person.name, "company": person.company,
                      "public_profile": {"source_id": matches[person.name].source_id,
                                         "match_confidence": matches[person.name].confidence}
-                     if person.name in matches else None} for person in attendees if person.side == side]
+                     if person.name in matches else None, "apollo_profile": apollo_of(person)}
+                    for person in attendees if person.side == side]
 
         sources = [{**source.model_dump(exclude_none=True), "excerpt": book.excerpts.get(source.id, "")}
                    for source in book.sources]
@@ -484,8 +506,9 @@ class PrepResearchPipeline:
             f"Unclassified attendees (company unknown): {json.dumps(brief_of('unknown'))[:1000]}\n"
             f"What the organizer wants to learn: {inputs.notes[:3000]}\n"
             f"Our organization (who WE are and what we sell): {_brief_json(brief)[:12000]}\n"
-            f"Sources (web = public research, provided_link = organizer links, our_documents / prep_upload / "
-            f"organization_brief = our own private material): {json.dumps(sources, ensure_ascii=False)[:60000]}"
+            f"Sources (web = public research, provided_link = organizer links, apollo = Apollo structured B2B data, "
+            f"our_documents / prep_upload / organization_brief = our own private material): "
+            f"{json.dumps(sources, ensure_ascii=False)[:60000]}"
         )
         request = TextGenerationRequest(system_prompt=_SYNTHESIS_SYSTEM, prompt=prompt, max_output_tokens=4000,
                                         response_schema=SYNTHESIS_SCHEMA, metadata=llm.metadata("meeting_prep"))
@@ -555,6 +578,10 @@ _SYNTHESIS_SYSTEM = (
     "outcomes, ROI and risk; sales people get partnership and go-to-market angles. relevant_services must be "
     "services or products from Our organization. Build a meeting narrative, talking points, questions and "
     "watch-outs that connect their situation to our offering. Be respectful; no manipulative tactics. "
+    "Sources with origin apollo come from Apollo, a structured B2B data provider (firmographics, verified job "
+    "titles, funding, hiring and news); cite them like web sources, and an attendee with an apollo_profile may use "
+    "its title and background. When Apollo and a web page disagree (e.g. headcount, funding, a person's title), "
+    "never silently pick one: state both values with their sources and dates. "
     "Return JSON matching the schema."
 )
 
@@ -611,20 +638,32 @@ def _company_specs(target: Target, plan: _PlanOutput, event: Any) -> list[_Searc
     return list(unique.values())[:MAX_COMPANY_SEARCHES]
 
 
-def _apply_people(output: SynthesisOutput, attendees: list[ResearchAttendee],
-                  matches: dict[str, PersonMatch]) -> SynthesisOutput:
-    """Attendees come from the calendar, and profile links/confidence from our matcher, never the LLM."""
+def _apply_people(output: SynthesisOutput, attendees: list[ResearchAttendee], matches: dict[str, PersonMatch],
+                  apollo_people: dict[str, ApolloPerson] | None = None) -> SynthesisOutput:
+    """Attendees come from the calendar, and profile links/confidence from our matchers, never the LLM."""
+    apollo_people = apollo_people or {}
     by_name = {_normalize(person.name): person for person in output.attendees}
     people: list[AttendeeBrief] = []
     for attendee in attendees:
         drafted = by_name.get(_normalize(attendee.name)) or AttendeeBrief(name=attendee.name)
         match = matches.get(attendee.name, PersonMatch("unconfirmed", None, None, None))
+        verified = apollo_people.get(_normalize(attendee.name)) if attendee.side != "unknown" else None
         attached = match.confidence in {"confirmed", "likely"}
+        confidence = match.confidence
+        if verified is not None and confidence == "unconfirmed":
+            confidence = "confirmed" if verified.matched_by == "email" else "likely"
+        known = attached or verified is not None
+        title = drafted.title if known else None
+        source_ids = list(drafted.source_ids)
+        if verified is not None:
+            title = title or verified.title
+            if verified.source_id and verified.source_id not in source_ids:
+                source_ids.append(verified.source_id)
         people.append(drafted.model_copy(update={
-            "name": attendee.name, "email": attendee.email, "match_confidence": match.confidence, "side": attendee.side,
-            "linkedin_url": match.url if attached else None,
-            "title": drafted.title if attached else None,
-            "background": drafted.background if attached or drafted.source_ids else "",
+            "name": attendee.name, "email": attendee.email, "match_confidence": confidence, "side": attendee.side,
+            "linkedin_url": match.url if attached else (verified.linkedin_url if verified else None),
+            "title": title, "background": drafted.background if known or drafted.source_ids else "",
+            "source_ids": source_ids, "apollo": verified,
         }))
     return output.model_copy(update={
         "attendees": people,
@@ -632,6 +671,21 @@ def _apply_people(output: SynthesisOutput, attendees: list[ResearchAttendee],
         "talking_points": output.talking_points[:12], "questions_to_ask": output.questions_to_ask[:12],
         "watchouts": output.watchouts[:10],
     })
+
+
+def apollo_queries(attendees: list[ResearchAttendee], target: Target) -> list[ApolloPersonQuery]:
+    """Their attendees and third parties Apollo may look up (never ours; unknown people are not sent)."""
+    queries = []
+    for person in attendees:
+        if person.side not in RESEARCHABLE_SIDES:
+            continue
+        email_domain = _email_domain(person.email)
+        domain = target.domain if person.side == "theirs" else email_domain
+        if person.side == "theirs" and email_domain and email_domain not in FREE_MAIL_DOMAINS:
+            domain = email_domain
+        company = target.name if person.side == "theirs" else None
+        queries.append(ApolloPersonQuery(name=person.name, email=person.email, domain=domain, company=company))
+    return queries
 
 
 def _structured(result: Any) -> dict[str, Any]:

@@ -24,8 +24,9 @@ import httpx
 from pydantic import BaseModel
 from sqlalchemy import select
 
+from .apollo_composio import ApolloError
 from .credential_vault import BILLING_PROVIDER_TYPES, CredentialPublic, CredentialVault
-from .database import Database, ProviderCredentialRow
+from .database import Database, ProviderCredentialRow, WorkspaceIntegrationRow
 from .provider_balance_clients import (
     ExaTeamReading,
     OpenRouterCredits,
@@ -42,6 +43,7 @@ from .tenant import current_organization_id
 from .provider_balance_status import (
     DASHBOARD_URLS,
     DEFAULT_LOW_BALANCE_USD,
+    apollo_status,
     PROVIDER_NAMES,
     BalanceProvider,
     BalanceStatus,
@@ -163,6 +165,7 @@ class ProviderBalanceService:
         self._cache: dict[tuple[str, str], tuple[float, str, BalanceStatus]] = {}
         self._signals: dict[tuple[str, str], datetime] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        self.apollo: Any | None = None  # ApolloIntegrationService, set by create_app
 
     # ----- public ----------------------------------------------------------------------------------
     async def overview(self, organization_id: UUID, *, force: bool = False,
@@ -182,7 +185,9 @@ class ProviderBalanceService:
             current = {str(item.id): self._cache[(org, str(item.id))][2] for item, _ in keys}
             tracked = tracked_spend_by_credential(self.database, organization_id, month_start(self._now()))
             items = [self._finish(org, current[str(item.id)], tracked) for item, _ in keys]
-        for status in (status for _, status in fresh):
+            apollo, apollo_fresh = await self._apollo(organization_id, force, credential_id)
+            items.extend([apollo] if apollo else [])
+        for status in [*(status for _, status in fresh), *([apollo] if apollo_fresh and apollo else [])]:
             self._alert(organization_id, status)
         return BalanceOverview(
             items=items, billing_keys=self._billing_info(billing), low_balance_threshold_usd=self.threshold_usd,
@@ -239,6 +244,8 @@ class ProviderBalanceService:
             orgs = session.execute(select(ProviderCredentialRow.organization_id).where(
                 ProviderCredentialRow.provider_type.in_(("openai", "openrouter", "exa", "openai_compatible")),
             ).distinct()).scalars().all()
+            orgs = list(dict.fromkeys([*orgs, *session.execute(
+                select(WorkspaceIntegrationRow.organization_id).distinct()).scalars().all()]))
         checked = 0
         for org in orgs:
             try:
@@ -255,6 +262,34 @@ class ProviderBalanceService:
         while True:
             await self.check_all_workspaces()
             await asyncio.sleep(self.interval_seconds)
+
+    # ----- Apollo (a workspace integration, not a saved key) ---------------------------------------
+    async def _apollo(self, organization_id: UUID, force: bool,
+                      credential_id: UUID | None) -> tuple[BalanceStatus | None, bool]:
+        """The Apollo credits row (cached like keys); (status, freshly checked?)."""
+        row = self.apollo.row(organization_id) if self.apollo is not None else None
+        if row is None:
+            return None, False
+        cache_key = (str(organization_id), f"apollo:{row.id}")
+        fingerprint = f"{row.connected_account_id}|{row.updated_at.isoformat()}"
+        cached = self._cache.get(cache_key)
+        forced = force and credential_id in {None, UUID(row.id)}
+        if cached and not forced and cached[1] == fingerprint and self._clock() - cached[0] < self.ttl_seconds:
+            return cached[2], False
+        key = KeyRef(credential_id=UUID(row.id), provider="apollo", label="Apollo (workspace)", hint=row.hint)
+        checked_at = self._now()
+        try:
+            status = apollo_status(key, await self.apollo.credit_lines(organization_id), checked_at)
+        except ApolloError as exc:
+            # 401 marks the connection invalid (with its daily alert); "exhausted" is alerted by _alert below.
+            self.apollo.record_failure(organization_id, exc, notify=exc.kind == "invalid_key")
+            kind = {"invalid_key": "invalid_key", "out_of_credit": "exhausted"}.get(exc.kind, "error")
+            status = failed_key_status(key, ProviderCallError(kind, str(exc)), checked_at)  # type: ignore[arg-type]
+        except Exception:  # noqa: BLE001 - one odd response must not hide the other providers
+            logger.exception("unexpected error reading Apollo credits")
+            status = failed_key_status(key, ProviderCallError("error", "unexpected response"), checked_at)
+        self._cache[cache_key] = (self._clock(), fingerprint, status)
+        return status, True
 
     # ----- checking --------------------------------------------------------------------------------
     def _needs_check(self, org: str, item: CredentialPublic, billing: str, forced: bool) -> bool:
@@ -359,7 +394,12 @@ class ProviderBalanceService:
         if status.status not in {"low", "exhausted"}:
             return
         name = PROVIDER_NAMES[status.provider]
-        if status.status == "low" and status.remaining_usd is not None:
+        if status.provider == "apollo":
+            low = status.status == "low"
+            title = "Apollo credits are running low" if low else "Apollo is out of credits"
+            body = (f"Briefings use Apollo for company and people data. Check credits at {status.dashboard_url}."
+                    if low else f"Briefings skip Apollo until credits renew or you top up at {status.dashboard_url}.")
+        elif status.status == "low" and status.remaining_usd is not None:
             title = f"{name} key “{status.label}” has ${status.remaining_usd:,.2f} left"
             body = f"Top up at {status.dashboard_url} before AI features stop working."
         else:

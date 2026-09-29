@@ -109,6 +109,8 @@ from .storage_purge import StoragePurgeService
 from .routes_storage import register_storage_routes
 from .provider_balances import ProviderBalanceService
 from .routes_balances import register_balance_routes
+from .apollo_integration import ApolloIntegrationService
+from .routes_integrations import register_integration_routes
 from .stt_route import STTRouteError
 from .tenant import tenant_scope
 from .workspace_service import WorkspacePatch, WorkspacePublic, WorkspaceMemberPublic, WorkspaceService
@@ -346,6 +348,10 @@ def create_app(
     app.state.provider_balances = balances
     service.credit_alerts = balances  # out-of-credit model calls raise an alert (see ProfileService)
     meeting_prep.credit_alerts = balances  # and so do Exa 402s during research
+    # Apollo (through Composio) as a second research source; its credits show beside the saved keys.
+    apollo_integration = ApolloIntegrationService(database, notifications=app.state.notifications, usage=usage)
+    app.state.apollo = meeting_prep.apollo = balances.apollo = apollo_integration
+    register_integration_routes(app, apollo=apollo_integration)
     register_balance_routes(app, balances=balances)
 
     @app.middleware("http")

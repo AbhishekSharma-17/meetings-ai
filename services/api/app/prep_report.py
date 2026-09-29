@@ -19,9 +19,10 @@ from typing import Annotated
 
 from pydantic import BaseModel, BeforeValidator, Field
 
+from .apollo_models import ApolloPerson, ApolloSnapshot
 from .prep_parties import WhosWho
 
-SourceOrigin = Literal["web", "provided_link", "our_documents", "prep_upload", "organization_brief"]
+SourceOrigin = Literal["web", "provided_link", "our_documents", "prep_upload", "organization_brief", "apollo"]
 DevelopmentType = Literal["deal", "mou", "partnership", "funding", "product", "hiring", "news"]
 Persona = Literal["technical", "business", "sales", "executive", "unknown"]
 MatchConfidence = Literal["confirmed", "likely", "unconfirmed"]
@@ -99,6 +100,8 @@ class AttendeeBrief(BaseModel):
     source_ids: list[str] = Field(default_factory=list)
     # Set by our resolver (never the model): theirs | other_external | unknown.
     side: Literal["theirs", "other_external", "unknown"] | None = None
+    # Verified work profile from Apollo (attached by our matcher, never the model).
+    apollo: ApolloPerson | None = None
 
 
 class PersonaFocus(BaseModel):
@@ -120,6 +123,7 @@ class PrepUsageTotals(BaseModel):
     output_tokens: int = 0
     estimated_usd: float = 0.0
     unpriced_calls: int = 0
+    apollo_calls: int = 0
 
 
 class ResearchStep(BaseModel):
@@ -129,6 +133,8 @@ class ResearchStep(BaseModel):
     category: str | None = None
     results: int = 0
     status: Literal["succeeded", "failed", "skipped"] = "succeeded"
+    # Short plain-language detail, e.g. "Apollo unavailable: Apollo rejected the API key" or "cached".
+    note: str | None = None
 
 
 class PrepFindingCompat(BaseModel):
@@ -167,6 +173,8 @@ class PrepReportV2(SynthesisOutput):
     model: str
     # Who's who used for this briefing (our company vs. the target, attendee sides, warnings).
     whos_who: WhosWho | None = None
+    # Structured Apollo facts (company snapshot, people, signals, CRM) when Apollo is connected.
+    apollo: ApolloSnapshot | None = None
     # v1-compatible projections so clients written for v1 keep rendering.
     findings: list[PrepFindingCompat] = Field(default_factory=list)
     relevant_offerings: list[str] = Field(default_factory=list)

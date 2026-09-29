@@ -1,0 +1,68 @@
+/* Apollo research source: AI providers card, briefing facts and signals, Provider credits lines. Tokens only. */
+
+/* ----- AI providers → Research sources ----- */
+.research-sources-state { padding:12px 20px 16px; }
+.research-source { display:grid; gap:8px; padding:4px 6px 12px; }
+.research-source-row { display:flex; align-items:center; gap:12px 16px; min-height:56px; padding:8px 14px; border-radius:var(--radius); }
+.research-source-main { display:grid; gap:1px; min-width:0; flex:1 1 220px; }
+.research-source-main b { font-size:14px; font-weight:500; }
+.research-source-main small { color:var(--text-secondary); line-height:1.45; }
+.research-source-row .badge, .research-source-row .button, .research-source-row .icon-button { flex:none; }
+.research-source-detail { display:grid; gap:10px; padding:0 14px 0 62px; }
+.research-source-meta { margin:0; color:var(--text-tertiary); font-size:12.5px; }
+.research-source-credits { list-style:none; display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:8px 20px; margin:0; padding:0; }
+.research-source-credits li { display:grid; gap:1px; min-width:0; }
+.research-source-credits span { color:var(--text-tertiary); font-size:11.5px; }
+.research-source-credits b { font-weight:500; font-variant-numeric:tabular-nums; }
+.research-source-note { margin:0 14px 0 62px; }
+p.research-source-note { color:var(--text-secondary); font-size:12.5px; line-height:1.5; max-width:78ch; }
+.research-source[data-state=invalid] .research-source-row { background:var(--destructive-subtle); }
+.provider-brand .provider-mark.neutral { color:var(--text-secondary); }
+
+/* ----- Briefing: company facts, why now, relationship ----- */
+.prep-apollo-company { display:grid; gap:10px; margin-top:4px; padding-top:12px; border-top:1px solid var(--border); }
+.prep-apollo-origin { display:flex; align-items:center; flex-wrap:wrap; gap:6px; color:var(--text-secondary); font-size:12.5px; font-weight:500; }
+.prep-apollo-tech { display:grid; gap:6px; }
+.prep-report-section .prep-apollo-tech ul.tag-list { display:flex; flex-wrap:wrap; gap:6px; padding-left:0; list-style:none; }
+.prep-report-section .prep-apollo-tech li.tag { font-size:12px; line-height:1; }
+.prep-apollo-label { color:var(--text-tertiary); font-size:12px; }
+.prep-apollo-link { display:inline-flex; align-items:center; gap:4px; justify-self:start; font-size:12.5px; font-weight:500; }
+.prep-apollo-link .lucide { width:12px; height:12px; }
+.prep-why-now { font-size:13.5px; font-weight:500; line-height:1.55; overflow-wrap:anywhere; }
+.prep-apollo-signal-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px 24px; }
+.prep-apollo-signal { display:grid; align-content:start; gap:6px; min-width:0; }
+.prep-apollo-signal h4 { display:flex; align-items:center; gap:6px; margin:0; color:var(--text-secondary); font-size:12.5px; font-weight:600; }
+.prep-apollo-signal h4 .lucide { width:14px; height:14px; color:var(--text-tertiary); }
+.prep-report-section .prep-apollo-signal ul { list-style:none; display:grid; gap:6px; padding-left:0; }
+.prep-apollo-signal li { font-size:13px; line-height:1.5; overflow-wrap:anywhere; }
+.prep-apollo-signal small { color:var(--text-tertiary); }
+.prep-apollo-relationship { display:flex; align-items:flex-start; gap:8px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius); background:var(--muted); font-size:13px; line-height:1.55; overflow-wrap:anywhere; }
+.prep-apollo-relationship > .lucide { flex:none; width:15px; height:15px; margin-top:3px; color:var(--brand); }
+.prep-apollo-hint { display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; margin:0; }
+
+/* ----- Attendee cards ----- */
+.prep-person-apollo { display:grid; gap:4px; padding-top:8px; border-top:1px solid var(--border); }
+.prep-person-facts { color:var(--text-secondary); font-size:12.5px; line-height:1.5; text-transform:none; overflow-wrap:anywhere; }
+.prep-person-facts::first-letter { text-transform:uppercase; }
+.prep-person-past { color:var(--text-secondary); font-size:12.5px; line-height:1.5; overflow-wrap:anywhere; }
+.prep-person-past span { color:var(--text-tertiary); }
+.prep-person-verified .provider-brand.xs { color:inherit; }
+
+/* ----- Observability → Provider credits (Apollo lines) ----- */
+.provider-credit[data-state] .provider-credit-lines div:first-child dd { color:inherit; }
+.provider-credit[data-state] .provider-credit-lines div[data-state=low] dd { color:var(--warning-text); }
+.provider-credit[data-state] .provider-credit-lines div[data-state=exhausted] dd { color:var(--destructive-text); }
+.provider-credit-lines { grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); }
+.provider-credit-lines-empty { margin:0; }
+
+@media (max-width: 640px) {
+  .research-sources-state { padding-left:16px; padding-right:16px; }
+  .research-source-row { flex-wrap:wrap; padding:10px 10px; }
+  .research-source-main { flex-basis:calc(100% - 56px); }
+  .research-source-row .provider-key-hint { order:1; margin-left:0; }
+  .research-source-row .badge { order:2; }
+  .research-source-row .icon-button, .research-source-row .button { order:3; margin-left:auto; }
+  .research-source-detail { padding:0 10px; }
+  .research-source-note { margin:0 10px; }
+  .prep-apollo-signal-grid { grid-template-columns:minmax(0,1fr); }
+}
