@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from fastapi import FastAPI
@@ -52,3 +54,29 @@ async def start_background_services(app: FastAPI) -> None:
 
 async def stop_background_services(app: FastAPI) -> None:
     await app.state.background_jobs.stop()
+
+
+def leadership_callbacks(
+    app: FastAPI, start_loops: Callable[[], list[asyncio.Task[None]]],
+) -> tuple[Callable[[], Awaitable[None]], Callable[[], Awaitable[None]]]:
+    """The work a process starts when it becomes the background leader, and stops when it isn't.
+
+    Leading: recover background jobs, then start the periodic loops. Stepping down (another process
+    took the lock, or shutdown): cancel the loops and this process's own running jobs, so the next
+    leader's recovery (which treats every running job it doesn't own as interrupted) never races
+    work that is still going on here.
+    """
+    loops: list[asyncio.Task[None]] = []
+
+    async def lead() -> None:
+        await start_background_services(app)
+        loops.extend(start_loops())
+
+    async def step_down() -> None:
+        running, loops[:] = list(loops), []
+        for task in running:
+            task.cancel()
+        await asyncio.gather(*running, return_exceptions=True)
+        await stop_background_services(app)
+
+    return lead, step_down

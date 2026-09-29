@@ -57,7 +57,7 @@ from .meeting_prep import OrganizationBriefService, OrganizationBrief, BriefDocu
 from .routes_prep import register_prep_routes
 from .organization_identity import OrganizationIdentityService
 from .routes_identity import register_identity_routes
-from .background_wiring import install_background_services, start_background_services, stop_background_services
+from .background_wiring import install_background_services, leadership_callbacks, stop_background_services
 from .routes_people import register_people_routes
 from .recipient_groups import RecipientGroupService
 from .routes_teams import register_team_routes
@@ -65,6 +65,7 @@ from .routes_preferences import register_preference_routes
 from .user_preferences import UserPreferenceService
 from .repository import RecipientGroupNotFoundError
 from .routes_speakers import register_speaker_routes
+from .leader import LeaderElection, leader_lock_for
 from .leave_notices import LeaveNotices
 from .leave_service import LeaveService
 from .leave_store import LeavePolicyService, MeetingLeaveStore, service_max_hours_from_env
@@ -113,6 +114,10 @@ from .tenant import tenant_scope
 from .workspace_service import WorkspacePatch, WorkspacePublic, WorkspaceMemberPublic, WorkspaceService
 from .sqlalchemy_repository import SQLAlchemyRepository, TranscriptSegmentNotFoundError, TranscriptReviewConflictError, SpeakerIdentityConflictError, MinutesDeletionConflictError
 from .rate_limit import provider_defaults_limiter, provider_test_limiter
+
+logger = logging.getLogger(__name__)
+# Graceful shutdown must hand background leadership on within Railway's 10 s drain window.
+SHUTDOWN_SECONDS = 8.0
 
 
 def _redact(value: Any) -> Any:
@@ -219,30 +224,46 @@ def create_app(
         raise RuntimeError("admin password and session secret must both be configured")
     admin = AdminSession(session_secret) if admin_password else None
 
+    def start_loops() -> list[asyncio.Task[None]]:
+        tasks = []
+        if os.getenv("AUTO_MOM_ENABLED") == "1":
+            tasks.append(asyncio.create_task(worker.run()))
+        if os.getenv("AUTO_KNOWLEDGE_INDEX_ENABLED") == "1":
+            tasks.append(asyncio.create_task(indexing_worker.run()))
+        if os.getenv("AUTO_RETENTION_ENABLED") == "1":
+            tasks.append(asyncio.create_task(retention.run()))
+        if os.getenv("AUTO_CALENDAR_SCHEDULE_ENABLED") == "1":
+            tasks.append(asyncio.create_task(calendar_schedule.run()))
+            if calendar_watch.enabled:
+                tasks.append(asyncio.create_task(calendar_watch.run()))
+        # On by default: an assistant that never leaves a call is worse than any other failure here.
+        if os.getenv("AUTO_LEAVE_ENABLED", "1") != "0":
+            tasks.append(asyncio.create_task(leave_watchdog.run()))
+        # Every PROVIDER_BALANCE_CHECK_HOURS (default 6, 0 = off): low-credit alerts for saved keys.
+        if balances.interval_seconds > 0:
+            tasks.append(asyncio.create_task(balances.run()))
+        return tasks
+
     @asynccontextmanager
     async def lifespan(_: FastAPI):
-        task = asyncio.create_task(worker.run()) if os.getenv("AUTO_MOM_ENABLED") == "1" else None
-        index_task = asyncio.create_task(indexing_worker.run()) if os.getenv("AUTO_KNOWLEDGE_INDEX_ENABLED") == "1" else None
-        retention_task = asyncio.create_task(retention.run()) if os.getenv("AUTO_RETENTION_ENABLED") == "1" else None
-        schedule_task = asyncio.create_task(calendar_schedule.run()) if os.getenv("AUTO_CALENDAR_SCHEDULE_ENABLED") == "1" else None
-        watch_task = asyncio.create_task(calendar_watch.run()) \
-            if os.getenv("AUTO_CALENDAR_SCHEDULE_ENABLED") == "1" and calendar_watch.enabled else None
-        # On by default: an assistant that never leaves a call is worse than any other failure here.
-        leave_task = asyncio.create_task(leave_watchdog.run()) if os.getenv("AUTO_LEAVE_ENABLED", "1") != "0" else None
-        # Every PROVIDER_BALANCE_CHECK_HOURS (default 6, 0 = off): low-credit alerts for saved keys.
-        balance_task = asyncio.create_task(balances.run()) if balances.interval_seconds > 0 else None
-        await start_background_services(app)
+        # Background loops and job recovery assume they are alone, so only the process holding the
+        # leader lock runs them; during a deploy the new process waits for the old one to exit
+        # before taking over (see leader.py). Every process serves requests.
+        lead, step_down = leadership_callbacks(app, start_loops)
+        election = LeaderElection(leader_lock_for(database), start=lead, stop=step_down)
+        await election.try_lead_now()  # a lone process recovers before it serves requests
+        leader_task = asyncio.create_task(election.run())
         try:
             yield
         finally:
+            # Cancel this process's jobs first, then hand leadership on, so the next leader's
+            # recovery sees their final state. Bounded so shutdown fits Railway's drain window.
             await stop_background_services(app)
-            for running in (task, index_task, retention_task, schedule_task, watch_task, leave_task, balance_task):
-                if running:
-                    running.cancel()
-                    try:
-                        await running
-                    except asyncio.CancelledError:
-                        pass
+            leader_task.cancel()
+            try:
+                await asyncio.wait_for(asyncio.gather(leader_task, return_exceptions=True), SHUTDOWN_SECONDS)
+            except TimeoutError:
+                logger.warning("background leadership did not hand over cleanly before shutdown")
             await vexa.close()
             database.engine.dispose()
 

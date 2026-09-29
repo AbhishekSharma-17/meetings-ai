@@ -336,3 +336,98 @@ def test_minutes_job_rechecks_the_requesters_current_role() -> None:
         finished = _poll(client, str(job.id))
         assert finished["status"] == "failed"
         assert "owners and admins" in finished["error"]
+
+
+def _queued_row(database: Database) -> str:
+    now = datetime.now(UTC)
+    job_id = str(uuid4())
+    with database.session_factory.begin() as session:
+        session.add(BackgroundJobRow(
+            id=job_id, organization_id=str(LEGACY_ORGANIZATION_ID), user_id=str(LEGACY_ADMIN_USER_ID),
+            kind="work", subject_id="s", status="queued", stage="queued", message=None, payload={},
+            result=None, error=None, attempts=0, created_at=now, started_at=None, finished_at=None,
+            updated_at=now,
+        ))
+    return job_id
+
+
+def test_only_one_process_can_claim_a_queued_job(tmp_path) -> None:
+    url = f"sqlite+pysqlite:///{tmp_path / 'jobs.db'}"
+    database = Database(url)
+    database.migrate()
+    job_id = _queued_row(database)
+    first, second = BackgroundJobService(database), BackgroundJobService(Database(url))
+    assert first._claim(job_id) is not None
+    assert second._claim(job_id) is None  # the other process already started it
+    with database.session_factory() as session:
+        row = session.get(BackgroundJobRow, job_id)
+        assert (row.status, row.attempts, row.stage) == ("running", 1, "starting")
+
+
+def _status(database: Database, job_id) -> str:
+    with database.session_factory() as session:
+        return session.get(BackgroundJobRow, str(job_id)).status
+
+
+def test_recover_leaves_jobs_running_in_this_process_alone() -> None:
+    database = _database()
+    release = asyncio.Event()
+    failures: list[str] = []
+
+    async def slow(context):
+        await release.wait()
+        return {"ok": True}
+
+    jobs = BackgroundJobService(database)
+    jobs.register("slow", slow, on_failure=lambda job: failures.append(job.error))
+
+    async def scenario():
+        await jobs.start()
+        job, _ = _submit(jobs, "slow")
+        deadline = time.monotonic() + 5
+        while _status(database, job.id) != "running":
+            assert time.monotonic() < deadline
+            await asyncio.sleep(0.01)
+        assert jobs.recover() == (0, 0)  # becoming leader again must not touch our own job
+        assert _status(database, job.id) == "running"
+        release.set()
+        await jobs.wait(str(job.id))
+        return job.id
+
+    job_id = asyncio.run(scenario())
+    assert _status(database, job_id) == "succeeded"
+    assert failures == []
+
+
+def test_an_api_process_that_is_not_the_leader_leaves_running_jobs_alone(tmp_path, monkeypatch) -> None:
+    """The deploy bug: a new process starting next to the old one must not fail the old one's jobs."""
+    import app.main as main_module
+    from app.leader import AlwaysLeader
+
+    url = f"sqlite+pysqlite:///{tmp_path / 'deploy.db'}"
+    database = Database(url)
+    database.migrate()
+    job_id = _queued_row(database)
+    with database.session_factory.begin() as session:
+        session.get(BackgroundJobRow, job_id).status = "running"  # the old process is working on it
+
+    class OtherProcessLeads(AlwaysLeader):
+        def try_acquire(self) -> bool:
+            return False
+
+        def still_held(self) -> bool:
+            return False
+
+    monkeypatch.setattr(main_module, "leader_lock_for", lambda _database: OtherProcessLeads())
+    with TestClient(create_app(database_url=url)):
+        pass
+    with database.session_factory() as session:
+        assert session.get(BackgroundJobRow, job_id).status == "running"
+
+    # Once it really is the leader (the old process has gone), leftovers are recovered as before.
+    monkeypatch.setattr(main_module, "leader_lock_for", lambda _database: AlwaysLeader())
+    with TestClient(create_app(database_url=url)):
+        pass
+    with database.session_factory() as session:
+        row = session.get(BackgroundJobRow, job_id)
+        assert (row.status, row.error) == ("failed", INTERRUPTED_MESSAGE)

@@ -133,19 +133,25 @@ class BackgroundJobService:
         await asyncio.gather(*tasks, return_exceptions=True)
 
     def recover(self) -> tuple[int, int]:
-        """Mark interrupted ``running`` jobs failed (retryable); start ``queued`` ones again."""
+        """Mark interrupted ``running`` jobs failed (retryable); start ``queued`` ones again.
+
+        Runs only in the process that leads background work (see ``leader``), once the previous
+        leader has gone, so every other ``running`` job was really interrupted. Jobs this process is
+        already running (submitted to it while it waited to lead) are left alone.
+        """
         now = datetime.now(UTC)
+        mine = set(self._tasks)
         with self.database.session_factory.begin() as session:
-            interrupted = session.execute(select(BackgroundJobRow).where(
+            interrupted = [row for row in session.execute(select(BackgroundJobRow).where(
                 BackgroundJobRow.status == "running",
-            )).scalars().all()
+            )).scalars().all() if row.id not in mine]
             for row in interrupted:
                 row.status, row.error, row.finished_at, row.updated_at = "failed", INTERRUPTED_MESSAGE, now, now
                 row.result = {"error_status": 503, "retryable": True}
             failed = [(_public(row), UUID(row.organization_id)) for row in interrupted]
-            queued = session.execute(select(BackgroundJobRow.id).where(
+            queued = [job_id for job_id in session.execute(select(BackgroundJobRow.id).where(
                 BackgroundJobRow.status == "queued",
-            )).scalars().all()
+            )).scalars().all() if job_id not in mine]
         for job, organization_id in failed:
             self._hook(job, organization_id)
         for job_id in queued:
@@ -210,18 +216,26 @@ class BackgroundJobService:
         async with self._semaphore:
             await self._execute(job_id)
 
-    async def _execute(self, job_id: str) -> None:
+    def _claim(self, job_id: str) -> tuple[JobContext, str] | None:
+        """Atomically move a queued job to running. Exactly one process can win; None if another did."""
         now = datetime.now(UTC)
         with self.database.session_factory.begin() as session:
+            claimed = session.execute(update(BackgroundJobRow).where(
+                BackgroundJobRow.id == job_id, BackgroundJobRow.status == "queued",
+            ).values(status="running", started_at=now, updated_at=now, attempts=BackgroundJobRow.attempts + 1,
+                     stage="starting", message="Starting")).rowcount
+            if not claimed:
+                return None
             row = session.get(BackgroundJobRow, job_id)
-            if row is None or row.status != "queued":
-                return
-            row.status, row.started_at, row.updated_at = "running", now, now
-            row.attempts += 1
-            row.stage, row.message = "starting", "Starting"
             context = JobContext(UUID(row.id), UUID(row.organization_id),
                                  UUID(row.user_id) if row.user_id else None, dict(row.payload or {}), self)
-            kind = row.kind
+            return context, row.kind
+
+    async def _execute(self, job_id: str) -> None:
+        claim = self._claim(job_id)
+        if claim is None:
+            return
+        context, kind = claim
         spec = self.kinds.get(kind)
         if spec is None:
             self._finish(job_id, "failed", error="This kind of job is no longer supported.", message=None)

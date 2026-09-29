@@ -63,8 +63,17 @@ use a health check, so a release only takes traffic once it answers (`/ready` fo
 which also requires a reachable database at the current schema version; `/` for the web). A
 release that never becomes healthy fails and the previous one keeps serving. The web keeps the
 old release for 15 s after the switch (`overlapSeconds`). The API uses no overlap and a short
-10 s drain because its in-process background loops assume a single running instance (see
-below). Deploy the API before the web so the previous web release never talks to an older API.
+10 s drain. Deploy the API before the web so the previous web release never talks to an older API.
+
+During a deploy the new API process starts, and passes its health check, while the old one is
+still running. Background work is therefore leader-elected (`services/api/app/leader.py`): only
+the process holding a PostgreSQL advisory lock runs the background loops (post-meeting minutes,
+indexing, calendar scheduling and watching, leave watchdog, retention, provider balances) and the
+startup recovery of background jobs. The lock lives on one database connection, so it is released
+as soon as the old process exits or crashes and the new process takes over within about two
+seconds. Every process still serves HTTP requests. Background jobs submitted over HTTP run in the
+process that received them; moving a job from queued to running is a single conditional update, so
+no two processes can start the same job, and recovery never touches jobs its own process runs.
 
 The file is a *named partial* (`export const partial = "app-services"`) that declares only
 the web and API services. Keep that line: without it Railway treats the file as the whole
@@ -76,9 +85,9 @@ configuration is already up to date). Change a setting by editing the file, revi
 `railway config plan`, then running `railway config apply`.
 
 Deploy Vexa first when changing its image or STT contract. The API should
-have one replica while the calendar scheduler, MOM, knowledge-index, and
-retention loops are in-process. Multiple API replicas need a separately
-coordinated job queue before scaling out. Do not attach a public domain to
+have one replica. Leader election keeps the background loops to one process,
+but more replicas would still need load testing of request-driven work (prep,
+chat, uploads) before scaling out. Do not attach a public domain to
 the Vexa or API services merely to test them; the web proxy and authenticated
 `/v1/integrations/vexa/health` endpoint cover the normal integration check.
 

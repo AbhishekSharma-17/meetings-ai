@@ -8,8 +8,8 @@
 // Health checks make every release zero-downtime: a release only takes traffic once it answers
 // (/ready also requires the database at the current schema version), and a release that never
 // becomes healthy fails while the previous one keeps serving. The web keeps the old release for
-// 15 s after the switch; the API uses no overlap and a short drain because its in-process
-// background loops assume a single running instance (see docs/deployment/railway.md).
+// 15 s after the switch; the API uses no overlap and a short drain. Background loops only run in
+// the leader-elected API process (services/api/app/leader.py; see docs/deployment/railway.md).
 //
 // Keep `export const partial` below. Without it Railway treats this file as the whole project,
 // and `railway config apply` would DELETE the Vexa service and both databases.
