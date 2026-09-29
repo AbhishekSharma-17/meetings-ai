@@ -3,7 +3,7 @@
 import { FormEvent, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 
-export const PASSWORD_MIN = 12;
+export const PASSWORD_MIN = 6;
 export const PASSWORD_MAX = 200;
 
 export function passwordProblem(password: string, confirm: string): string | null {

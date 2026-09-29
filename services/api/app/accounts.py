@@ -24,6 +24,11 @@ from .workspace_preferences import (
 )
 
 
+
+# Account password length rules (product decision: 6 is the minimum). Shared by every flow.
+PASSWORD_MIN = 6
+PASSWORD_MAX = 200
+
 class AccountError(ValueError):
     pass
 
@@ -110,7 +115,7 @@ class InviteOutcome:
 
 class ChangePasswordRequest(BaseModel):
     current_password: str
-    new_password: str = Field(min_length=12, max_length=200)
+    new_password: str = Field(min_length=PASSWORD_MIN, max_length=PASSWORD_MAX)
 
 
 class ProfilePatch(BaseModel):
@@ -354,8 +359,8 @@ class AccountService:
         )).scalar_one()
 
     def change_password(self, actor: Actor, current: str, new: str) -> Actor:
-        if len(new) < 12 or len(new) > 200:
-            raise AccountError("new password must be 12–200 characters")
+        if not PASSWORD_MIN <= len(new) <= PASSWORD_MAX:
+            raise AccountError(f"new password must be {PASSWORD_MIN}–{PASSWORD_MAX} characters")
         if current == new:
             raise AccountError("new password must be different")
         with self.database.session_factory.begin() as session:

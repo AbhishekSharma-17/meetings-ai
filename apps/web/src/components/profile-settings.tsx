@@ -9,6 +9,7 @@ import { PageHeader } from "./ui/page-header";
 import { Badge } from "./ui/feedback";
 import { SettingsToast } from "./settings-toast";
 import { TimePreferencesCard } from "./time-preferences-control";
+import { PASSWORD_MIN } from "./set-password-form";
 
 const roleLabel: Record<CurrentAccount["role"], string> = { owner: "Owner", admin: "Admin", member: "Member", viewer: "Viewer" };
 const PHOTO_TYPES = ["image/png", "image/jpeg", "image/webp"];
@@ -119,13 +120,13 @@ export function ProfileSettings({ account, workspace, onAccountChange }: { accou
       </section>
       <TimePreferencesCard />
       <section className="card" aria-labelledby="password-title">
-        <div className="card-header"><div><h2 id="password-title">Change password</h2><p>Use at least 12 characters. Changing it signs you out everywhere else.</p></div></div>
+        <div className="card-header"><div><h2 id="password-title">Change password</h2><p>Use at least {PASSWORD_MIN} characters. Changing it signs you out everywhere else.</p></div></div>
         <form onSubmit={(event) => void changePassword(event)}>
           <div className="card-body form-stack">
             <div className="field"><label htmlFor="profile-current-password">Current password</label><input id="profile-current-password" type="password" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} required /></div>
             <div className="field-row">
-              <div className="field"><label htmlFor="profile-new-password">New password</label><input id="profile-new-password" type="password" autoComplete="new-password" minLength={12} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required /></div>
-              <div className="field"><label htmlFor="profile-confirm-password">Confirm new password</label><input id="profile-confirm-password" type="password" autoComplete="new-password" minLength={12} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required /></div>
+              <div className="field"><label htmlFor="profile-new-password">New password</label><input id="profile-new-password" type="password" autoComplete="new-password" minLength={PASSWORD_MIN} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required /></div>
+              <div className="field"><label htmlFor="profile-confirm-password">Confirm new password</label><input id="profile-confirm-password" type="password" autoComplete="new-password" minLength={PASSWORD_MIN} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required /></div>
             </div>
           </div>
           <div className="card-footer"><button className="button primary" disabled={saving}>{saving ? "Updating…" : "Update password"}</button></div>

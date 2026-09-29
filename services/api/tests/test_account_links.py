@@ -144,7 +144,7 @@ def test_short_password_does_not_consume_the_link(make_app) -> None:
         assert _login(owner) == 200
         _invite(owner)
         token = token_from(resend.sent[-1]["text"])
-        assert _accept(mate, token, "too-short").status_code == 422
+        assert _accept(mate, token, "abc12").status_code == 422
         assert _accept(mate, token).status_code == 200
 
 
@@ -357,3 +357,16 @@ def test_an_invite_from_another_workspace_never_revokes_this_workspaces_link(mak
 def _invite_user_id(app) -> str:
     with app.state.database.session_factory() as session:
         return session.execute(select(UserRow.id).where(UserRow.email == "mate@example.test")).scalar_one()
+
+
+def test_six_character_passwords_are_accepted(make_app) -> None:
+    resend = FakeResend()
+    app = make_app(resend)
+    with TestClient(app) as owner, TestClient(app) as mate:
+        assert _login(owner) == 200
+        _invite(owner)
+        token = token_from(resend.sent[-1]["text"])
+        assert _accept(mate, token, "abc123").status_code == 200
+        changed = mate.post("/v1/auth/change-password", json={"current_password": "abc123", "new_password": "xyz789"})
+        assert changed.status_code == 200, changed.text
+        assert mate.post("/v1/auth/change-password", json={"current_password": "xyz789", "new_password": "abc12"}).status_code == 422

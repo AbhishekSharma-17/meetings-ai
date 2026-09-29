@@ -13,14 +13,14 @@ from .account_tokens import (
     MAX_TOKEN_LENGTH, IssuedLink, LinkError, LinkState, consume_link, find_link, issue_link, link_state,
     revoke_links, unusable_password_hash,
 )
-from .accounts import AccountError, AccountPublic, AccountService, Actor, InviteRequest, _hash_password
+from .accounts import (
+    PASSWORD_MAX, PASSWORD_MIN, AccountError, AccountPublic, AccountService, Actor, InviteRequest, _hash_password,
+)
 from .database import (
     LEGACY_ADMIN_USER_ID, OrganizationMembershipRow, OrganizationRow, UserCredentialRow, UserRow,
 )
 from .workspace_preferences import record_last_organization
 
-PASSWORD_MIN = 12
-PASSWORD_MAX = 200
 
 
 class AcceptLinkRequest(BaseModel):

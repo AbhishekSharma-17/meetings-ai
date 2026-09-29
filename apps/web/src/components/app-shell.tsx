@@ -30,6 +30,7 @@ import { DemoBanner, DemoPill } from "./demo-banner";
 import { NotificationCenter } from "./notification-center";
 import { AccountLinkScreen, takeAccountLinkFromUrl, type AccountLink } from "./account-link-screen";
 import { ForgotPasswordForm } from "./forgot-password-form";
+import { PASSWORD_MIN } from "./set-password-form";
 import { rememberSelection, type NotificationTarget } from "./notification-feed";
 import { useTimePreferences, useTimePreferencesSync } from "@/lib/time-preferences";
 import { TimeZoneIndicator } from "./time-preferences-control";
@@ -255,7 +256,7 @@ export function AppShell() {
     <form className="login-card" onSubmit={(event) => void changePassword(event)}>
       <div><p className="eyebrow">Account setup</p><h1>Choose your password</h1><p className="intro">{account.email} · {account.display_name}</p></div>
       <div className="field"><label htmlFor="temporary-password">Temporary password</label><input id="temporary-password" type="password" autoComplete="current-password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} required /></div>
-      <div className="field"><label htmlFor="new-password">New password</label><input id="new-password" type="password" autoComplete="new-password" minLength={12} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required /><p className="field-hint">At least 12 characters.</p></div>
+      <div className="field"><label htmlFor="new-password">New password</label><input id="new-password" type="password" autoComplete="new-password" minLength={PASSWORD_MIN} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required /><p className="field-hint">At least {PASSWORD_MIN} characters.</p></div>
       <button className="button primary lg block" disabled={loggingIn}>{loggingIn ? "Saving…" : "Set new password"}</button>
       {loginError ? <p className="form-error" role="alert">{loginError}</p> : null}
     </form>

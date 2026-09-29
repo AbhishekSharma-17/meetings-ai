@@ -73,10 +73,10 @@ test("an invite link opens the accept screen, strips the token and signs the per
 
   const password = page.getByLabel("New password");
   const confirm = page.getByLabel("Confirm password");
-  await password.fill("too-short");
-  await confirm.fill("too-short");
+  await password.fill("abc12");
+  await confirm.fill("abc12");
   await page.getByRole("button", { name: "Accept invite and sign in" }).click();
-  await expect(page.getByText("Use at least 12 characters.")).toBeVisible();
+  await expect(page.getByText("Use at least 6 characters.")).toBeVisible();
   await password.fill("a-long-enough-password");
   await confirm.fill("a-different-password!");
   await page.getByRole("button", { name: "Accept invite and sign in" }).click();
