@@ -71,7 +71,7 @@ test("workspace profile can be edited", async ({ page }) => {
     if (pathname === "/v1/workspace/brief/documents") return route.fulfill({ json: [] });
     if (pathname === "/v1/workspace/usage") return route.fulfill({ json: { total_requests: 0, input_tokens: 0, output_tokens: 0, estimated_usd: 0, unpriced_requests: 0, recent: [], by_meeting: [], by_purpose: [], by_provider: [] } });
     if (pathname === "/v1/workspace/operations") return route.fulfill({ json: { people: 1, meetings_captured: 0, completed_meetings: 0, saved_chats: 0, active_captures: 0, failed_captures: 0, failed_mom_jobs: 0, pending_index_jobs: 0, failed_index_jobs: 0, failed_email_deliveries: 0, latest_audit_at: null } });
-    if (pathname === "/v1/workspace/audit") return route.fulfill({ json: [{
+    if (pathname === "/v1/workspace/audit" || pathname === "/v1/me/activity") return route.fulfill({ json: [{
       id: "00000000-0000-4000-8000-000000000099",
       actor_user_id: "00000000-0000-4000-8000-000000000002",
       action: "auth.login.succeeded", resource_path: "/v1/auth/login",
@@ -92,7 +92,7 @@ test("workspace profile can be edited", async ({ page }) => {
   await page.getByRole("button", { name: "Organization & people" }).click();
   await expect(page.getByRole("heading", { name: "Workspace settings" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Organization profile" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Recent activity" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your recent activity" })).toBeVisible();
   await expect(page.getByRole("region", { name: "People & access" }).getByText("Local administrator")).toBeVisible();
   await page.getByLabel("Workspace name", { exact: true }).fill("Research Team");
   await page.getByLabel("Contact email optional").fill("team@example.com");

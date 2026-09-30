@@ -130,6 +130,7 @@ export function registerWorkspace(router: DemoRouter): void {
       return noContent();
     })
     .on("GET", "/v1/workspace/audit", ({ store, query }) => json(store.audit.slice(0, Number(query.get("limit")) || 40)))
+    .on("GET", "/v1/me/activity", ({ store, query }) => json(store.audit.filter((event) => event.actor_user_id === accountOf(store).user_id).slice(0, Number(query.get("limit")) || 40)))
     .on("GET", "/v1/workspace/operations", ({ store }) => json(operations(store)))
     .on("GET", "/v1/workspace/retention", ({ store }) => json(store.retention))
     .on("PUT", "/v1/workspace/retention", ({ store, body }) => {

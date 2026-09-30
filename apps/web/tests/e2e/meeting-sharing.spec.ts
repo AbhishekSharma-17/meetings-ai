@@ -35,7 +35,9 @@ async function common(page: Page, account: typeof owner, extra: (path: string, m
     if (path === `/v1/meetings/${meetingId}/minutes`) return route.fulfill({ json: minutes });
     if (path.endsWith("/delivery-settings")) return route.fulfill({ json: { internal_recipients: ["team@example.test"], participant_recipients: [], send_to_participants: false, include_transcript: false } });
     if (path === "/v1/integrations/resend/status") return route.fulfill({ json: { api_key_configured: true, sender_configured: true, sender: "x", can_attempt_send: true, domain_verification: "verified" } });
-    if (path === "/v1/knowledge-bases" || path === "/v1/provider-profiles" || path === "/v1/provider-defaults" || path === "/v1/teams") return route.fulfill({ json: [] });
+    if (path === "/v1/workspace/teams") return route.fulfill({ json: [{ id: "team-sales", name: "Sales", description: null, created_by: null, created_at: meeting.created_at, updated_at: meeting.created_at, member_count: 2, meeting_count: 0,
+      members: [{ email: cara.email, user_id: cara.user_id, display_name: cara.display_name, active: true }, { email: owner.email, user_id: owner.user_id, display_name: owner.display_name, active: true }] }] });
+    if (path === "/v1/knowledge-bases" || path === "/v1/provider-profiles" || path === "/v1/provider-defaults") return route.fulfill({ json: [] });
     return route.fulfill({ status: 404, json: { detail: "not needed in this UI test" } });
   });
 }
@@ -108,7 +110,7 @@ test("the sharing card fits a phone screen", async ({ page }) => {
   await page.getByRole("button", { name: "Open Acme renewal" }).click();
   const card = page.locator(".sharing-card");
   await expect(card.getByRole("list", { name: "Shared with" })).toContainText("Cara Lee");
-  await expect(card.getByRole("list", { name: "Recap emails" })).toContainText("+1");
+  await expect(card.getByRole("list", { name: "Recap emails" })).toContainText("ceo@example.test");  // every recipient, no "+1"
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
   const capture = process.env.PLAYWRIGHT_CAPTURE_DIR;
   if (capture) await card.screenshot({ path: `${capture}/meeting-sharing-card-360.png` });
@@ -132,4 +134,33 @@ test("a member opens a meeting shared with them from Shared with me", async ({ p
   await expect(page.getByText("Acme renews for two years.")).toBeVisible();
   await expect(page.getByText("We renew for two years.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Sharing" })).toHaveCount(0);  // no sharing controls for members
+});
+
+test("share with a whole team by typing @, and long recipient lists expand", async ({ page }) => {
+  const many = Array.from({ length: 9 }, (_, index) => `person${index + 1}@example.test`);
+  let history = { shares: [] as unknown[], deliveries: [{ ...recap, recipients: [cara.email, ...many] }] as unknown[] };
+  const posts: unknown[] = [];
+  await common(page, owner, (path, method, body) => {
+    if (path === `/v1/meetings/${meetingId}/sharing`) return { json: history };
+    if (path === `/v1/meetings/${meetingId}/shares` && method === "POST") {
+      posts.push(body);
+      history = { ...history, shares: [{ id: "sh1", person: { user_id: cara.user_id, display_name: cara.display_name }, shared_by: null, note: null, created_at: "2026-09-26T09:00:00Z", revoked_at: null, revoked_by: null }] };
+      return { json: history };
+    }
+    return undefined;
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open Acme renewal" }).click();
+  const card = page.locator(".sharing-card");
+  const recipients = card.getByRole("list", { name: "Recap emails" }).getByRole("list", { name: "Recipients" });
+  await expect(recipients).toContainText("Cara Lee");  // a teammate shows by name
+  await expect(recipients).not.toContainText("person9@example.test");
+  await recipients.getByRole("button", { name: "Show all 10" }).click();
+  await expect(recipients).toContainText("person9@example.test");
+
+  await card.getByLabel("Teammates", { exact: true }).pressSequentially("@Sal");
+  await page.getByRole("option", { name: /Sales/ }).click();
+  await card.getByRole("button", { name: "Share", exact: true }).click();
+  await expect(card.getByText("Shared with 1 person. They were notified.")).toBeVisible();
+  expect(posts).toEqual([{ user_ids: [cara.user_id], note: null }]);  // the team's admin already sees it
 });

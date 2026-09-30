@@ -56,6 +56,7 @@ export function MonthGrid({ month, days, selectedDay, entriesByDay, connections,
         return <button type="button" key={key} className={classes} aria-label={dayLabel(day, matches)} aria-pressed={key === selectedDay} aria-current={key === today ? "date" : undefined} onClick={() => onSelectDay(key)}>
           <span className="calendar-day-head">
             <span className="calendar-day-number">{day.getDate()}</span>
+            {key === today ? <span className="calendar-today-label">Today</span> : null}
             {matches.length ? <span className="calendar-day-sources" aria-hidden="true"><SourceStack sources={matches.flatMap((entry) => entry.sources)} connections={connections} decorative /></span> : null}
           </span>
           {matches.length ? <span className="calendar-day-events" aria-hidden="true">

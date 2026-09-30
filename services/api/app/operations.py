@@ -157,10 +157,12 @@ class AuditService:
                 status_code=status_code, created_at=datetime.now(UTC),
             ))
 
-    def list(self, organization_id: UUID, limit: int = 50) -> list[AuditEventPublic]:
+    def list(self, organization_id: UUID, limit: int = 50, actor_user_id: UUID | None = None) -> list[AuditEventPublic]:
+        """Newest first; ``actor_user_id`` limits it to one person's own actions."""
         with self.database.session_factory() as session:
             rows = session.execute(select(AuditEventRow).where(
-                AuditEventRow.organization_id == str(organization_id)
+                AuditEventRow.organization_id == str(organization_id),
+                *([AuditEventRow.actor_user_id == str(actor_user_id)] if actor_user_id else []),
             ).order_by(AuditEventRow.created_at.desc(), AuditEventRow.id.desc()).limit(limit)).scalars().all()
             return [AuditEventPublic(
                 id=UUID(row.id), actor_user_id=UUID(row.actor_user_id) if row.actor_user_id else None,

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Tabs } from "@base-ui/react/tabs";
-import { AudioLines, BookOpenCheck, CircleAlert, Coins, Cpu, Database, Gauge, Info, ListTree, RefreshCw, TriangleAlert } from "lucide-react";
+import { AudioLines, BookOpenCheck, CircleAlert, Coins, Cpu, Database, Gauge, History, Info, ListTree, RefreshCw, TriangleAlert } from "lucide-react";
 import { meetingsService, usageService } from "@/lib/meetings-service";
 import type { Meeting, UsageRange, UsageSummaryDetail, WorkspaceCalendarConnection, WorkspaceMember, WorkspaceOperations } from "@/lib/types";
 import { PageHeader } from "./ui/page-header";
@@ -16,9 +16,10 @@ import { RangePicker, rangeFor, type RangeChoice } from "./observability-range";
 import { formatCompact, formatDuration, formatUsd, providerLabel, purposeLabel } from "./usage-labels";
 import { UsageProviderName } from "./provider-brand-icons";
 import { ProviderCreditsCard } from "./observability-credits";
+import { ActivityCard } from "./workspace-activity";
 
-type Tab = "overview" | "ledger" | "prep" | "storage";
-const tabs: Tab[] = ["overview", "ledger", "prep", "storage"];
+type Tab = "overview" | "ledger" | "prep" | "storage" | "activity";
+const tabs: Tab[] = ["overview", "ledger", "prep", "storage", "activity"];
 
 export function ObservabilityScreen() {
   const [tab, setTab] = useState<Tab>("overview");
@@ -61,11 +62,13 @@ export function ObservabilityScreen() {
         <Tabs.Tab value="ledger"><ListTree aria-hidden="true" />Usage ledger{usage ? <span className="count">{formatCompact(usage.total_requests)}</span> : null}</Tabs.Tab>
         <Tabs.Tab value="prep"><BookOpenCheck aria-hidden="true" />Meeting prep</Tabs.Tab>
         <Tabs.Tab value="storage"><Database aria-hidden="true" />Data &amp; storage</Tabs.Tab>
+        <Tabs.Tab value="activity"><History aria-hidden="true" />Activity</Tabs.Tab>
       </Tabs.List>
       <Tabs.Panel value="overview"><Overview usage={usage} operations={operations} people={people} accounts={accounts} accountsError={accountsError} meetings={meetings} refreshKey={refreshKey} /></Tabs.Panel>
       <Tabs.Panel value="ledger"><UsageLedger range={range} usage={usage} refreshKey={refreshKey} /></Tabs.Panel>
       <Tabs.Panel value="prep"><PrepUsagePanel range={range} usage={usage} refreshKey={refreshKey} /></Tabs.Panel>
       <Tabs.Panel value="storage"><StoragePanel refreshKey={refreshKey} /></Tabs.Panel>
+      <Tabs.Panel value="activity">{tab === "activity" ? <WorkspaceActivityTab key={refreshKey} people={people} meetings={meetings} /> : null}</Tabs.Panel>
     </Tabs.Root>
   </section>;
 }
@@ -137,4 +140,18 @@ function healthState(value: number | undefined, kind: "failure" | "active"): [To
   if (value === undefined) return ["neutral", "Unknown"];
   if (kind === "failure") return value > 0 ? ["danger", "Needs review"] : ["success", "Healthy"];
   return value > 0 ? ["info", "In progress"] : ["neutral", "Idle"];
+}
+
+/** Everyone's activity in the workspace (owners and admins); each person sees their own under Organization & people. */
+function WorkspaceActivityTab({ people, meetings }: { people: WorkspaceMember[]; meetings: Meeting[] }) {
+  const [baseNames, setBaseNames] = useState<ReadonlyMap<string, string>>(new Map());
+  const [teamNames, setTeamNames] = useState<ReadonlyMap<string, string>>(new Map());
+  useEffect(() => {
+    void Promise.allSettled([meetingsService.listKnowledgeBases(), meetingsService.listTeams()]).then(([bases, teams]) => {
+      if (bases.status === "fulfilled") setBaseNames(new Map(bases.value.map((item) => [item.id, item.name])));
+      if (teams.status === "fulfilled") setTeamNames(new Map(teams.value.map((item) => [item.id, item.name])));
+    });
+  }, []);
+  const meetingTitles = useMemo(() => new Map(meetings.map((item) => [item.id, item.title])), [meetings]);
+  return <ActivityCard scope="workspace" members={people} meetingTitles={meetingTitles} baseNames={baseNames} teamNames={teamNames} />;
 }

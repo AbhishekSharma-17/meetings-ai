@@ -55,8 +55,11 @@
 .calendar-day-head { display:flex; align-items:center; justify-content:space-between; gap:4px; min-width:0; }
 .calendar-day-sources { display:none; }
 .calendar-day-number { display:grid; place-items:center; width:26px; height:26px; border:1px solid transparent; border-radius:50%; font-size:12.5px; font-weight:500; font-variant-numeric:tabular-nums; }
-.calendar-day.today .calendar-day-number { border-color:var(--brand); color:var(--brand); font-weight:600; }
-.calendar-day.selected .calendar-day-number { background:var(--brand); border-color:var(--brand); color:var(--brand-foreground); }
+/* Today is always a filled circle with a label; another selected day gets a tinted cell and an outlined number. */
+.calendar-day.today { box-shadow:inset 0 0 0 1px var(--brand-border); }
+.calendar-day.today .calendar-day-number { background:var(--brand); border-color:var(--brand); color:var(--brand-foreground); font-weight:600; }
+.calendar-day.selected:not(.today) .calendar-day-number { border-color:var(--brand); color:var(--brand); font-weight:600; }
+.calendar-today-label { margin-right:auto; color:var(--brand); font-size:11px; font-weight:600; letter-spacing:.02em; text-transform:uppercase; }
 .calendar-day-events { display:grid; gap:3px; min-width:0; }
 .calendar-chip { display:flex; align-items:center; gap:4px; min-width:0; height:22px; padding:0 4px 0 3px; border:1px solid var(--border); border-radius:999px; background:var(--muted); color:var(--foreground); font-size:11.5px; line-height:1; }
 .calendar-chip-title { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -281,6 +284,7 @@ a.prep-citation:hover { text-decoration:none; background:var(--card); }
   .calendar-day { align-items:center; gap:3px; min-height:50px; padding:5px 2px; }
   .calendar-day-events { display:none; }
   .calendar-day-head { flex-direction:column; gap:3px; }
+  .calendar-today-label { display:none; }
   .calendar-day-sources { display:flex; }
   .calendar-day-sources .brand-icon.xs { width:12px; height:12px; }
   .calendar-day-sources .source-stack.stacked > .brand-icon.xs { width:14px; height:14px; }

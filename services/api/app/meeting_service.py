@@ -71,6 +71,9 @@ class MeetingService:
         meeting_url = str(payload.meeting_url)
         parsed = parse_meeting_url(meeting_url)
         if parsed is None:
+            host = (urlsplit(meeting_url).hostname or "").lower()
+            if host == "webex.com" or host.endswith(".webex.com"):
+                raise MeetingValidationError("Webex meetings aren't supported yet; the assistant can join Google Meet, Teams, Zoom or Jitsi")
             raise MeetingValidationError(
                 "meeting_url must be a supported Google Meet, Teams, Zoom, or Jitsi link"
             )

@@ -17,6 +17,14 @@ import { WEEKDAY_DATE_TIME, wallTimeToDate, zoneAbbreviation } from "@/lib/time-
 
 const SUPPORTED_PLATFORMS = "Google Meet, Zoom, Microsoft Teams or Jitsi";
 
+/** A known platform the assistant can't join yet: say so instead of a generic "invalid link". */
+function unsupportedPlatform(value: string): string | null {
+  try {
+    const host = new URL(value.trim()).hostname.toLowerCase();
+    return host === "webex.com" || host.endsWith(".webex.com") ? "Webex" : null;
+  } catch { return null; }
+}
+
 function detectPlatform(value: string): string | null {
   try {
     const host = new URL(value.trim()).hostname.toLowerCase();
@@ -233,6 +241,7 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
             </div>
             {linkError
               ? <p id="meeting-link-hint" className="inline-error nm-link-hint">{linkError}</p>
+              : unsupportedPlatform(link) ? <p id="meeting-link-hint" className="inline-error nm-link-hint">{unsupportedPlatform(link)} meetings aren&apos;t supported yet. The assistant can join {SUPPORTED_PLATFORMS}.</p>
               : <p id="meeting-link-hint" className={platform ? "field-hint nm-link-hint detected" : "field-hint nm-link-hint"}>{platform ? <><CircleCheck aria-hidden="true" />{platform} link</> : `Works with ${SUPPORTED_PLATFORMS}.`}</p>}
           </div>
           <div className="field-row">

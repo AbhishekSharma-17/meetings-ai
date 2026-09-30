@@ -5,26 +5,30 @@ import { History, Mail, Send, Share2, UserMinus } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
 import { activeShares, sharingService, type MeetingSharing, type RecapDelivery } from "@/lib/sharing-service";
 import { formatDateTime } from "@/lib/time-preferences";
-import type { WorkspaceMember } from "@/lib/types";
+import type { Team, WorkspaceMember } from "@/lib/types";
 import { Avatar } from "./ui/avatar";
-import type { ChipSuggestion } from "./ui/chip-input";
-import { EmailChips, isValidEmail } from "./ui/email-chips";
+import { isValidEmail } from "./ui/email-chips";
 import { Alert, Badge, EmptyState } from "./ui/feedback";
 import { SwitchField } from "./ui/switch";
+import { TeamRecipientChips } from "./team-recipient-chips";
 
-const MAX_SHOWN_RECIPIENTS = 3;
-
-function recipientsText(list: string[]): string {
-  const shown = list.slice(0, MAX_SHOWN_RECIPIENTS).join(", ");
-  return list.length > MAX_SHOWN_RECIPIENTS ? `${shown} +${list.length - MAX_SHOWN_RECIPIENTS}` : shown;
-}
+/** Recipients shown before "Show all" in the history. */
+const RECIPIENTS_SHOWN = 6;
 
 function messageFor(cause: unknown, fallback: string): string {
   return cause instanceof Error ? cause.message : fallback;
 }
 
-function suggestionsFor(members: WorkspaceMember[]): ChipSuggestion[] {
-  return members.map((member) => ({ id: member.email ?? member.user_id, label: member.display_name, detail: member.email ?? undefined, keywords: member.email ? [member.email] : [] }));
+/** Everyone the chosen addresses and teams reach (teams: their current active members). */
+function reach(emails: string[], teamIds: string[], teams: Team[]): string[] {
+  const fromTeams = teams.filter((team) => teamIds.includes(team.id)).flatMap((team) => team.members.filter((member) => member.active).map((member) => member.email));
+  const seen = new Set<string>();
+  return [...emails, ...fromTeams].filter((email) => {
+    const key = email.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 /**
@@ -34,7 +38,10 @@ function suggestionsFor(members: WorkspaceMember[]): ChipSuggestion[] {
 export function MeetingSharingCard({ meetingId, revision = 0 }: { meetingId: string; revision?: number }) {
   const [sharing, setSharing] = useState<MeetingSharing | null>(null);
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
   const [shareWith, setShareWith] = useState<string[]>([]);
+  const [shareTeams, setShareTeams] = useState<string[]>([]);
+  const [resendTeams, setResendTeams] = useState<string[]>([]);
   const [note, setNote] = useState("");
   const [resendTo, setResendTo] = useState<string[]>([]);
   const [attachTranscript, setAttachTranscript] = useState(false);
@@ -44,7 +51,10 @@ export function MeetingSharingCard({ meetingId, revision = 0 }: { meetingId: str
 
   const load = useCallback(() => sharingService.history(meetingId).then(setSharing).catch((cause) => setError(messageFor(cause, "Could not load sharing."))), [meetingId]);
   useEffect(() => { void load(); }, [load, revision]);
-  useEffect(() => { void meetingsService.listWorkspaceMembers().then(setMembers).catch(() => setMembers([])); }, []);
+  useEffect(() => {
+    void meetingsService.listWorkspaceMembers().then(setMembers).catch(() => setMembers([]));
+    void meetingsService.listTeams().then(setTeams).catch(() => setTeams([]));
+  }, []);
 
   const active = activeShares(sharing);
   // Owners and admins already see every meeting; invites that aren't accepted yet can't sign in.
@@ -56,11 +66,14 @@ export function MeetingSharingCard({ meetingId, revision = 0 }: { meetingId: str
     const byEmail = new Map(shareable.filter((member) => member.email).map((member) => [member.email!.toLowerCase(), member]));
     const unknown = shareWith.filter((email) => !byEmail.has(email.toLowerCase()));
     if (unknown.length) { setError(`${unknown.join(", ")} ${unknown.length === 1 ? "isn't a teammate" : "aren't teammates"} who can be given access. Choose people from this workspace.`); return; }
+    // A team shares with its members who don't already see the meeting (admins always do).
+    const people = [...new Set(reach(shareWith, shareTeams, teams).map((email) => byEmail.get(email.toLowerCase())?.user_id).filter((id): id is string => Boolean(id)))];
+    if (!people.length) { setError("Everyone you chose can already see this meeting."); return; }
     setBusy("share"); setError(null); setNotice(null);
     try {
-      setSharing(await sharingService.share(meetingId, shareWith.map((email) => byEmail.get(email.toLowerCase())!.user_id), note));
-      setNotice(`Shared with ${shareWith.length} ${shareWith.length === 1 ? "person" : "people"}. They were notified.`);
-      setShareWith([]); setNote("");
+      setSharing(await sharingService.share(meetingId, people, note));
+      setNotice(`Shared with ${people.length} ${people.length === 1 ? "person" : "people"}. They were notified.`);
+      setShareWith([]); setShareTeams([]); setNote("");
     } catch (cause) { setError(messageFor(cause, "Could not share this meeting.")); }
     finally { setBusy(null); }
   }
@@ -75,9 +88,9 @@ export function MeetingSharingCard({ meetingId, revision = 0 }: { meetingId: str
   async function resend() {
     setBusy("resend"); setError(null); setNotice(null);
     try {
-      const delivery = await sharingService.resend(meetingId, resendTo, attachTranscript);
-      setNotice(`Recap sent again to ${recipientsText(delivery.recipients)}.`);
-      setResendTo([]);
+      const delivery = await sharingService.resend(meetingId, reach(resendTo, resendTeams, teams), attachTranscript);
+      setNotice(`Recap sent again to ${delivery.recipients.length === 1 ? delivery.recipients[0] : `${delivery.recipients.length} people`}.`);
+      setResendTo([]); setResendTeams([]);
     } catch (cause) { setError(messageFor(cause, "Could not send the recap again.")); }
     finally { setBusy(null); void load(); }
   }
@@ -94,38 +107,38 @@ export function MeetingSharingCard({ meetingId, revision = 0 }: { meetingId: str
 
       <div className="sharing-block">
         <h3><Share2 aria-hidden="true" /> Share in the app</h3>
-        <EmailChips id="share-people" label="Teammates" value={shareWith} onChange={setShareWith} placeholder="Type a name or pick a teammate" disabled={busy !== null}
-          suggestions={suggestionsFor(shareable)} suggestionsLabel="People in this workspace" onPick={(pick) => setShareWith((current) => current.includes(pick.id) ? current : [...current, pick.id])}
-          hint="They can read the transcript and the approved MOM. They can't edit, send or share it." />
+        <TeamRecipientChips id="share-people" label="Teammates" value={shareWith} onChange={setShareWith} groupIds={shareTeams} onGroupIdsChange={setShareTeams}
+          teams={teams} members={shareable} placeholder="Type @ or a name to pick teammates or a team" disabled={busy !== null}
+          hint="Type @ to pick people or a whole team. They can read the transcript and the approved MOM; they can't edit, send or share it." />
         <div className="field">
           <label htmlFor="share-note">Note <span className="optional">optional</span></label>
           <input id="share-note" value={note} maxLength={500} placeholder="e.g. Please check the action items before Friday" disabled={busy !== null} onChange={(event) => setNote(event.target.value)} />
         </div>
         <div className="button-group end">
-          <button type="button" className="button primary" disabled={busy !== null || !shareWith.length} onClick={() => void share()}><Share2 aria-hidden="true" />{busy === "share" ? "Sharing…" : "Share"}</button>
+          <button type="button" className="button primary" disabled={busy !== null || (!shareWith.length && !shareTeams.length)} onClick={() => void share()}><Share2 aria-hidden="true" />{busy === "share" ? "Sharing…" : "Share"}</button>
         </div>
       </div>
 
       <div className="sharing-block">
         <h3><Mail aria-hidden="true" /> Email the recap again</h3>
         {recapSent ? <>
-          <EmailChips id="resend-recipients" label="Send to" value={resendTo} onChange={setResendTo} disabled={busy !== null}
-            suggestions={suggestionsFor(members.filter((member) => member.status === "active" && member.email))} suggestionsLabel="Teammates' addresses"
-            onPick={(pick) => setResendTo((current) => current.includes(pick.id) ? current : [...current, pick.id])}
-            hint="Anyone who missed it, inside or outside the workspace. The MOM itself doesn't change." />
+          <TeamRecipientChips id="resend-recipients" label="Send to" value={resendTo} onChange={setResendTo} groupIds={resendTeams} onGroupIdsChange={setResendTeams}
+            teams={teams} members={members.filter((member) => member.status === "active" && member.email)} placeholder="name@company.com or type @" disabled={busy !== null}
+            hint="Type @ for teammates or a team, or enter anyone's address. The MOM itself doesn't change." />
           <SwitchField id="resend-transcript" label="Attach the full timestamped transcript (.md)" checked={attachTranscript} onChange={setAttachTranscript} />
           <div className="button-group end">
-            <button type="button" className="button secondary" disabled={busy !== null || !resendTo.length || invalidResend} onClick={() => void resend()}><Send aria-hidden="true" />{busy === "resend" ? "Sending…" : "Send again"}</button>
+            <button type="button" className="button secondary" disabled={busy !== null || (!resendTo.length && !resendTeams.length) || invalidResend} onClick={() => void resend()}><Send aria-hidden="true" />{busy === "resend" ? "Sending…" : "Send again"}</button>
           </div>
         </> : <Alert tone="info">Send the recap from MOM & follow-up first. After that you can email it again to anyone who missed it.</Alert>}
       </div>
 
-      <SharingHistory sharing={sharing} busy={busy} onRevoke={(id, name) => void revoke(id, name)} />
+      <SharingHistory sharing={sharing} members={members} busy={busy} onRevoke={(id, name) => void revoke(id, name)} />
     </div>
   </section>;
 }
 
-function SharingHistory({ sharing, busy, onRevoke }: { sharing: MeetingSharing | null; busy: string | null; onRevoke(id: string, name: string): void }) {
+function SharingHistory({ sharing, members, busy, onRevoke }: { sharing: MeetingSharing | null; members: WorkspaceMember[]; busy: string | null; onRevoke(id: string, name: string): void }) {
+  const names = useMemo(() => new Map(members.filter((member) => member.email).map((member) => [member.email!.toLowerCase(), member.display_name])), [members]);
   if (!sharing) return null;
   const empty = !sharing.shares.length && !sharing.deliveries.length;
   return <div className="sharing-block sharing-history">
@@ -146,17 +159,26 @@ function SharingHistory({ sharing, busy, onRevoke }: { sharing: MeetingSharing |
       </li>)}
     </ul> : null}
     {sharing.deliveries.length ? <ul className="sharing-list" aria-label="Recap emails">
-      {sharing.deliveries.map((delivery) => <DeliveryRow key={delivery.id} delivery={delivery} />)}
+      {sharing.deliveries.map((delivery) => <DeliveryRow key={delivery.id} delivery={delivery} names={names} />)}
     </ul> : null}
   </div>;
 }
 
-function DeliveryRow({ delivery }: { delivery: RecapDelivery }) {
+/** Every recipient, by name when they are a teammate; long lists collapse behind "Show all". */
+function DeliveryRow({ delivery, names }: { delivery: RecapDelivery; names: Map<string, string> }) {
+  const [expanded, setExpanded] = useState(false);
   const failed = delivery.status !== "sent";
+  const shown = expanded ? delivery.recipients : delivery.recipients.slice(0, RECIPIENTS_SHOWN);
+  const hidden = delivery.recipients.length - shown.length;
   return <li className={failed ? "failed" : undefined}>
     <span className="sharing-mail-icon" aria-hidden="true"><Mail /></span>
     <div className="sharing-line">
-      <b title={delivery.recipients.join(", ")}>{recipientsText(delivery.recipients)}</b>
+      <b className="sr-only">{delivery.recipients.length} recipient{delivery.recipients.length === 1 ? "" : "s"}</b>
+      <ul className="sharing-recipients" aria-label="Recipients">
+        {shown.map((email) => { const name = names.get(email.toLowerCase()); return <li key={email} title={email}>{name ? <>{name} <span>{email}</span></> : email}</li>; })}
+        {hidden > 0 ? <li><button type="button" className="text-button" onClick={() => setExpanded(true)}>Show all {delivery.recipients.length}</button></li> : null}
+        {expanded && delivery.recipients.length > RECIPIENTS_SHOWN ? <li><button type="button" className="text-button" onClick={() => setExpanded(false)}>Show fewer</button></li> : null}
+      </ul>
       <small>{delivery.kind === "resend" ? "Sent again" : "Recap sent"} {formatDateTime(delivery.created_at)}{delivery.sent_by ? ` by ${delivery.sent_by.display_name}` : ""}{delivery.include_transcript ? " · transcript attached" : ""}</small>
       {failed && delivery.error ? <small className="inline-error">{delivery.error}</small> : null}
     </div>

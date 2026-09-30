@@ -423,6 +423,7 @@ def create_app(
                         or (method == "GET" and path == "/v1/ai/settings")
                         or path == "/v1/auth/me"
                         or (method in {"GET", "PUT"} and path == "/v1/me/preferences")
+                        or (method == "GET" and path == "/v1/me/activity")
                         or (method == "POST" and path == "/v1/me/preferences/detected")
                         or (method in {"PUT", "DELETE"} and path == "/v1/auth/me/photo")
                         or (method == "PUT" and path == "/v1/workspaces/default")
@@ -634,6 +635,12 @@ def create_app(
     @app.get("/v1/workspace/audit", response_model=list[AuditEventPublic])
     def list_workspace_audit(request: Request, limit: int = 50) -> list[AuditEventPublic]:
         return audit.list(request.state.actor.organization_id, max(1, min(limit, 200)))
+
+    @app.get("/v1/me/activity", response_model=list[AuditEventPublic])
+    def list_my_activity(request: Request, limit: int = 50) -> list[AuditEventPublic]:
+        """Everyone sees their own recent actions; the whole workspace's is for admins (above)."""
+        actor = request.state.actor
+        return audit.list(actor.organization_id, max(1, min(limit, 200)), actor_user_id=actor.user_id)
 
     @app.get("/v1/workspace/operations", response_model=WorkspaceOperationsPublic)
     def get_workspace_operations(request: Request) -> WorkspaceOperationsPublic:

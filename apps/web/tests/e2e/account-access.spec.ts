@@ -31,7 +31,7 @@ async function mockApi(page: Page, handler: Handler) {
     if (pathname === "/v1/meetings") return route.fulfill({ json: { items: [], count: 0 } });
     if (pathname === "/v1/workspace/teams") return route.fulfill({ json: [] });
     if (pathname === "/v1/notifications/unread-count") return route.fulfill({ json: { count: 0 } });
-    if (["/v1/provider-profiles", "/v1/provider-defaults", "/v1/knowledge-bases", "/v1/workspace/audit", "/v1/workspace/brief/documents"].includes(pathname)) return route.fulfill({ json: [] });
+    if (["/v1/provider-profiles", "/v1/provider-defaults", "/v1/knowledge-bases", "/v1/workspace/audit", "/v1/me/activity", "/v1/workspace/brief/documents"].includes(pathname)) return route.fulfill({ json: [] });
     return route.fulfill({ status: 404, json: { detail: "mock route missing" } });
   });
 }

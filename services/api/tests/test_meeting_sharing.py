@@ -311,3 +311,25 @@ def test_the_sender_is_recorded_only_when_an_email_is_attempted(world) -> None:
     assert admin.post(f"/v1/meetings/{meeting}/minutes/resend", json={"recipients": ["x@example.com"]}).status_code == 409
     with world["app"].state.database.session_factory() as session:
         assert session.execute(select(EmailDeliverySenderRow)).scalars().all() == []
+
+
+def test_everyone_sees_only_their_own_activity_and_admins_see_the_workspace(world) -> None:
+    meeting = world["meeting"]
+    admin = _as(world, "asha")
+    admin.post(f"/v1/meetings/{meeting}/shares", json={"user_ids": [world["cara"]]})
+    cara = _as(world, "cara")
+    cara.put("/v1/me/preferences", json={"time_zone": "Asia/Kolkata"})
+    mine = cara.get("/v1/me/activity")
+    assert mine.status_code == 200
+    assert mine.json() and {item["actor_user_id"] for item in mine.json()} == {world["cara"]}
+    assert cara.get("/v1/workspace/audit").status_code == 403
+    admin = _as(world, "asha")
+    assert {item["actor_user_id"] for item in admin.get("/v1/me/activity").json()} == {world["asha"]}
+    everyone = {item["actor_user_id"] for item in admin.get("/v1/workspace/audit").json()}
+    assert {world["asha"], world["cara"]} <= everyone
+
+
+def test_a_webex_link_is_refused_with_a_clear_reason(world) -> None:
+    response = _as(world, "asha").post("/v1/meetings", json={"meeting_url": "https://acme.webex.com/meet/jane", "title": "Webex call"})
+    assert response.status_code == 422
+    assert "Webex meetings aren't supported yet" in response.text

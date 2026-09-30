@@ -23,7 +23,7 @@ const sectionLinks: SectionLink[] = [
   { id: "settings-brief", label: "Company profile" },
   { id: "settings-leave", label: "Leaving calls" },
   { id: "settings-retention", label: "Data retention", adminOnly: true },
-  { id: "settings-activity", label: "Recent activity", adminOnly: true },
+  { id: "settings-activity", label: "Your activity" },
 ];
 
 export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceChange, onSwitchWorkspace, onCreateWorkspace, onWorkspacesChange, onOpenObservability }: {
@@ -106,7 +106,7 @@ export function WorkspaceSettings({ workspace, workspaces, account, onWorkspaceC
         <WorkspaceBrief workspaceId={workspace.id} canManage={canManage} />
         <WorkspaceLeavePolicy key={workspace.id} onSaved={(text) => { setError(null); setMessage(text); }} />
         {canManage ? <RetentionCard onSaved={setMessage} /> : null}
-        {canManage ? <ActivityCard members={members} meetingTitles={meetingTitles} baseNames={baseNames} teamNames={teamNames} /> : null}
+        <ActivityCard scope="mine" members={members} meetingTitles={meetingTitles} baseNames={baseNames} teamNames={teamNames} />
       </div>
     </div>
     <SettingsToast notice={notice} onDismiss={() => { setError(null); setMessage(null); }} />

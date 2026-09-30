@@ -67,7 +67,7 @@ function fixtures(pathname: string, members: typeof people): unknown {
   };
   if (pathname in map) return map[pathname];
   if (pathname.endsWith("/conversations") || pathname === "/v1/provider-defaults" || pathname === "/v1/credentials" || pathname.endsWith("/documents")
-    || pathname === "/v1/workspace/audit" || pathname === "/v1/calendar/schedules" || pathname === "/v1/calendar/connections" || pathname === "/v1/workspace/calendar-connections") return [];
+    || pathname === "/v1/workspace/audit" || pathname === "/v1/me/activity" || pathname === "/v1/calendar/schedules" || pathname === "/v1/calendar/connections" || pathname === "/v1/workspace/calendar-connections") return [];
   return undefined;
 }
 

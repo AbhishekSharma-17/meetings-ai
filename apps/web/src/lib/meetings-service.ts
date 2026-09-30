@@ -35,6 +35,8 @@ export interface MeetingsService {
   updateTeam(id: string, input: Partial<TeamInput>): Promise<Team>;
   deleteTeam(id: string): Promise<void>;
   listWorkspaceAudit(): Promise<AuditEvent[]>;
+  /** The signed-in person's own recent actions (any role). */
+  listMyActivity(): Promise<AuditEvent[]>;
   getWorkspaceOperations(): Promise<WorkspaceOperations>;
   getWorkspaceUsage(): Promise<UsageSummary>;
   getRetentionPolicy(): Promise<RetentionPolicy>;
@@ -514,6 +516,10 @@ class HttpMeetingsService implements MeetingsService {
 
   async deleteTeam(id: string): Promise<void> {
     await api<void>(`/v1/workspace/teams/${id}`, { method: "DELETE" });
+  }
+
+  async listMyActivity(): Promise<AuditEvent[]> {
+    return api<AuditEvent[]>("/v1/me/activity?limit=30");
   }
 
   async listWorkspaceAudit(): Promise<AuditEvent[]> {

@@ -16,7 +16,9 @@ type CategoryFilter = ActivityCategory | "all";
 type ActorFace = { name: string; photoUrl: string | null; kind: "person" | "assistant" };
 
 /** Workspace audit trail in plain language: who did what, to which meeting, person or knowledge base. */
-export function ActivityCard({ members, meetingTitles, baseNames, teamNames }: { members: WorkspaceMember[]; meetingTitles: ReadonlyMap<string, string>; baseNames: ReadonlyMap<string, string>; teamNames?: ReadonlyMap<string, string> }) {
+/** `scope`: "mine" (anyone: their own actions) or "workspace" (owners and admins: everyone's). */
+export function ActivityCard({ members, meetingTitles, baseNames, teamNames, scope = "workspace" }: { members: WorkspaceMember[]; meetingTitles: ReadonlyMap<string, string>; baseNames: ReadonlyMap<string, string>; teamNames?: ReadonlyMap<string, string>; scope?: "mine" | "workspace" }) {
+  const load = scope === "mine" ? () => meetingsService.listMyActivity() : () => meetingsService.listWorkspaceAudit();
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -25,14 +27,15 @@ export function ActivityCard({ members, meetingTitles, baseNames, teamNames }: {
   const [category, setCategory] = useState<CategoryFilter>("all");
 
   useEffect(() => {
-    void meetingsService.listWorkspaceAudit().then(setEvents).catch(() => {
+    void load().then(setEvents).catch(() => {
       setError("Could not load recent activity.");
     }).finally(() => setLoaded(true));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `scope` never changes for a mounted card
   }, []);
 
   async function refresh() {
     setError(null); setRefreshing(true);
-    try { setEvents(await meetingsService.listWorkspaceAudit()); }
+    try { setEvents(await load()); }
     catch { setError("Could not load recent activity."); }
     finally { setRefreshing(false); }
   }
@@ -66,9 +69,11 @@ export function ActivityCard({ members, meetingTitles, baseNames, teamNames }: {
     ...activityCategoryOrder.filter((key) => counts.has(key)).map((key) => ({ value: key, label: `${activityCategories[key].label} (${counts.get(key)})` }))];
   const clear = () => { setQuery(""); setCategory("all"); };
 
-  return <section className="card settings-section activity-card" id="settings-activity" aria-labelledby="workspace-audit-title">
+  return <section className="card settings-section activity-card" id={scope === "mine" ? "settings-activity" : "workspace-activity"} aria-labelledby={`${scope}-audit-title`}>
     <div className="card-header">
-      <div><h2 id="workspace-audit-title">Recent activity</h2><p>Changes, sign-ins and deliveries in this workspace. Message contents and credentials are never recorded.</p></div>
+      <div><h2 id={`${scope}-audit-title`}>{scope === "mine" ? "Your recent activity" : "Workspace activity"}</h2><p>{scope === "mine"
+        ? "What you changed, sent and signed in to in this workspace. Only you (and workspace admins) see it."
+        : "Everyone's changes, sign-ins and deliveries in this workspace. Message contents and credentials are never recorded."}</p></div>
       <button type="button" className="button ghost sm" onClick={() => void refresh()} disabled={refreshing}><RefreshCw aria-hidden="true" className={refreshing ? "obs-spin" : undefined} /> Refresh</button>
     </div>
     {entries.length ? <div className="card-toolbar">

@@ -23,7 +23,7 @@ async function mockApi(page: Page, handler: (route: Route, pathname: string, met
     if (pathname === "/v1/workspace/retention") return route.fulfill({ json: { enabled: false, meeting_days: null, chat_days: null, audit_days: null } });
     if (pathname === "/v1/workspace/operations") return route.fulfill({ json: { people: 1, meetings_captured: 0, completed_meetings: 0, saved_chats: 0, active_captures: 0, failed_captures: 0, failed_mom_jobs: 0, pending_index_jobs: 0, failed_index_jobs: 0, failed_email_deliveries: 0, latest_audit_at: null } });
     if (pathname === "/v1/meetings") return route.fulfill({ json: { items: [], count: 0 } });
-    if (pathname === "/v1/provider-profiles" || pathname === "/v1/provider-defaults" || pathname === "/v1/knowledge-bases" || pathname.endsWith("/documents") || pathname === "/v1/workspace/audit") return route.fulfill({ json: [] });
+    if (pathname === "/v1/provider-profiles" || pathname === "/v1/provider-defaults" || pathname === "/v1/knowledge-bases" || pathname.endsWith("/documents") || pathname === "/v1/workspace/audit" || pathname === "/v1/me/activity") return route.fulfill({ json: [] });
     return route.fulfill({ status: 404, json: { detail: "mock route missing" } });
   });
 }
