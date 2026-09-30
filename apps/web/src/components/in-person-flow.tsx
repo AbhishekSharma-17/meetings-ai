@@ -13,6 +13,7 @@ import { useMicrophoneCheck } from "./in-person-mic-check";
 import { InPersonSetup, type SetupValues, type StartProblem } from "./in-person-setup";
 import { InPersonRecording } from "./in-person-recording";
 import { InPersonFinalizing } from "./in-person-finalizing";
+import { InPersonBackgroundBanner } from "./in-person-background";
 
 /** A recording left unfinished on this device (found after a reload). */
 export type PendingRecording = { stored: StoredSession; session: InPersonSession; buffered: StoredChunk[] };
@@ -32,22 +33,28 @@ function startProblem(cause: unknown): StartProblem {
   return { title: "The recording could not start", detail: message || "Check your connection and try again." };
 }
 
-export function InPersonRecorder({ request, identity, canOpenProviders, onClose, onFinished, onOpenProviders }: {
-  request: InPersonRequest | null;
+type RecorderProps = {
   identity: string;
   canOpenProviders: boolean;
+  /** The person navigated elsewhere: keep recording, show a compact banner instead of the recorder page. */
+  background: boolean;
+  onReturn(): void;
   onClose(): void;
   /** The recording is done (or the person chose to leave while it is processed): open its meeting. */
   onFinished(meetingId: string): void;
   onOpenProviders(): void;
-}) {
+};
+
+/**
+ * The in-person recorder. Setup is a dialog over the current screen; recording and finalizing take over the
+ * main area as a normal page (render this as a direct child of `main`).
+ */
+export function InPersonRecorder({ request, ...props }: RecorderProps & { request: InPersonRequest | null }) {
   if (!request) return null;
-  return <Flow request={request} identity={identity} canOpenProviders={canOpenProviders} onClose={onClose} onFinished={onFinished} onOpenProviders={onOpenProviders} />;
+  return <Flow request={request} {...props} />;
 }
 
-function Flow({ request, identity, canOpenProviders, onClose, onFinished, onOpenProviders }: {
-  request: InPersonRequest; identity: string; canOpenProviders: boolean; onClose(): void; onFinished(meetingId: string): void; onOpenProviders(): void;
-}) {
+function Flow({ request, identity, canOpenProviders, background, onReturn, onClose, onFinished, onOpenProviders }: RecorderProps & { request: InPersonRequest }) {
   const [demo] = useState(isDemoActive);
   const [laptop] = useState(() => deviceKind() === "laptop");
   const check = useMicrophoneCheck();
@@ -57,7 +64,19 @@ function Flow({ request, identity, canOpenProviders, onClose, onFinished, onOpen
   const [starting, setStarting] = useState(false);
   const [problem, setProblem] = useState<StartProblem | null>(null);
   const mounted = useRef(true);
+  const page = useRef<HTMLElement>(null);
+  const backgroundRef = useRef(background);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => { backgroundRef.current = background; }, [background]);
+
+  // The recorder page replaces the screen underneath: start at the top and move focus onto it.
+  const onPage = phase !== "setup" && !background;
+  useEffect(() => {
+    if (!onPage) return;
+    window.scrollTo({ top: 0 });
+    const timer = window.setTimeout(() => page.current?.focus({ preventScroll: true }), 0);
+    return () => window.clearTimeout(timer);
+  }, [onPage, phase]);
 
   useEffect(() => {
     if (!controller) return;
@@ -112,18 +131,25 @@ function Flow({ request, identity, canOpenProviders, onClose, onFinished, onOpen
   }, [buildEngine, controller]);
 
   const stopped = useCallback((next: InPersonSession) => { setSession(next); setPhase("finalizing"); }, []);
+  // Done while the person works elsewhere: don't pull them away; the notification says it's ready.
+  const done = useCallback((meetingId: string) => { if (backgroundRef.current) onClose(); else onFinished(meetingId); }, [onClose, onFinished]);
 
-  return <Dialog.Root open disablePointerDismissal onOpenChange={(open) => { if (!open && phase === "setup") onClose(); }}>
-    <Dialog.Portal>
-      <Dialog.Backdrop className="ip-backdrop" />
-      <Dialog.Popup className="ip-popup" data-phase={phase}>
-        {phase === "setup" && request.kind === "new" ? <InPersonSetup seed={request.seed} check={check} demo={demo} laptop={laptop} starting={starting} problem={problem}
-          canOpenProviders={canOpenProviders} onStart={(values) => void start(values)} onCancel={onClose} onOpenProviders={onOpenProviders} /> : null}
-        {phase === "recording" && controller && session ? <InPersonRecording controller={controller} session={session} onStopped={stopped} onResumeEngine={resumeEngine} /> : null}
-        {phase === "finalizing" && session ? <InPersonFinalizing session={session} onDone={onFinished} onLeave={onFinished} /> : null}
-      </Dialog.Popup>
-    </Dialog.Portal>
-  </Dialog.Root>;
+  return <>
+    {request.kind === "new" ? <Dialog.Root open={phase === "setup"} onOpenChange={(open) => { if (!open && !starting) onClose(); }}>
+      <Dialog.Portal>
+        <Dialog.Backdrop className="dialog-backdrop" />
+        <Dialog.Popup className="dialog lg ip-setup" finalFocus={() => page.current ?? true}>
+          <InPersonSetup seed={request.seed} check={check} demo={demo} laptop={laptop} starting={starting} problem={problem}
+            canOpenProviders={canOpenProviders} onStart={(values) => void start(values)} onCancel={onClose} onOpenProviders={onOpenProviders} />
+        </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root> : null}
+    {phase !== "setup" && session ? <section ref={page} tabIndex={-1} hidden={background} className="page narrow ip-recorder" aria-labelledby="ip-recorder-title" data-phase={phase}>
+      {phase === "recording" && controller ? <InPersonRecording controller={controller} session={session} onStopped={stopped} onResumeEngine={resumeEngine} /> : null}
+      {phase === "finalizing" ? <InPersonFinalizing session={session} onDone={done} onLeave={onFinished} /> : null}
+    </section> : null}
+    {background && phase !== "setup" && session ? <InPersonBackgroundBanner session={session} controller={phase === "recording" ? controller : null} onReturn={onReturn} /> : null}
+  </>;
 }
 
 function resumeController(pending: PendingRecording, identity: string, action: "finish" | "continue"): RecordingController {

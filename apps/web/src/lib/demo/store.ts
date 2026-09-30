@@ -15,6 +15,7 @@ import { acmeReport, acmeUsage, initechReport, initechUsage } from "./fixtures/p
 import { aiSettings, type AiSettingsState, type BackendDefault, type BackendProfile, credentials, profiles, providerDefaults } from "./fixtures/providers";
 import { generateLedger } from "./fixtures/usage";
 import { demoApollo, type DemoApolloState } from "./fixtures/apollo";
+import { demoResearch, type DemoResearchState } from "./fixtures/research";
 
 export type DemoStore = {
   clock: Clock; orgId: string; displayName: string; photoUrl: string | null; defaultWorkspaceId: string | null;
@@ -31,6 +32,8 @@ export type DemoStore = {
   profiles: BackendProfile[]; defaults: BackendDefault[]; credentials: VaultCredential[]; ai: AiSettingsState;
   /** The workspace's sample Apollo connection (AI providers → Research sources). */
   apollo: DemoApolloState;
+  /** Research (Apollo Explorer): saved sample profiles, private chats and today's lookups. */
+  research: DemoResearchState;
   usage: UsageEvent[]; audit: AuditEvent[]; purged: Partial<Record<StorageCategoryKey, string[]>>;
 };
 
@@ -140,6 +143,7 @@ export function createStore(): DemoStore {
     bases, conversations: conversations(clock, seeds), reindexedAt: {},
     profiles: profiles(), defaults: providerDefaults(), credentials: credentials(clock), ai: aiSettings(clock),
     apollo: demoApollo(clock.start),
+    research: demoResearch(clock),
     usage: generateLedger(clock, {
       meetings: seeds.filter((seed) => seed.meeting.status === "completed").map((seed) => ({ id: seed.meeting.id, title: seed.meeting.title })),
       bases: bases.map((base) => ({ id: base.id, name: base.name })),

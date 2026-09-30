@@ -42,8 +42,10 @@ function websiteError(value: string): string | null {
   } catch { return "Enter a full website address, e.g. https://company.com"; }
 }
 
-export function MeetingPrepPanel({ event, canEdit = true, onOpenProviders, onOpenOrganization }: {
+export function MeetingPrepPanel({ event, canEdit = true, initialSides, onOpenProviders, onOpenOrganization }: {
   event: CachedCalendarEvent;
+  /** Sides to start from (e.g. people marked as theirs in Research) when no saved briefing has corrections. */
+  initialSides?: AttendeeSides;
   canEdit?: boolean;
   /** Shown on setup errors (e.g. no Exa key). Pass only for owners/admins. */
   onOpenProviders?(): void;
@@ -64,7 +66,7 @@ export function MeetingPrepPanel({ event, canEdit = true, onOpenProviders, onOpe
   const [textProfiles, setTextProfiles] = useState<KnowledgeTextProfile[]>([]);
   const [textProfileId, setTextProfileId] = useState("");
   // Who's-who corrections (attendee key → ours/theirs); sent with the briefing and kept in it.
-  const [sides, setSides] = useState<AttendeeSides>({});
+  const [sides, setSides] = useState<AttendeeSides>(() => initialSides ?? {});
   const [history, setHistory] = useState<PrepHistory | null>(null);
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState<PrepStage | null>(null);
@@ -86,7 +88,7 @@ export function MeetingPrepPanel({ event, canEdit = true, onOpenProviders, onOpe
       .then((saved) => {
         setReport(saved);
         if (saved) setTab("briefing");
-        if (saved && isReportV2(saved)) setSides(sidesFromReport(saved.whos_who));
+        if (saved && isReportV2(saved)) setSides((current) => ({ ...sidesFromReport(saved.whos_who), ...current }));
       })
       .catch(() => setLoadError("A previous briefing could not be loaded. You can generate a new one."))
       .finally(() => setLoadingReport(false));

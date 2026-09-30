@@ -22,12 +22,13 @@ const SUGGESTED_PROMPTS = [
 ];
 const CITATION_PATTERN = /\[K(\d+)\]/g;
 
-/** Renders an answer as paragraphs and bullets, turning [K1] markers into citation chips. */
-function AnswerText({ text, citations, onCite }: { text: string; citations: KnowledgeSource[]; onCite?(index: number): void }) {
+/** Renders an answer as paragraphs and bullets, turning [K1] markers (or another `marker` letter) into citation chips. */
+export function AnswerText({ text, citations, onCite, marker = "K" }: { text: string; citations: readonly unknown[]; onCite?(index: number): void; marker?: "K" | "S" }) {
+  const pattern = marker === "K" ? CITATION_PATTERN : /\[S(\d+)\]/g;
   const inline = (line: string, key: string): ReactNode[] => {
     const parts: ReactNode[] = [];
     let last = 0;
-    for (const match of line.matchAll(CITATION_PATTERN)) {
+    for (const match of line.matchAll(pattern)) {
       const index = Number(match[1]);
       if (match.index > last) parts.push(line.slice(last, match.index));
       parts.push(citations[index - 1] && onCite

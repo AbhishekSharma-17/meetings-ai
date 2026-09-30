@@ -70,26 +70,42 @@ export function useMicrophoneCheck() {
 
 export type MicrophoneCheck = ReturnType<typeof useMicrophoneCheck>;
 
+/** Demo mode: a gentle simulated level so the preview looks like the real microphone check. */
+function demoLevel(): number {
+  const t = Date.now() / 1000;
+  return Math.max(0.04, Math.min(0.95, 0.4 + 0.2 * Math.sin(t * 2.3) + 0.1 * Math.sin(t * 6.1 + 1.3)));
+}
+
 export function InPersonMicCheck({ check, showPicker, demo }: { check: MicrophoneCheck; showPicker: boolean; demo: boolean }) {
-  if (demo) return <div className="ip-mic" aria-labelledby="ip-mic-title">
-    <h3 id="ip-mic-title">Microphone</h3>
+  return <section className="ip-section" aria-labelledby="ip-mic-title">
+    <h3 id="ip-mic-title" className="ip-section-title">Microphone</h3>
+    {demo ? <DemoMicrophone /> : <MicrophoneState check={check} showPicker={showPicker} />}
+  </section>;
+}
+
+function DemoMicrophone() {
+  const level = useLevel(demoLevel, true);
+  return <>
+    <InPersonLevel level={level} label="Microphone level" />
     <p className="field-hint">Demo: no microphone is used. Audio, captions and the transcript are simulated.</p>
-  </div>;
-  return <div className="ip-mic" aria-labelledby="ip-mic-title">
-    <h3 id="ip-mic-title">Microphone</h3>
-    {check.status === "ready" ? <>
-      {showPicker && check.devices.length > 1 ? <UiSelect id="ip-mic-device" label="Input device" value={check.deviceId} onChange={check.choose}
-        options={check.devices.map((device) => ({ value: device.deviceId, label: device.label }))} /> : null}
-      <InPersonLevel level={check.level} label="Microphone level" />
-      <p className="field-hint">Speak for a moment: the bar should move. Place the device in the middle of the table.</p>
-    </> : check.status === "error" && check.problem ? <Alert tone="danger" title={check.problem.title}
-      actions={<button type="button" className="button secondary" onClick={() => void check.request(check.deviceId)}><RefreshCw aria-hidden="true" /> Try again</button>}>
-      {check.problem.detail}
-    </Alert> : <div className="ip-mic-idle">
-      <p className="field-hint">Your browser asks for permission first. Nothing is recorded until you start.</p>
-      <button type="button" className="button secondary" disabled={check.status === "requesting"} onClick={() => void check.request(check.deviceId)}>
-        <Mic aria-hidden="true" />{check.status === "requesting" ? "Waiting for permission…" : "Allow microphone"}
-      </button>
-    </div>}
+  </>;
+}
+
+function MicrophoneState({ check, showPicker }: { check: MicrophoneCheck; showPicker: boolean }) {
+  if (check.status === "ready") return <>
+    {showPicker && check.devices.length > 1 ? <UiSelect id="ip-mic-device" label="Input device" value={check.deviceId} onChange={check.choose}
+      options={check.devices.map((device) => ({ value: device.deviceId, label: device.label }))} /> : null}
+    <InPersonLevel level={check.level} label="Microphone level" />
+    <p className="field-hint">Speak for a moment: the bar should move. Place the device in the middle of the table.</p>
+  </>;
+  if (check.status === "error" && check.problem) return <Alert tone="danger" title={check.problem.title}
+    actions={<button type="button" className="button secondary sm" onClick={() => void check.request(check.deviceId)}><RefreshCw aria-hidden="true" />Try again</button>}>
+    {check.problem.detail}
+  </Alert>;
+  return <div className="ip-mic-idle">
+    <p className="field-hint">Your browser asks for permission first. Nothing is recorded until you start.</p>
+    <button type="button" className="button secondary" disabled={check.status === "requesting"} onClick={() => void check.request(check.deviceId)}>
+      <Mic aria-hidden="true" />{check.status === "requesting" ? "Waiting for permission…" : "Allow microphone"}
+    </button>
   </div>;
 }

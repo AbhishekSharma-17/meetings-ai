@@ -41,7 +41,7 @@ export function InPersonCalendarMark({ link }: { link: InPersonCalendarLink | nu
 export function InPersonEventLink({ link, onOpenMeeting }: { link: InPersonCalendarLink | null; onOpenMeeting?(id: string): void }) {
   if (!link) return null;
   return <div className="calendar-detail-block ip-event-link" data-status={link.status}>
-    <p className="ip-event-link-status"><span className="ip-chip"><Users aria-hidden="true" />In person</span><b>{statusWords[link.status]}</b></p>
+    <p className="ip-event-link-status"><span className="tag ip-chip"><Users aria-hidden="true" />In person</span><b>{statusWords[link.status]}</b></p>
     {link.title ? <p className="field-hint">{link.title}</p> : null}
     {onOpenMeeting ? <button type="button" className="button secondary sm" onClick={() => onOpenMeeting(link.meeting_id)}>Open recording <ArrowRight aria-hidden="true" /></button> : null}
   </div>;

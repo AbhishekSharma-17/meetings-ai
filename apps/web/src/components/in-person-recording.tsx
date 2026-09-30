@@ -2,18 +2,19 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Dialog } from "@base-ui/react/dialog";
-import { Bookmark, CircleStop, CloudOff, Pause, Play, RefreshCw, RotateCw } from "lucide-react";
+import { Bookmark, CircleStop, Pause, Play, RefreshCw } from "lucide-react";
 import type { RecordingController, RecorderSnapshot } from "@/lib/in-person-controller";
 import { isHandheld, watchLowBattery } from "@/lib/in-person-media";
 import type { InPersonSession } from "@/lib/in-person-types";
-import { Alert } from "./ui/feedback";
+import { Alert, Badge, LoadingRow, type Tone } from "./ui/feedback";
+import { PageHeader } from "./ui/page-header";
+import { SettingsToast, type SettingsNotice } from "./settings-toast";
 import { InPersonLevel } from "./in-person-level";
 import { InPersonCaptions } from "./in-person-captions";
 import { formatClock, useLevel, useRecorderSnapshot, useSessionPoll, useTicker } from "./use-in-person";
 
 const CAPTION_POLL_MS = 5_000;
 const TIMER_TICK_MS = 500;
-const TOAST_MS = 4_000;
 
 export function uploadLabel(upload: RecorderSnapshot["upload"]): string {
   if (upload.state === "offline") return "Offline — keeping audio on this device";
@@ -30,6 +31,30 @@ function uploadDetail(upload: RecorderSnapshot["upload"]): string | null {
   return null;
 }
 
+function uploadTone(upload: RecorderSnapshot["upload"]): Tone {
+  if (upload.state === "offline" || upload.state === "retrying") return "warning";
+  if (upload.state === "error") return "danger";
+  if (upload.state === "uploading" && upload.pending > 1) return "neutral";
+  return "success";
+}
+
+type Status = { label: string; tone: Tone; dot: boolean };
+
+/** The page header's status badge: a word and a tone, never colour alone. */
+export function recorderStatus(snapshot: RecorderSnapshot): Status {
+  if (snapshot.phase === "stopping" || snapshot.phase === "idle") return { label: "Finishing", tone: "neutral", dot: false };
+  if (snapshot.phase === "paused") return { label: "Paused", tone: "warning", dot: false };
+  if (snapshot.phase === "interrupted") return { label: "Stopped", tone: "warning", dot: false };
+  if (snapshot.upload.state === "offline") return { label: "Offline — saving on this device", tone: "neutral", dot: true };
+  return { label: "Recording", tone: "danger", dot: true };
+}
+
+function finishingLabel(upload: RecorderSnapshot["upload"]): string {
+  if (upload.state === "offline") return "Waiting for a connection to upload the rest…";
+  if (upload.pending) return `Uploading the last ${upload.pending === 1 ? "piece" : `${upload.pending} pieces`}…`;
+  return "Finishing…";
+}
+
 export function InPersonRecording({ controller, session, onStopped, onResumeEngine }: {
   controller: RecordingController;
   session: InPersonSession;
@@ -44,7 +69,7 @@ export function InPersonRecording({ controller, session, onStopped, onResumeEngi
   const level = useLevel(readLevel, recording);
   const poll = useSessionPoll(session.meeting_id, CAPTION_POLL_MS, active, session);
   const [confirming, setConfirming] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [notice, setNotice] = useState<SettingsNotice | null>(null);
   const [lowBattery, setLowBattery] = useState(false);
   const [resumeProblem, setResumeProblem] = useState<string | null>(null);
   const [resuming, setResuming] = useState(false);
@@ -53,11 +78,6 @@ export function InPersonRecording({ controller, session, onStopped, onResumeEngi
   useTicker(TIMER_TICK_MS, recording);
 
   useEffect(() => watchLowBattery(setLowBattery), []);
-  useEffect(() => {
-    if (!toast) return;
-    const timer = window.setTimeout(() => setToast(null), TOAST_MS);
-    return () => window.clearTimeout(timer);
-  }, [toast]);
 
   const finish = useCallback(async (stopFirst: boolean) => {
     if (stopping.current) return;
@@ -78,7 +98,7 @@ export function InPersonRecording({ controller, session, onStopped, onResumeEngi
 
   function mark() {
     const moment = controller.markMoment();
-    setToast(`Moment marked at ${formatClock(moment.atMs)}`);
+    setNotice({ text: `Moment marked at ${formatClock(moment.atMs)}`, tone: "success" });
   }
 
   async function resumeEngine() {
@@ -91,65 +111,68 @@ export function InPersonRecording({ controller, session, onStopped, onResumeEngi
   const detail = uploadDetail(upload);
   const paused = snapshot.phase === "paused";
   const finishing = snapshot.phase === "stopping" || snapshot.phase === "idle";
-  const barLabel = finishing ? "Finishing" : paused ? "Paused" : snapshot.phase === "interrupted" ? "Stopped" : "Recording";
-  return <div className="ip-screen ip-recording" data-phase={snapshot.phase}>
-    <div className="ip-live-bar" data-state={recording ? "live" : "held"}>
-      <span className="ip-live-dot" aria-hidden="true" />
-      <Dialog.Title className="ip-live-title">{barLabel}</Dialog.Title>
-      <span className="ip-live-meeting">{session.title}</span>
-    </div>
+  const status = recorderStatus(snapshot);
+  return <>
+    <PageHeader eyebrow="In-person recording" titleId="ip-recorder-title" title={session.title}
+      badge={<Badge tone={status.tone} dot={status.dot}>{status.label}</Badge>}
+      description="Stop when the meeting ends. The transcript and speaker suggestions follow a few minutes later." />
 
-    <div className="ip-recording-body">
-      <section className="ip-meter-block" aria-label="Recording time and level">
-        <p className="ip-timer tabular" aria-live="off">{formatClock(controller.elapsedMs())}</p>
-        <InPersonLevel level={level} paused={!recording} label="Input level" />
-        <p className="ip-upload" data-state={upload.state}>
-          {upload.state === "offline" ? <CloudOff aria-hidden="true" /> : upload.state === "retrying" ? <RotateCw aria-hidden="true" /> : null}
-          <span role="status" data-testid="upload-status">{uploadLabel(upload)}</span>
-        </p>
-        {detail ? <p className="field-hint ip-upload-detail">{detail}</p> : null}
-        {upload.state === "error" || upload.state === "retrying" ? <button type="button" className="button secondary sm" onClick={() => controller.retryUploads()}><RefreshCw aria-hidden="true" /> Try again now</button> : null}
+    <div className="ip-recorder-body">
+      {snapshot.phase === "interrupted" ? <Alert tone="warning" title="Recording stopped" actions={<>
+        <button type="button" className="button primary sm" disabled={resuming} onClick={() => void resumeEngine()}><Play aria-hidden="true" />{resuming ? "Starting…" : "Resume recording"}</button>
+        <button type="button" className="button secondary sm" onClick={() => setConfirming(true)}>Stop and transcribe</button>
+      </>}>{snapshot.interruption} Everything recorded so far is safe.{resumeProblem ? ` ${resumeProblem}` : ""}</Alert> : null}
+      {snapshot.stopError ? <Alert tone="danger" title="The recording has not finished yet" actions={<button type="button" className="button secondary sm" onClick={() => void finish(false)}>Try again</button>}>{snapshot.stopError}</Alert> : null}
+
+      <section className="card ip-session" aria-label="Time and input level">
+        <div className="card-body ip-session-body">
+          <div className="ip-clock">
+            <div>
+              <p className="stat-label">Recorded time</p>
+              <p className="ip-timer tabular" aria-live="off">{formatClock(controller.elapsedMs())}</p>
+            </div>
+            <span role="status" className="ip-upload" data-testid="upload-status"><Badge tone={uploadTone(upload)} dot>{uploadLabel(upload)}</Badge></span>
+          </div>
+          <InPersonLevel level={level} paused={!recording} label="Input level" />
+          {detail || upload.state === "error" || upload.state === "retrying" ? <div className="ip-upload-detail">
+            {detail ? <p className="field-hint">{detail}</p> : null}
+            {upload.state === "error" || upload.state === "retrying" ? <button type="button" className="button secondary sm" onClick={() => controller.retryUploads()}><RefreshCw aria-hidden="true" />Try again now</button> : null}
+          </div> : null}
+          {snapshot.moments.length ? <div className="ip-moments">
+            <h2 className="field-label">Moments</h2>
+            <ul className="tag-list" aria-label="Marked moments">{snapshot.moments.map((moment, index) => <li key={`${moment.atMs}-${index}`} className="tag">
+              <Bookmark aria-hidden="true" /><span className="tabular">{formatClock(moment.atMs)}</span>{moment.saved ? null : <span className="text-tertiary">· saving…</span>}
+            </li>)}</ul>
+          </div> : null}
+        </div>
+        <div className="card-footer ip-controls">
+          {finishing ? <LoadingRow>{finishingLabel(upload)}</LoadingRow> : <>
+            {paused ? <button type="button" className="button secondary" onClick={() => controller.resume()}><Play aria-hidden="true" />Resume</button>
+              : <button type="button" className="button secondary" disabled={!recording} onClick={() => controller.pause()}><Pause aria-hidden="true" />Pause</button>}
+            <button type="button" className="button secondary" disabled={!recording && !paused} onClick={mark}><Bookmark aria-hidden="true" />Mark moment</button>
+            <button type="button" className="button danger" onClick={() => setConfirming(true)}><CircleStop aria-hidden="true" />Stop</button>
+          </>}
+        </div>
       </section>
 
-      <div className="ip-notes">
-        {snapshot.phase === "interrupted" ? <Alert tone="warning" title="Recording stopped" actions={<>
-          <button type="button" className="button primary" disabled={resuming} onClick={() => void resumeEngine()}><Play aria-hidden="true" />{resuming ? "Starting…" : "Resume recording"}</button>
-          <button type="button" className="button secondary" onClick={() => setConfirming(true)}>Stop and transcribe</button>
-        </>}>{snapshot.interruption} Everything recorded so far is safe.{resumeProblem ? ` ${resumeProblem}` : ""}</Alert> : null}
-        {snapshot.stopError ? <Alert tone="danger" title="The recording has not finished yet" actions={<button type="button" className="button secondary" onClick={() => void finish(false)}>Try again</button>}>{snapshot.stopError}</Alert> : null}
-        {handheld ? <Alert tone="neutral" role="note">Keep this screen on and this page open. Locking the phone or switching apps may stop the recording.</Alert>
-          : <Alert tone="neutral" role="note">Keep this tab open until you stop. Audio is saved on this device as you go.</Alert>}
-        {lowBattery ? <Alert tone="warning">Battery is below 15%. Plug in to keep recording.</Alert> : null}
-        {snapshot.storage === "memory" ? <Alert tone="warning">This browser can&apos;t keep audio on the device. Leave this page open until uploads show Saved.</Alert> : null}
-        {poll.error && active ? <p className="field-hint">Live preview paused: {poll.error}</p> : null}
-      </div>
+      {handheld ? <Alert tone="neutral" role="note">Keep this screen on and this page open. Locking the phone or switching apps may stop the recording.</Alert>
+        : <Alert tone="neutral" role="note">Keep this tab open until you stop. Audio is saved on this device as you go.</Alert>}
+      {lowBattery ? <Alert tone="warning">Battery is below 15%. Plug in to keep recording.</Alert> : null}
+      {snapshot.storage === "memory" ? <Alert tone="warning">This browser can&apos;t keep audio on the device. Leave this page open until uploads show Saved.</Alert> : null}
 
-      {snapshot.moments.length ? <section className="ip-moments" aria-label="Marked moments">
-        <h3>Moments</h3>
-        <ul>{snapshot.moments.map((moment, index) => <li key={`${moment.atMs}-${index}`}><Bookmark aria-hidden="true" /><span className="tabular">{formatClock(moment.atMs)}</span>{moment.saved ? null : <small>Saving…</small>}</li>)}</ul>
-      </section> : null}
-
-      <InPersonCaptions captions={poll.session?.captions ?? []} />
+      <InPersonCaptions captions={poll.session?.captions ?? []} problem={poll.error && active ? poll.error : null} />
     </div>
 
-    {toast ? <p className="ip-toast" role="status">{toast}</p> : null}
-    <footer className="ip-controls">
-      {finishing ? <p className="ip-finishing" role="status"><span className="spinner" aria-hidden="true" />{upload.state === "offline" ? "Waiting for a connection to upload the rest…" : upload.pending ? `Uploading the last ${upload.pending === 1 ? "piece" : `${upload.pending} pieces`}…` : "Finishing…"}</p> : <>
-        {paused ? <button type="button" className="button secondary" onClick={() => controller.resume()}><Play aria-hidden="true" />Resume</button>
-          : <button type="button" className="button secondary" disabled={!recording} onClick={() => controller.pause()}><Pause aria-hidden="true" />Pause</button>}
-        <button type="button" className="button secondary" disabled={!recording && !paused} onClick={mark}><Bookmark aria-hidden="true" />Mark moment</button>
-        <button type="button" className="button danger" onClick={() => setConfirming(true)}><CircleStop aria-hidden="true" />Stop</button>
-      </>}
-    </footer>
+    <SettingsToast notice={notice} onDismiss={() => setNotice(null)} />
     <StopConfirm open={confirming} onCancel={() => setConfirming(false)} onConfirm={() => void finish(true)} />
-  </div>;
+  </>;
 }
 
 function StopConfirm({ open, onCancel, onConfirm }: { open: boolean; onCancel(): void; onConfirm(): void }) {
   return <Dialog.Root open={open} onOpenChange={(next) => { if (!next) onCancel(); }}>
     <Dialog.Portal>
-      <Dialog.Backdrop className="dialog-backdrop ip-confirm-backdrop" />
-      <Dialog.Popup className="dialog ip-confirm" role="alertdialog">
+      <Dialog.Backdrop className="dialog-backdrop" />
+      <Dialog.Popup className="dialog" role="alertdialog">
         <Dialog.Title className="dialog-title">Stop and create the transcript?</Dialog.Title>
         <Dialog.Description className="dialog-intro">Recording ends and the rest of the audio is uploaded. The transcript and speaker suggestions usually take a few minutes.</Dialog.Description>
         <div className="dialog-footer">

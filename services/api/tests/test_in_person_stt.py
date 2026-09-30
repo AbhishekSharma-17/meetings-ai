@@ -286,12 +286,15 @@ def test_v29_database_upgrades_to_v30_with_in_person_tables(tmp_path) -> None:
     with database.engine.begin() as connection:
         connection.execute(text("DROP TABLE in_person_chunks"))
         connection.execute(text("DROP TABLE in_person_sessions"))
-        connection.execute(text("DELETE FROM schema_version WHERE version = 30"))
+        # Back to a real v29 database: later versions' tables go too (v31: research profiles).
+        for table in ("research_messages", "research_conversations", "research_profiles"):
+            connection.execute(text(f"DROP TABLE {table}"))
+        connection.execute(text("DELETE FROM schema_version WHERE version >= 30"))
     database.engine.dispose()
     upgraded = Database(url)
     upgraded.migrate()
     with upgraded.session_factory() as session:
-        assert max(session.execute(select(SchemaVersionRow.version)).scalars().all()) == 30 == Database.SCHEMA_VERSION
+        assert max(session.execute(select(SchemaVersionRow.version)).scalars().all()) == Database.SCHEMA_VERSION >= 30
     with upgraded.engine.connect() as connection:
         names = set(upgraded.engine.dialect.get_table_names(connection))
     assert {"in_person_sessions", "in_person_chunks"} <= names

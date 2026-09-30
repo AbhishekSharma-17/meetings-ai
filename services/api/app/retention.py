@@ -11,7 +11,7 @@ from sqlalchemy import delete, select
 from .database import (
     AuditEventRow, CalendarEventCacheRow, Database, KnowledgeBaseRow, KnowledgeChunkRow,
     KnowledgeConversationRow, KnowledgeDocumentRow, KnowledgeMessageRow, MeetingPrepInputRow,
-    MeetingPrepRow, MeetingRow, MeetingTenantRow, WorkspaceRetentionRow,
+    MeetingPrepRow, MeetingRow, MeetingTenantRow, ResearchConversationRow, ResearchMessageRow, WorkspaceRetentionRow,
 )
 from .tenant import tenant_scope
 
@@ -124,6 +124,15 @@ class RetentionService:
                                 KnowledgeMessageRow.conversation_id.in_(conversation_ids)))
                             session.execute(delete(KnowledgeConversationRow).where(
                                 KnowledgeConversationRow.id.in_(conversation_ids)))
+                        # Research chats follow the same chat retention.
+                        research_ids = session.execute(select(ResearchConversationRow.id).where(
+                            ResearchConversationRow.organization_id == policy.organization_id,
+                            ResearchConversationRow.updated_at < cutoff).limit(100)).scalars().all()
+                        if research_ids:
+                            session.execute(delete(ResearchMessageRow).where(
+                                ResearchMessageRow.conversation_id.in_(research_ids)))
+                            session.execute(delete(ResearchConversationRow).where(
+                                ResearchConversationRow.id.in_(research_ids)))
                     if conversation_ids:
                         self.audit.append(None, "retention.chats.deleted", "/v1/knowledge-bases", 204,
                                           organization_id=organization_id)

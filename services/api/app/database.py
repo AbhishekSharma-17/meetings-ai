@@ -1032,6 +1032,63 @@ class InPersonChunkRow(Base):
     preview_text: Mapped[str | None] = mapped_column(Text)
 
 
+class ResearchProfileRow(Base):
+    """A company or person looked up in Apollo and kept for the workspace (v31).
+
+    ``data`` holds parsed Apollo facts only (never emails or phone numbers). Shared with the workspace.
+    """
+
+    __tablename__ = "research_profiles"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)  # company | person
+    apollo_id: Mapped[str | None] = mapped_column(String(80))
+    domain: Mapped[str | None] = mapped_column(String(200), index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    title: Mapped[str | None] = mapped_column(String(200))
+    company: Mapped[str | None] = mapped_column(String(200))
+    data: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_by: Mapped[str | None] = mapped_column(String(36))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    apollo_calls: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    __table_args__ = (UniqueConstraint("organization_id", "kind", "apollo_id", name="uq_research_profile_apollo"),)
+
+
+class ResearchConversationRow(Base):
+    """One person's Ask AI chat about a saved research profile (v31); never visible to teammates."""
+
+    __tablename__ = "research_conversations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+    profile_id: Mapped[str] = mapped_column(String(36), ForeignKey("research_profiles.id"), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ResearchMessageRow(Base):
+    """A question or cited answer in a research chat (v31)."""
+
+    __tablename__ = "research_messages"
+    __table_args__ = (UniqueConstraint("conversation_id", "position"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(String(36), ForeignKey("research_conversations.id"), nullable=False, index=True)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    citations: Mapped[list[dict]] = mapped_column(JSON, nullable=False)
+    provider: Mapped[str | None] = mapped_column(String(100))
+    model: Mapped[str | None] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class SchemaVersionRow(Base):
     __tablename__ = "schema_version"
 
@@ -1088,6 +1145,7 @@ SCHEMA_TABLES_BY_VERSION: dict[int, tuple[str, ...]] = {
     28: ("meeting_coverage",),
     29: ("workspace_integrations", "apollo_cache"),
     30: ("in_person_sessions", "in_person_chunks"),
+    31: ("research_profiles", "research_conversations", "research_messages"),
 }
 
 SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
@@ -1160,6 +1218,9 @@ SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
     "apollo_cache": ("id", "organization_id", "kind", "cache_key", "payload", "fetched_at", "expires_at"),
     "in_person_sessions": ("meeting_id", "organization_id", "recorded_by", "device", "mime_type", "consent_at", "consent_notice_shown", "status", "started_at", "stopped_at", "last_activity_at", "last_seq", "received_chunks", "duration_ms", "total_bytes", "expected_people", "moments", "finalize_stage", "finalize_message", "parts_total", "parts_done", "attempts", "speaker_labels", "name_suggestions", "error"),
     "in_person_chunks": ("meeting_id", "seq", "organization_id", "mime_type", "stream_start", "bytes", "byte_size", "duration_ms", "received_at", "preview_text"),
+    "research_profiles": ("id", "organization_id", "kind", "apollo_id", "domain", "name", "title", "company", "data", "created_by", "created_at", "updated_at", "fetched_at", "apollo_calls"),
+    "research_conversations": ("id", "organization_id", "profile_id", "user_id", "title", "created_at", "updated_at"),
+    "research_messages": ("id", "conversation_id", "position", "role", "content", "citations", "provider", "model", "created_at"),
 }
 
 
@@ -1242,7 +1303,7 @@ def _migrate_to_v22(connection) -> None:
 class Database:
     """Upgrades known schemas and rejects unknown or incomplete ones."""
 
-    SCHEMA_VERSION = 30
+    SCHEMA_VERSION = 31
 
     def __init__(self, url: str) -> None:
         engine_options: dict[str, object] = {"pool_pre_ping": True}

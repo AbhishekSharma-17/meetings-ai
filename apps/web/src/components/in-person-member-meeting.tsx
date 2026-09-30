@@ -71,7 +71,7 @@ export function InPersonMemberMeeting({ meetingId, backLabel, onBack }: { meetin
       description={<InPersonRecordMeta session={recording.session} />} />
     {error ? <p className="form-error" role="alert">{error}</p> : null}
     <div className="record-alerts"><InPersonStatusAlert session={recording.session} onChanged={recording.setSession} /></div>
-    {meeting ? <div className="stack ip-member-stack">
+    {meeting ? <div className="stack-lg">
       {done ? <InPersonSpeakerNames meetingId={meetingId} onApplied={() => void loadTranscript()} /> : null}
       <section className="card" aria-labelledby="ip-member-minutes">
         <div className="card-header"><div><h2 id="ip-member-minutes">Minutes</h2><p>Drafted from the transcript and reviewed by a workspace admin.</p></div></div>

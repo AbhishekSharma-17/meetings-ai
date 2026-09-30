@@ -114,6 +114,8 @@ from .apollo_integration import ApolloIntegrationService
 from .routes_integrations import register_integration_routes
 from .in_person_wiring import install_in_person
 from .routes_in_person import in_person_route_allowed
+from .research_wiring import install_research
+from .routes_research import research_route_allowed
 from .stt_route import STTRouteError
 from .tenant import tenant_scope
 from .workspace_service import WorkspacePatch, WorkspacePublic, WorkspaceMemberPublic, WorkspaceService
@@ -364,6 +366,12 @@ def create_app(
         app, database=database, repository=repository, meeting_service=meeting_service, providers=service,
         calendar_schedule=calendar_schedule, call_coordination=call_coordination, jobs=app.state.background_jobs,
     )
+    # Research (Apollo Explorer): look up companies and people, keep profiles, ask AI about them.
+    install_research(
+        app, database=database, apollo=apollo_integration, usage=usage, repository=repository,
+        meeting_prep=meeting_prep, documents=document_service, providers=service, ai_settings=ai_settings,
+        vault=vault, identities=organization_identity,
+    )
 
     @app.middleware("http")
     async def require_admin(request: Request, call_next):
@@ -432,6 +440,7 @@ def create_app(
                         or (method == "GET" and re.fullmatch(r"/v1/meetings/[0-9a-f-]+(?:/transcript|/leave)?", path))
                         or member_route_allowed(method, path)
                         or in_person_route_allowed(method, path, actor.role)
+                        or research_route_allowed(method, path, actor.role)
                     )
                     if not allowed:
                         return JSONResponse(status_code=403, content={"detail": "workspace role does not permit this action"})

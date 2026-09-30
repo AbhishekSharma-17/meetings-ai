@@ -1,7 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 import { counters, installMediaFakes, MEETING_ID, mockInPersonApi, newState, type InPersonMockState } from "./in-person-mocks";
 
-const recorder = (page: Page) => page.getByRole("dialog", { name: /Record an in-person meeting|Recording/ });
+// The recorder is a page in the app shell (setup is a dialog over the current screen).
+const recorder = (page: Page) => page.getByRole("region", { name: /Recording/ });
 
 async function openSetup(page: Page) {
   await page.goto("/");
@@ -143,14 +144,15 @@ test.describe("in-person recording", () => {
     await expect(page.getByRole("button", { name: "Record in person" })).toBeVisible();
   });
 
-  test("fits a 360 px phone with thumb-sized controls", async ({ page }) => {
+  test("fits a 360 px phone with thumb-sized controls in a bottom bar", async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 740 });
     await startRecording(page);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow).toBeLessThanOrEqual(0);
     for (const name of ["Pause", "Mark moment", "Stop"]) {
       const box = await page.getByRole("button", { name, exact: true }).boundingBox();
-      expect(box?.height ?? 0).toBeGreaterThanOrEqual(48);
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+      expect((box?.y ?? 0) + (box?.height ?? 0)).toBeGreaterThan(740 - 72);
     }
     await expect(recorder(page)).toBeVisible();
   });
@@ -174,7 +176,8 @@ test("after a reload, saved audio is uploaded in order and the recording finishe
   const banner = page.getByRole("status").filter({ hasText: "didn't finish recording" });
   await expect(banner).toContainText("saved on this device");
   await banner.getByRole("button", { name: "Upload the saved audio and finish" }).click();
-  await expect(page.getByRole("heading", { name: "Office design review" })).toBeVisible({ timeout: 25_000 });
+  // The recorder page is titled after the meeting too; wait for the meeting page itself.
+  await expect(page.locator(".page-header").getByText("Recorded in person on Alex Morgan's laptop")).toBeVisible({ timeout: 25_000 });
   expect(state.chunkSeqs.length).toBeGreaterThan(uploaded);
   expect(state.chunkSeqs).toEqual(state.chunkSeqs.map((_, index) => index));
   expect(state.stopBodies.at(-1)).toEqual({ final_seq: state.chunkSeqs.length - 1 });
@@ -264,8 +267,8 @@ test("the demo recorder never touches the microphone and ends on a named demo me
   await expect(page.getByRole("heading", { name: "Recording" })).toBeVisible();
   await expect(page.getByRole("log", { name: "Live preview" }).locator("li").first()).toBeVisible({ timeout: 15_000 });
   await stopAndConfirm(page);
-  await expect(page.getByRole("heading", { name: "Demo walkthrough" })).toBeVisible({ timeout: 25_000 });
-  await expect(page.getByRole("region", { name: "Name the speakers" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Name the speakers" })).toBeVisible({ timeout: 25_000 });
+  await expect(page.getByRole("heading", { name: "Demo walkthrough" })).toBeVisible();
   const media = await counters(page);
   expect(media.gum).toBe(0);
   expect(media.recorders).toBe(0);

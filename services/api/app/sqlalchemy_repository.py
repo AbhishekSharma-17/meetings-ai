@@ -48,6 +48,8 @@ from .database import (
     KnowledgeBaseRow,
     KnowledgeConversationRow,
     KnowledgeMessageRow,
+    ResearchConversationRow,
+    ResearchMessageRow,
     MeetingDeliverySettingsRow,
     MeetingMinutesRow,
     MeetingMinutesEvidenceRow,
@@ -167,6 +169,17 @@ class SQLAlchemyRepository:
                 KnowledgeMessageRow.conversation_id.in_(cited_conversations)))
             session.execute(delete(KnowledgeConversationRow).where(
                 KnowledgeConversationRow.id.in_(cited_conversations)))
+        # Research chats (Apollo Explorer) can quote the meeting too.
+        research = session.execute(select(ResearchMessageRow).join(
+            ResearchConversationRow, ResearchMessageRow.conversation_id == ResearchConversationRow.id,
+        ).where(ResearchConversationRow.organization_id == str(current_organization_id()))).scalars().all()
+        cited_research = {
+            message.conversation_id for message in research
+            if any(isinstance(citation, dict) and citation.get("meeting_id") == key for citation in (message.citations or []))
+        }
+        if cited_research:
+            session.execute(delete(ResearchMessageRow).where(ResearchMessageRow.conversation_id.in_(cited_research)))
+            session.execute(delete(ResearchConversationRow).where(ResearchConversationRow.id.in_(cited_research)))
 
     def list_profiles(self) -> list[ProviderProfile]:
         with self.database.session_factory() as session:

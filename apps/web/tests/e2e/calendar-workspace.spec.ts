@@ -170,10 +170,14 @@ test("saved calendar range and meetings survive a hard reload without another ma
   const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
   const startKey = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, "0")}-01`;
   const meetingStart = new Date(nextMonth.getFullYear(), nextMonth.getMonth(), 12, 12);
+  const meetingDay = `${startKey.slice(0, 8)}12`;
   let syncCalls = 0;
   await page.route("**/v1/calendar/synced?**", (route) => {
-    const requested = new URL(route.request().url()).searchParams.get("start_date");
-    return route.fulfill({ json: { events: requested === startKey ? [{
+    // Any window that contains the meeting's day (a month grid may start in the previous month).
+    const params = new URL(route.request().url()).searchParams;
+    const from = params.get("start_date") ?? "", to = params.get("end_date") ?? from;
+    const inWindow = from <= meetingDay && meetingDay <= to;  // this month's grid never reaches the 12th of next month
+    return route.fulfill({ json: { events: inWindow ? [{
       id: "00000000-0000-4000-8000-000000000088", synced_at: new Date().toISOString(),
       connection_id: "outlook-account", provider: "outlook", event_id: "saved-event", title: "Saved client meeting",
       starts_at: meetingStart.toISOString(), ends_at: new Date(meetingStart.getTime() + 3600_000).toISOString(),

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Building2, CalendarDays, Clock, NotebookPen, Users } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
 import { useUiPreference } from "@/lib/ui-preferences";
-import type { CachedCalendarEvent, CalendarSnapshot } from "@/lib/types";
+import type { AttendeeSides, CachedCalendarEvent, CalendarSnapshot } from "@/lib/types";
 import { CalendarBrandIcon } from "./brand-icons";
 import { CalendlyPill, PlatformMark, PlatformPill, SourceStack } from "./calendar-event-marks";
 import { entryMatches, findEntry, mergeCalendarEvents, viaCalendly, type CalendarEntry } from "./calendar-events";
@@ -21,9 +21,11 @@ export { MeetingPrepPanel } from "./prep-panel";
 
 const listDate: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" };
 
-export function MeetingPrepWorkspace({ identity, initialEvent, onOpenCalendar, onOpenOrganization, onOpenProviders }: {
+export function MeetingPrepWorkspace({ identity, initialEvent, initialSides, onOpenCalendar, onOpenOrganization, onOpenProviders }: {
   identity: string;
   initialEvent?: CachedCalendarEvent | null;
+  /** Who's-who sides chosen elsewhere (Research → Prepare a meeting) for one event. */
+  initialSides?: { eventId: string; sides: AttendeeSides } | null;
   onOpenCalendar(): void;
   onOpenOrganization(): void;
   /** Opens AI providers from setup errors (e.g. no Exa key). Pass only for owners and admins. */
@@ -93,7 +95,7 @@ export function MeetingPrepWorkspace({ identity, initialEvent, onOpenCalendar, o
       <div className="prep-main">
         {selectedEvent ? <>
           <EventSummary entry={selectedEntry ?? { id: selectedEvent.id, event: selectedEvent, sources: [selectedEvent] }} />
-          <MeetingPrepPanel key={selectedEvent.id} event={selectedEvent} onOpenProviders={onOpenProviders} onOpenOrganization={onOpenOrganization} />
+          <MeetingPrepPanel key={selectedEvent.id} event={selectedEvent} initialSides={initialSides?.eventId === selectedEvent.id ? initialSides.sides : undefined} onOpenProviders={onOpenProviders} onOpenOrganization={onOpenOrganization} />
         </> : loading ? <div className="card card-body"><Skeleton lines={4} /></div> : <div className="card"><EmptyState plain icon={<NotebookPen />} title="Select a meeting">Its details and saved briefing appear here.</EmptyState></div>}
       </div>
     </div>}

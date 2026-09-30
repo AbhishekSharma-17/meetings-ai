@@ -15,7 +15,7 @@ export const isInPerson = (meeting: Pick<Meeting, "platform"> | null | undefined
 
 /** The "In person" mark for lists and headers: an icon and a word, never a colour. */
 export function InPersonChip({ className = "" }: { className?: string }) {
-  return <span className={`ip-chip ${className}`.trim()}><Users aria-hidden="true" />In person</span>;
+  return <span className={`tag ip-chip ${className}`.trim()}><Users aria-hidden="true" />In person</span>;
 }
 
 const deviceWords: Record<InPersonDevice, string> = { phone: "phone", laptop: "laptop", unknown: "device" };
@@ -54,9 +54,9 @@ export function useInPersonSession(meetingId: string, enabled: boolean) {
 
 /** Header line: who recorded it on what, and the consent that was given. */
 export function InPersonRecordMeta({ session }: { session: InPersonSession | null }) {
-  if (!session) return <span className="ip-record-meta"><InPersonChip /></span>;
+  if (!session) return <span className="record-meta"><InPersonChip /></span>;
   const agreed = formatFullDateTime(new Date(session.consent.agreed_at));
-  return <span className="ip-record-meta">
+  return <span className="record-meta">
     <InPersonChip />
     <span>{recordedOn(session)}</span>
     <span className="ip-consent-record"><ShieldCheck aria-hidden="true" />Everyone present agreed to be recorded · {agreed} · {session.consent.notice_shown ? "notice shown" : "notice not shown"}</span>
@@ -81,8 +81,8 @@ export function InPersonStatusAlert({ session, onChanged }: { session: InPersonS
   }
   if (session.status === "finalizing") {
     const progress = finalizeProgress(session);
-    return <Alert tone="info" title="Creating the transcript">
-      <span className="ip-inline-progress">{stageLabel(session.finalize?.stage)} · {progress}%</span> You can leave this page; we&apos;ll notify you when the transcript is ready.
+    return <Alert tone="info" title={`Creating the transcript · ${progress}%`}>
+      {stageLabel(session.finalize?.stage)}. You can leave this page; we&apos;ll notify you when the transcript is ready.
     </Alert>;
   }
   if (session.status === "failed") {

@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { Dialog } from "@base-ui/react/dialog";
-import { Mic, X } from "lucide-react";
+import { X } from "lucide-react";
 import type { InPersonSeed } from "@/lib/in-person-types";
 import { ChipInput } from "./ui/chip-input";
 import { SwitchField } from "./ui/switch";
@@ -42,47 +42,44 @@ export function InPersonSetup({ seed, check, demo, laptop, starting, problem, ca
     onStart({ title: title.trim() || DEFAULT_TITLE, expectedPeople: expected, noticeShown: showNotice });
   }
 
-  return <form className="ip-screen ip-setup" onSubmit={submit} noValidate>
-    <header className="ip-setup-head">
-      <div>
-        <p className="eyebrow"><Mic aria-hidden="true" />In person</p>
-        <Dialog.Title className="ip-title">Record an in-person meeting</Dialog.Title>
-        <Dialog.Description className="ip-intro">Record a face-to-face conversation from this device. You get a transcript, speaker names you approve and draft minutes.</Dialog.Description>
-      </div>
-      <button type="button" className="icon-button ip-close" aria-label="Cancel" onClick={onCancel}><X aria-hidden="true" /></button>
-    </header>
-
-    <div className="ip-setup-body">
+  return <>
+    <Dialog.Close className="close-button" aria-label="Cancel" disabled={starting}><X aria-hidden="true" /></Dialog.Close>
+    <Dialog.Title className="dialog-title">Record an in-person meeting</Dialog.Title>
+    <Dialog.Description className="dialog-intro">Record a face-to-face conversation from this device. You get a transcript, speaker names you approve and draft minutes.</Dialog.Description>
+    <form className="ip-setup-form" onSubmit={submit} noValidate>
       <InPersonInstallHint />
-      <div className="field">
-        <label htmlFor="ip-title">Meeting title</label>
-        <input id="ip-title" value={title} maxLength={MAX_TITLE} onChange={(event) => setTitle(event.target.value)} autoComplete="off" />
-      </div>
-      <ChipInput id="ip-expected" label="Who's expected" kind="text" value={expected} onChange={setExpected} maxItems={MAX_EXPECTED} maxItemLength={120}
-        placeholder="Type a name, then comma" labelSuffix={<span className="optional">optional</span>}
-        hint="Names help suggest who is speaking. Nobody is contacted." />
+      <section className="ip-section" aria-labelledby="ip-meeting-heading">
+        <h3 id="ip-meeting-heading" className="sr-only">Meeting</h3>
+        <div className="field">
+          <label htmlFor="ip-title">Meeting title</label>
+          <input id="ip-title" value={title} maxLength={MAX_TITLE} onChange={(event) => setTitle(event.target.value)} autoComplete="off" disabled={starting} />
+        </div>
+        <ChipInput id="ip-expected" label="Who's expected" kind="text" value={expected} onChange={setExpected} maxItems={MAX_EXPECTED} maxItemLength={120}
+          placeholder="Type a name, then comma" labelSuffix={<span className="optional">optional</span>} disabled={starting}
+          hint="Names help suggest who is speaking. Nobody is contacted." />
+      </section>
+
       <InPersonMicCheck check={check} showPicker={laptop} demo={demo} />
 
-      <fieldset className="ip-consent">
-        <legend>Consent</legend>
-        <label className="check-label ip-consent-check">
-          <input type="checkbox" checked={agreed} onChange={(event) => setAgreed(event.target.checked)} required />
-          <span>Everyone present has agreed to be recorded</span>
+      <fieldset className="ip-section">
+        <legend className="ip-section-title">Consent</legend>
+        <label className="choice-card">
+          <input type="checkbox" checked={agreed} onChange={(event) => setAgreed(event.target.checked)} disabled={starting} required />
+          <span><b>Everyone present has agreed to be recorded</b><small>Saved with the meeting, with the time and whether the notice was shown.</small></span>
         </label>
-        <SwitchField id="ip-notice" label="Show a notice to read aloud" description="Shows a short notice in large text you can read to the room." checked={showNotice} onChange={setShowNotice} />
-        {showNotice ? <blockquote className="ip-notice" aria-label="Notice to read aloud">{READ_ALOUD_NOTICE}</blockquote> : null}
-        <p className="field-hint">The consent is saved with the meeting, with the time and whether the notice was shown.</p>
+        <SwitchField id="ip-notice" label="Show a notice to read aloud" description="A short notice you can read to the room before you start." checked={showNotice} onChange={setShowNotice} disabled={starting} />
+        {showNotice ? <Alert tone="neutral" role="note" className="ip-notice" title="Read this aloud">{READ_ALOUD_NOTICE}</Alert> : null}
       </fieldset>
 
       {problem ? <Alert tone={problem.providers ? "warning" : "danger"} title={problem.title}
-        actions={problem.providers && canOpenProviders ? <button type="button" className="button secondary" onClick={onOpenProviders}>Open AI providers</button> : undefined}>
+        actions={problem.providers && canOpenProviders ? <button type="button" className="button secondary sm" onClick={onOpenProviders}>Open AI providers</button> : undefined}>
         {problem.detail}{problem.providers && !canOpenProviders ? " Ask a workspace admin to add a speech-to-text provider." : ""}
       </Alert> : null}
-    </div>
 
-    <footer className="ip-actions">
-      <button type="button" className="button ghost" onClick={onCancel}>Cancel</button>
-      <button type="submit" className="button primary" disabled={!agreed || starting}>{starting ? "Starting…" : "Start recording"}</button>
-    </footer>
-  </form>;
+      <div className="dialog-footer">
+        <button type="button" className="button secondary" onClick={onCancel} disabled={starting}>Cancel</button>
+        <button type="submit" className="button primary" disabled={!agreed || starting}>{starting ? "Starting…" : "Start recording"}</button>
+      </div>
+    </form>
+  </>;
 }

@@ -23,7 +23,7 @@ import { ProvidersIcon } from "./ui-icons";
 import { ThemeSwitcher } from "./theme-switcher";
 import { Dialog } from "@base-ui/react/dialog";
 import { Popover } from "@base-ui/react/popover";
-import { BrainCircuit, Building2, CalendarDays, ChartNoAxesCombined, Check, ChevronsUpDown, Compass, FileCheck2, House, LogOut, Menu, MessagesSquare, Mic, NotebookPen, UserRound, Users, Video, X } from "lucide-react";
+import { BrainCircuit, Building2, CalendarDays, ChartNoAxesCombined, Check, ChevronsUpDown, Compass, FileCheck2, House, LogOut, Menu, MessagesSquare, Mic, NotebookPen, ScanSearch, UserRound, Users, Video, X } from "lucide-react";
 import { Avatar } from "./ui/avatar";
 import { EmptyState, LoadingRow } from "./ui/feedback";
 import { DemoBanner, DemoPill } from "./demo-banner";
@@ -37,11 +37,14 @@ import { TimeZoneIndicator } from "./time-preferences-control";
 import { WorkspaceMenuList } from "./workspace-menu-list";
 import { InPersonRecorder, type InPersonRequest } from "./in-person-flow";
 import { InPersonResumeBanner, usePendingRecording } from "./in-person-resume";
+import { ResearchScreen } from "./research-screen";
+import type { ProfileLinks } from "./research-profile";
+import type { AttendeeSides } from "@/lib/types";
 import { BLANK_SEED } from "./in-person-seed";
 import type { InPersonSeed } from "@/lib/in-person-types";
 
-type View = "dashboard" | "meetings" | "calendar" | "prep" | "providers" | "meeting" | "workspace" | "knowledge" | "observability" | "profile";
-const views: View[] = ["dashboard", "meetings", "calendar", "prep", "providers", "meeting", "workspace", "knowledge", "observability", "profile"];
+type View = "dashboard" | "meetings" | "calendar" | "prep" | "providers" | "meeting" | "workspace" | "knowledge" | "observability" | "profile" | "research";
+const views: View[] = ["dashboard", "meetings", "calendar", "prep", "providers", "meeting", "workspace", "knowledge", "observability", "profile", "research"];
 const isView = (value: unknown): value is View => typeof value === "string" && views.includes(value as View);
 const isString = (value: unknown): value is string => typeof value === "string" && value.length > 0;
 function restoredView(scope: string): View {
@@ -86,6 +89,12 @@ export function AppShell() {
   // The in-person recorder (full screen) and a recording this device left unfinished.
   const [inPersonRequest, setInPersonRequest] = useState<InPersonRequest | null>(null);
   const [inPersonRevision, setInPersonRevision] = useState(0);
+  // Navigating away sends the recorder page to the background (it keeps recording, a banner leads back).
+  const [recorderBackground, setRecorderBackground] = useState<InPersonRequest | null>(null);
+  const [recorderView, setRecorderView] = useState<View>(view);
+  if (recorderView !== view) { setRecorderView(view); setRecorderBackground(inPersonRequest); }
+  // Who's-who sides chosen in Research → Prepare a meeting, applied when meeting prep opens that event.
+  const [prepSides, setPrepSides] = useState<{ eventId: string; sides: AttendeeSides } | null>(null);
 
   const identity = account ? `${account.organization_id}:${account.user_id}` : null;
   // Subscribing here re-renders every screen when the time zone or clock changes.
@@ -112,7 +121,7 @@ export function AppShell() {
         setAccount(current);
         const scope = `${current.organization_id}:${current.user_id}`;
         const restored = restoredView(scope);
-        const allowed = current.role === "owner" || current.role === "admin" ? views : current.role === "viewer" ? ["knowledge", "profile", "meeting"] : ["knowledge", "calendar", "prep", "profile", "meeting"];
+        const allowed = current.role === "owner" || current.role === "admin" ? views : current.role === "viewer" ? ["knowledge", "profile", "meeting"] : ["knowledge", "calendar", "prep", "profile", "meeting", "research"];
         const next = calendarConnected && current.role !== "viewer" ? "calendar" : allowed.includes(restored) ? restored : current.role === "owner" || current.role === "admin" ? "dashboard" : "knowledge";
         if (next === "meeting") {
           const id = readUiPreference(`meetings-ai:active-meeting:${scope}`, "", isString, "session");
@@ -167,7 +176,7 @@ export function AppShell() {
       const current = await meetingsService.getCurrentAccount();
       setLoginPassword(""); setAccount(current); setAuthenticated(true);
       const restored = restoredView(`${current.organization_id}:${current.user_id}`);
-      setView(current.role === "owner" || current.role === "admin" ? restored === "meeting" ? "meetings" : restored : current.role === "viewer" ? "knowledge" : restored === "calendar" || restored === "prep" ? restored : "knowledge");
+      setView(current.role === "owner" || current.role === "admin" ? restored === "meeting" ? "meetings" : restored : current.role === "viewer" ? "knowledge" : restored === "calendar" || restored === "prep" || restored === "research" ? restored : "knowledge");
       setNavigationRestored(true);
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : "Sign in failed.");
@@ -198,7 +207,7 @@ export function AppShell() {
 
   const openMeeting = useCallback((id: string, segmentId?: string) => {
     setActiveMeetingId(id); setFocusSegmentId(segmentId ?? null);
-    setMeetingReturnView(view === "knowledge" || segmentId ? "knowledge" : view === "meetings" ? "meetings" : view === "calendar" ? "calendar" : "dashboard"); setView("meeting");
+    setMeetingReturnView(view === "research" ? "research" : view === "knowledge" || segmentId ? "knowledge" : view === "meetings" ? "meetings" : view === "calendar" ? "calendar" : "dashboard"); setView("meeting");
   }, [view]);
   const openNotification = useCallback((target: NotificationTarget) => {
     if (!identity || !account) return;
@@ -214,7 +223,19 @@ export function AppShell() {
     }
     if (isView(target.view) && (admin || ["calendar", "profile"].includes(target.view))) setView(target.view);
   }, [identity, account, openMeeting]);
-  const recordInPerson = useCallback((seed: InPersonSeed) => setInPersonRequest({ kind: "new", seed }), []);
+  const researchLinks: ProfileLinks = {
+    onOpenMeeting: openMeeting,
+    onOpenPrep: (eventId) => { if (identity) rememberSelection(`meetings-ai:prep-event:${identity}`, eventId); setPrepEvent(null); setFocusNonce((value) => value + 1); setView("prep"); },
+    onOpenKnowledge: (baseId) => { if (identity) rememberSelection(`meetings-ai:knowledge-base:${identity}`, baseId); setFocusNonce((value) => value + 1); setView("knowledge"); },
+    onOpenCalendar: () => setView("calendar"),
+    onPrepared: (result) => {
+      if (identity) rememberSelection(`meetings-ai:prep-event:${identity}`, result.calendar_event_id);
+      setPrepSides({ eventId: result.calendar_event_id, sides: result.attendee_sides });
+      setPrepEvent(null); setFocusNonce((value) => value + 1); setView("prep");
+    },
+  };
+  // A recording already running is brought back to the front instead of starting a second one.
+  const recordInPerson = useCallback((seed: InPersonSeed) => { setRecorderBackground(null); setInPersonRequest((current) => current ?? { kind: "new", seed }); }, []);
   const closeRecorder = useCallback(() => { setInPersonRequest(null); setInPersonRevision((value) => value + 1); pendingRecording.recheck(); }, [pendingRecording]);
   const finishRecording = useCallback((meetingId: string) => {
     setInPersonRequest(null);
@@ -288,10 +309,13 @@ export function AppShell() {
         {demoMode ? <DemoBanner /> : null}
         <header className="topbar">
           <button className="icon-button mobile-nav-trigger" aria-label="Open navigation" onClick={() => setMobileNavOpen(true)}><Menu /></button>
-          <nav className="topbar-context" aria-label="Breadcrumb"><span className="topbar-kicker">{workspace?.display_name ?? "Meetings AI"}</span><span className="topbar-sep" aria-hidden="true">/</span><span className="topbar-location" aria-current="page">{viewTitle[view]}</span></nav>
+          <nav className="topbar-context" aria-label="Breadcrumb"><span className="topbar-kicker">{workspace?.display_name ?? "Meetings AI"}</span><span className="topbar-sep" aria-hidden="true">/</span><span className="topbar-location" aria-current="page">{inPersonRequest !== null && recorderBackground !== inPersonRequest ? "In-person recording" : viewTitle[view]}</span></nav>
           <div className="topbar-actions">{demoMode ? <DemoPill /> : null}{liveCount && view !== "meetings" ? <button type="button" className="status live" onClick={() => setView("meetings")}>{liveCount} live</button> : null}{identity ? <NotificationCenter key={identity} identity={identity} onNavigate={openNotification} /> : null}</div>
         </header>
         <main id="main-content">
+          {identity ? <InPersonRecorder request={inPersonRequest} identity={identity} canOpenProviders={account?.role === "owner" || account?.role === "admin"}
+            background={inPersonRequest !== null && recorderBackground === inPersonRequest} onReturn={() => setRecorderBackground(null)}
+            onClose={closeRecorder} onFinished={finishRecording} onOpenProviders={() => { setInPersonRequest(null); setView("providers"); }} /> : null}
           {pendingRecording.pending && !inPersonRequest ? <div className="ip-resume-region"><InPersonResumeBanner key={pendingRecording.pending.session.meeting_id} pending={pendingRecording.pending}
             onFinish={() => { if (pendingRecording.pending) setInPersonRequest({ kind: "resume", pending: pendingRecording.pending, action: "finish" }); }}
             onContinue={() => { if (pendingRecording.pending) setInPersonRequest({ kind: "resume", pending: pendingRecording.pending, action: "continue" }); }}
@@ -299,10 +323,11 @@ export function AppShell() {
           {view === "dashboard" ? <Dashboard meetings={meetings} account={account} onNewMeeting={() => { setCalendarSelection(null); setDialogOpen(true); }} onRecordInPerson={() => recordInPerson(BLANK_SEED)} onOpenCalendar={() => setView("calendar")} onOpenProviders={() => setView("providers")} onOpenKnowledge={() => setView("knowledge")} onOpenMeetings={() => setView("meetings")} onOpenMeeting={openMeeting} /> : null}
           {view === "meetings" && identity ? <MeetingsLibrary key={identity} identity={identity} meetings={meetings} onOpen={openMeeting} onNew={() => { setCalendarSelection(null); setDialogOpen(true); }} onCalendar={() => setView("calendar")} onRecordInPerson={() => recordInPerson(BLANK_SEED)} /> : null}
           {view === "calendar" && account && account.role !== "viewer" ? <CalendarWorkspace key={identity} calendarIdentity={`${account.organization_id}:${account.user_id}`} preferredConnectionId={preferredCalendarConnectionId} onPreferredConnectionApplied={() => setPreferredCalendarConnectionId(null)} canSchedule={account.role === "owner" || account.role === "admin"} onChoose={(selection) => { setCalendarSelection(selection); setDialogOpen(true); }} onPrepare={(event) => { setPrepEvent(event); setView("prep"); }} onNewMeeting={account.role === "owner" || account.role === "admin" ? () => { setCalendarSelection(null); setDialogOpen(true); } : undefined} onOpenMeeting={openMeeting} onRecordInPerson={recordInPerson} inPersonRevision={inPersonRevision} /> : null}
-          {view === "prep" && account && account.role !== "viewer" && identity ? <MeetingPrepWorkspace key={`${identity}:${focusNonce}`} identity={identity} initialEvent={prepEvent} onOpenCalendar={() => setView("calendar")} onOpenOrganization={() => setView("workspace")} onOpenProviders={account.role === "owner" || account.role === "admin" ? () => setView("providers") : undefined} /> : null}
+          {view === "prep" && account && account.role !== "viewer" && identity ? <MeetingPrepWorkspace key={`${identity}:${focusNonce}`} identity={identity} initialEvent={prepEvent} initialSides={prepSides} onOpenCalendar={() => setView("calendar")} onOpenOrganization={() => setView("workspace")} onOpenProviders={account.role === "owner" || account.role === "admin" ? () => setView("providers") : undefined} /> : null}
           {view === "providers" ? providersLoadError ? <section className="page narrow"><EmptyState icon={<ProvidersIcon />} title="AI providers are unavailable" action={<button className="button secondary" onClick={() => void meetingsService.listProviderProfiles().then((nextProfiles) => { setProfiles(nextProfiles); setProvidersLoadError(null); }).catch(() => undefined)}>Retry</button>}><span role="alert">{providersLoadError}</span></EmptyState></section> : identity ? <ProviderSettings key={identity} identity={identity} profiles={profiles} onProfilesChange={setProfiles} /> : null : null}
           {view === "knowledge" && identity ? <KnowledgeScreen key={`${identity}:${focusNonce}`} identity={identity} account={account} onOpenSource={openMeeting} onOpenProviders={account?.role === "owner" || account?.role === "admin" ? () => setView("providers") : undefined} /> : null}
           {view === "observability" && (account?.role === "owner" || account?.role === "admin") ? <ObservabilityScreen /> : null}
+          {view === "research" && account && account.role !== "viewer" && identity ? <ResearchScreen key={identity} userId={account.user_id} links={researchLinks} onOpenProviders={account.role === "owner" || account.role === "admin" ? () => setView("providers") : undefined} /> : null}
           {view === "workspace" ? workspace
             ? <WorkspaceSettings workspace={workspace} workspaces={workspaces} account={account} onWorkspaceChange={setWorkspace} onSwitchWorkspace={switchWorkspace} onCreateWorkspace={createWorkspace} onWorkspacesChange={setWorkspaces} onOpenObservability={() => setView("observability")} />
             : <section className="page narrow">{workspaceLoading ? <LoadingRow>Loading workspace…</LoadingRow> : <EmptyState icon={<Building2 />} title="Workspace profile is unavailable">Refresh the page to try again.</EmptyState>}</section>
@@ -310,7 +335,7 @@ export function AppShell() {
           {view === "profile" && account ? <ProfileSettings account={account} workspace={workspace} onAccountChange={setAccount} /> : null}
           {view === "meeting" && activeMeetingId ? account?.role === "owner" || account?.role === "admin"
             ? <MeetingDetailScreen meetingId={activeMeetingId} focusSegmentId={focusSegmentId} backLabel={backLabel[meetingReturnView] ?? "Back"} onBack={() => setView(meetingReturnView)} onMeetingChange={updateMeeting} onDeleted={(id) => { setMeetings((current) => current.filter((meeting) => meeting.id !== id)); setActiveMeetingId(null); setView("dashboard"); }} />
-            : <MemberMeetingScreen meetingId={activeMeetingId} focusSegmentId={focusSegmentId} backLabel={meetingReturnView === "calendar" ? "Calendar" : "AI knowledge"} onBack={() => setView(meetingReturnView === "calendar" ? "calendar" : "knowledge")} onBackToKnowledge={() => setView("knowledge")} /> : null}
+            : <MemberMeetingScreen meetingId={activeMeetingId} focusSegmentId={focusSegmentId} backLabel={meetingReturnView === "calendar" ? "Calendar" : meetingReturnView === "research" ? "Research" : "AI knowledge"} onBack={() => setView(meetingReturnView === "calendar" || meetingReturnView === "research" ? meetingReturnView : "knowledge")} onBackToKnowledge={() => setView("knowledge")} /> : null}
         </main>
       </div>
       <Dialog.Root open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
@@ -323,8 +348,6 @@ export function AppShell() {
           </Dialog.Popup>
         </Dialog.Portal>
       </Dialog.Root>
-      {identity ? <InPersonRecorder request={inPersonRequest} identity={identity} canOpenProviders={account?.role === "owner" || account?.role === "admin"}
-        onClose={closeRecorder} onFinished={finishRecording} onOpenProviders={() => { setInPersonRequest(null); setView("providers"); }} /> : null}
       <NewMeetingDialog open={dialogOpen && (account?.role === "owner" || account?.role === "admin")} calendarSelection={calendarSelection} onClose={() => { setDialogOpen(false); setCalendarSelection(null); }} onMeetingJoined={(meeting) => {
         setDialogOpen(false);
         setCalendarSelection(null);
@@ -338,8 +361,9 @@ export function AppShell() {
 const viewTitle: Record<View, string> = {
   dashboard: "Overview", meetings: "Meetings", calendar: "Calendar", prep: "Meeting prep", providers: "AI providers",
   meeting: "Meeting details", workspace: "Organization & people", knowledge: "AI knowledge", observability: "Observability", profile: "My profile",
+  research: "Research",
 };
-const backLabel: Partial<Record<View, string>> = { dashboard: "Overview", meetings: "All meetings", calendar: "Calendar", knowledge: "AI knowledge" };
+const backLabel: Partial<Record<View, string>> = { dashboard: "Overview", meetings: "All meetings", calendar: "Calendar", knowledge: "AI knowledge", research: "Research" };
 
 function LoginLayout({ children }: { children: ReactNode }) {
   return <main className="login-page">
@@ -410,6 +434,7 @@ function SidebarPanel({ view, onNavigate, workspaces, account, liveCount, onSign
         <p className="sidebar-label">Intelligence</p>
         {item("knowledge", "AI knowledge", <BrainCircuit />)}
         {canUseCalendar ? item("prep", "Meeting prep", <NotebookPen />) : null}
+        {canUseCalendar ? item("research", "Research", <ScanSearch />) : null}
       </div>
       {canManageMeetings ? <div className="sidebar-group">
         <p className="sidebar-label">Administration</p>

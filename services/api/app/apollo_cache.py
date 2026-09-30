@@ -1,4 +1,7 @@
-"""Per-workspace, 30-day cache of Apollo results so repeat briefings do not spend Apollo credits again."""
+"""Per-workspace cache of Apollo results so repeat briefings and lookups do not spend Apollo credits again.
+
+Enrichment results live 30 days; Research searches (``org_search`` / ``people_search``) live one day.
+"""
 
 from __future__ import annotations
 
@@ -16,7 +19,14 @@ from .database import ApolloCacheRow, Database
 logger = logging.getLogger(__name__)
 
 CACHE_DAYS = 30
-CacheKind = Literal["org", "person", "news", "jobs", "account", "contact"]
+SEARCH_CACHE_HOURS = 24
+CacheKind = Literal["org", "person", "news", "jobs", "account", "contact", "org_search", "people_search"]
+_TTL: dict[str, timedelta] = {"org_search": timedelta(hours=SEARCH_CACHE_HOURS),
+                              "people_search": timedelta(hours=SEARCH_CACHE_HOURS)}
+
+
+def ttl_for(kind: str) -> timedelta:
+    return _TTL.get(kind, timedelta(days=CACHE_DAYS))
 
 
 def _aware(value: datetime) -> datetime:
@@ -44,6 +54,7 @@ class ApolloCache:
 
     def put(self, organization_id: UUID | str, kind: CacheKind, key: str, payload: dict[str, Any]) -> None:
         now = self._now()
+        expires = now + ttl_for(kind)
         try:
             with self.database.session_factory.begin() as session:
                 row = session.execute(select(ApolloCacheRow).where(
@@ -53,9 +64,9 @@ class ApolloCache:
                 if row is None:
                     session.add(ApolloCacheRow(id=str(uuid4()), organization_id=str(organization_id), kind=kind,
                                                cache_key=key[:400], payload=payload, fetched_at=now,
-                                               expires_at=now + timedelta(days=CACHE_DAYS)))
+                                               expires_at=expires))
                 else:
-                    row.payload, row.fetched_at, row.expires_at = payload, now, now + timedelta(days=CACHE_DAYS)
+                    row.payload, row.fetched_at, row.expires_at = payload, now, expires
         except SQLAlchemyError:
             # A cache write must never fail a briefing; the next one simply asks Apollo again.
             logger.exception("could not write the Apollo cache")
