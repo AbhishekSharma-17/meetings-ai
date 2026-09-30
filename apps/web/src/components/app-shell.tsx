@@ -17,13 +17,14 @@ import { ProviderSettings } from "./provider-settings";
 import { WorkspaceSettings } from "./workspace-settings";
 import { ProfileSettings } from "./profile-settings";
 import { KnowledgeScreen } from "./knowledge-screen";
+import { SharedWithMeScreen } from "./shared-with-me-screen";
 import { MemberMeetingScreen } from "./shared-meeting-screen";
 import { ObservabilityScreen } from "./observability-screen";
 import { ProvidersIcon } from "./ui-icons";
 import { ThemeSwitcher } from "./theme-switcher";
 import { Dialog } from "@base-ui/react/dialog";
 import { Popover } from "@base-ui/react/popover";
-import { BrainCircuit, Building2, CalendarDays, ChartNoAxesCombined, Check, ChevronsUpDown, Compass, FileCheck2, House, LogOut, Menu, MessagesSquare, Mic, NotebookPen, ScanSearch, UserRound, Users, Video, X } from "lucide-react";
+import { BrainCircuit, Building2, CalendarDays, ChartNoAxesCombined, Check, ChevronsUpDown, Compass, FileCheck2, House, LogOut, Menu, MessagesSquare, Mic, NotebookPen, ScanSearch, Share2, UserRound, Users, Video, X } from "lucide-react";
 import { Avatar } from "./ui/avatar";
 import { EmptyState, LoadingRow } from "./ui/feedback";
 import { DemoBanner, DemoPill } from "./demo-banner";
@@ -43,8 +44,8 @@ import type { AttendeeSides } from "@/lib/types";
 import { BLANK_SEED } from "./in-person-seed";
 import type { InPersonSeed } from "@/lib/in-person-types";
 
-type View = "dashboard" | "meetings" | "calendar" | "prep" | "providers" | "meeting" | "workspace" | "knowledge" | "observability" | "profile" | "research";
-const views: View[] = ["dashboard", "meetings", "calendar", "prep", "providers", "meeting", "workspace", "knowledge", "observability", "profile", "research"];
+type View = "dashboard" | "meetings" | "calendar" | "prep" | "providers" | "meeting" | "workspace" | "knowledge" | "observability" | "profile" | "research" | "shared";
+const views: View[] = ["dashboard", "meetings", "calendar", "prep", "providers", "meeting", "workspace", "knowledge", "observability", "profile", "research", "shared"];
 const isView = (value: unknown): value is View => typeof value === "string" && views.includes(value as View);
 const isString = (value: unknown): value is string => typeof value === "string" && value.length > 0;
 function restoredView(scope: string): View {
@@ -121,7 +122,7 @@ export function AppShell() {
         setAccount(current);
         const scope = `${current.organization_id}:${current.user_id}`;
         const restored = restoredView(scope);
-        const allowed = current.role === "owner" || current.role === "admin" ? views : current.role === "viewer" ? ["knowledge", "profile", "meeting"] : ["knowledge", "calendar", "prep", "profile", "meeting", "research"];
+        const allowed = current.role === "owner" || current.role === "admin" ? views.filter((item) => item !== "shared") : current.role === "viewer" ? ["knowledge", "profile", "meeting", "shared"] : ["knowledge", "calendar", "prep", "profile", "meeting", "research", "shared"];
         const next = calendarConnected && current.role !== "viewer" ? "calendar" : allowed.includes(restored) ? restored : current.role === "owner" || current.role === "admin" ? "dashboard" : "knowledge";
         if (next === "meeting") {
           const id = readUiPreference(`meetings-ai:active-meeting:${scope}`, "", isString, "session");
@@ -176,7 +177,7 @@ export function AppShell() {
       const current = await meetingsService.getCurrentAccount();
       setLoginPassword(""); setAccount(current); setAuthenticated(true);
       const restored = restoredView(`${current.organization_id}:${current.user_id}`);
-      setView(current.role === "owner" || current.role === "admin" ? restored === "meeting" ? "meetings" : restored : current.role === "viewer" ? "knowledge" : restored === "calendar" || restored === "prep" || restored === "research" ? restored : "knowledge");
+      setView(current.role === "owner" || current.role === "admin" ? restored === "meeting" ? "meetings" : restored === "shared" ? "dashboard" : restored : current.role === "viewer" ? restored === "shared" ? "shared" : "knowledge" : restored === "calendar" || restored === "prep" || restored === "research" || restored === "shared" ? restored : "knowledge");
       setNavigationRestored(true);
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : "Sign in failed.");
@@ -207,7 +208,7 @@ export function AppShell() {
 
   const openMeeting = useCallback((id: string, segmentId?: string) => {
     setActiveMeetingId(id); setFocusSegmentId(segmentId ?? null);
-    setMeetingReturnView(view === "research" ? "research" : view === "knowledge" || segmentId ? "knowledge" : view === "meetings" ? "meetings" : view === "calendar" ? "calendar" : "dashboard"); setView("meeting");
+    setMeetingReturnView(view === "research" ? "research" : view === "shared" ? "shared" : view === "knowledge" || segmentId ? "knowledge" : view === "meetings" ? "meetings" : view === "calendar" ? "calendar" : "dashboard"); setView("meeting");
   }, [view]);
   const openNotification = useCallback((target: NotificationTarget) => {
     if (!identity || !account) return;
@@ -335,7 +336,8 @@ export function AppShell() {
           {view === "profile" && account ? <ProfileSettings account={account} workspace={workspace} onAccountChange={setAccount} /> : null}
           {view === "meeting" && activeMeetingId ? account?.role === "owner" || account?.role === "admin"
             ? <MeetingDetailScreen meetingId={activeMeetingId} focusSegmentId={focusSegmentId} backLabel={backLabel[meetingReturnView] ?? "Back"} onBack={() => setView(meetingReturnView)} onMeetingChange={updateMeeting} onDeleted={(id) => { setMeetings((current) => current.filter((meeting) => meeting.id !== id)); setActiveMeetingId(null); setView("dashboard"); }} />
-            : <MemberMeetingScreen meetingId={activeMeetingId} focusSegmentId={focusSegmentId} backLabel={meetingReturnView === "calendar" ? "Calendar" : meetingReturnView === "research" ? "Research" : "AI knowledge"} onBack={() => setView(meetingReturnView === "calendar" || meetingReturnView === "research" ? meetingReturnView : "knowledge")} onBackToKnowledge={() => setView("knowledge")} /> : null}
+            : <MemberMeetingScreen meetingId={activeMeetingId} focusSegmentId={focusSegmentId} backLabel={backLabel[meetingReturnView] ?? "AI knowledge"} onBack={() => setView(meetingReturnView === "calendar" || meetingReturnView === "research" || meetingReturnView === "shared" ? meetingReturnView : "knowledge")} onBackToKnowledge={() => setView("knowledge")} /> : null}
+          {view === "shared" && account && account.role !== "owner" && account.role !== "admin" ? <SharedWithMeScreen onOpenMeeting={(id) => openMeeting(id)} /> : null}
         </main>
       </div>
       <Dialog.Root open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
@@ -361,9 +363,9 @@ export function AppShell() {
 const viewTitle: Record<View, string> = {
   dashboard: "Overview", meetings: "Meetings", calendar: "Calendar", prep: "Meeting prep", providers: "AI providers",
   meeting: "Meeting details", workspace: "Organization & people", knowledge: "AI knowledge", observability: "Observability", profile: "My profile",
-  research: "Research",
+  research: "Research", shared: "Shared with me",
 };
-const backLabel: Partial<Record<View, string>> = { dashboard: "Overview", meetings: "All meetings", calendar: "Calendar", knowledge: "AI knowledge", research: "Research" };
+const backLabel: Partial<Record<View, string>> = { dashboard: "Overview", meetings: "All meetings", calendar: "Calendar", knowledge: "AI knowledge", research: "Research", shared: "Shared with me" };
 
 function LoginLayout({ children }: { children: ReactNode }) {
   return <main className="login-page">
@@ -429,6 +431,7 @@ function SidebarPanel({ view, onNavigate, workspaces, account, liveCount, onSign
         {canManageMeetings ? item("dashboard", "Overview", <House />) : null}
         {canManageMeetings ? item("meetings", "Meetings", <Video />, view === "meetings" || view === "meeting", liveCount ? <span className="nav-live" aria-hidden="true" /> : null) : null}
         {canUseCalendar ? item("calendar", "Calendar", <CalendarDays />) : null}
+        {canManageMeetings ? null : item("shared", "Shared with me", <Share2 />)}
       </div>
       <div className="sidebar-group">
         <p className="sidebar-label">Intelligence</p>

@@ -11,12 +11,12 @@ from hashlib import scrypt
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 
 from .account_tokens import IssuedLink, has_usable_password, issue_link, revoke_links, unusable_password_hash
 from .database import (
     Database, KnowledgeBaseAccessRow, KnowledgeBaseRow, LEGACY_ADMIN_USER_ID, LEGACY_ORGANIZATION_ID,
-    OrganizationMembershipRow, OrganizationRow, UserCredentialRow, UserRow,
+    MeetingShareRow, OrganizationMembershipRow, OrganizationRow, UserCredentialRow, UserRow,
 )
 from .workspace_preferences import (
     default_organization_id, forget_organization, preferred_organization_id, record_last_organization,
@@ -412,8 +412,13 @@ class AccountService:
                 ),
             ))
             forget_organization(session, str(user_id), str(requester.organization_id))
-            revoke_links(session, user_id=str(user_id), organization_id=str(requester.organization_id),
-                         now=datetime.now(UTC))
+            now = datetime.now(UTC)
+            revoke_links(session, user_id=str(user_id), organization_id=str(requester.organization_id), now=now)
+            # Meetings shared with them stop being shared (re-inviting them later grants nothing back).
+            session.execute(update(MeetingShareRow).where(
+                MeetingShareRow.organization_id == str(requester.organization_id),
+                MeetingShareRow.user_id == str(user_id), MeetingShareRow.revoked_at.is_(None),
+            ).values(revoked_at=now, revoked_by=str(requester.user_id)))
             session.delete(membership)
 
     @staticmethod

@@ -18,7 +18,8 @@ const captureInProgress = new Set<MeetingDetail["status"]>([
 ]);
 const defaultMomGuidance: MomGuidance = { template: "standard", instructions: "", focus_fields: [] };
 
-export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: MeetingDetail; transcriptCount: number; segments: TranscriptSegment[] }) {
+/** `onDelivered`: the recap was emailed (sharing history refreshes). */
+export function MinutesPanel({ meeting, transcriptCount, segments, onDelivered }: { meeting: MeetingDetail; transcriptCount: number; segments: TranscriptSegment[]; onDelivered?(): void }) {
   const [minutes, setMinutes] = useState<MeetingMinutes | null>(null);
   const [draft, setDraft] = useState<EditableDraft | null>(null);
   const [busy, setBusy] = useState<"generate" | "retry" | "save" | "approve" | "send" | "delete" | null>(null);
@@ -265,7 +266,8 @@ export function MinutesPanel({ meeting, transcriptCount, segments }: { meeting: 
       setMessageAt("mom");
       const viaTeams = delivery.groups?.length ? ` (including ${delivery.groups.map((group) => group.name).join(", ")})` : "";
       setNotice(`Recap sent to ${delivery.recipients.length} recipient${delivery.recipients.length === 1 ? "" : "s"}${viaTeams}.`);
-    } catch (requestError) { setError(messageFor(requestError)); }
+      onDelivered?.();
+    } catch (requestError) { setError(messageFor(requestError)); onDelivered?.(); }
     finally { setBusy(null); }
   }
 

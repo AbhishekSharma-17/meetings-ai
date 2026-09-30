@@ -5,6 +5,7 @@ import logging
 import re
 from base64 import b64encode
 from datetime import UTC, datetime
+from collections.abc import Callable
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
@@ -224,54 +225,79 @@ class MinutesService:
 
     async def send(
         self, meeting_id: UUID, request: MinutesEmailRequest,
-        groups: list[dict[str, object]] | None = None,
+        groups: list[dict[str, object]] | None = None, *, on_attempt: Callable[[UUID], None] | None = None,
     ) -> EmailDelivery:
-        """Send the approved MOM. `groups` records which teams were expanded into the recipients."""
+        """Send the approved MOM. `groups` records which teams were expanded into the recipients;
+        `on_attempt(delivery_id)` runs once the checks pass, just before the email goes out."""
         meeting = self.repository.get_meeting(meeting_id)
         minutes = self.get(meeting_id)
         if minutes.status is not MinutesStatus.APPROVED:
             raise MinutesConflictError("approve the MOM before sending it")
         self._require_current_transcript(meeting_id)
-        transcript = self.repository.get_transcript(meeting_id)
-        html, plain_text = _email_content(minutes, transcript, include_transcript=request.include_transcript, meeting=meeting)
-        attachments = _email_attachments(meeting.title or minutes.title, transcript if request.include_transcript else [])
-        delivery = EmailDelivery(
-            meeting_id=meeting_id,
-            recipients=request.recipients,
-            status="failed",
-            groups=list(groups or []),
+        identity = json.dumps(
+            [str(meeting_id), minutes.approved_at.isoformat() if minutes.approved_at else "",
+             request.recipients, request.include_transcript],
+            separators=(",", ":"),
         )
         try:
-            delivery_identity = json.dumps(
-                [str(meeting_id), minutes.approved_at.isoformat() if minutes.approved_at else "",
-                 request.recipients, request.include_transcript],
-                separators=(",", ":"),
-            )
-            delivery.provider_message_id = await self.resend.send(
-                recipients=request.recipients,
-                subject=f"Meeting recap: {_human_text(minutes.title or meeting.title or 'Untitled meeting', _evidence_times(transcript))}",
-                html=html,
-                text=plain_text,
-                attachments=attachments,
-                idempotency_key=f"minutes-{sha256(delivery_identity.encode()).hexdigest()}",
-            )
+            delivery = await self._deliver(meeting, minutes, request, groups, on_attempt,
+                                           lambda _delivery_id: f"minutes-{sha256(identity.encode()).hexdigest()}")
         except EmailDeliveryError as exc:
-            delivery.error = str(exc)
             minutes.last_error = str(exc)
             minutes.updated_at = datetime.now(UTC)
-            self.repository.save_email_delivery(delivery)
             self.repository.save_minutes(minutes)
-            self.events.recap_failed(meeting_id, delivery.id, delivery.error)
             raise
-        delivery.status = "sent"
-        self.repository.save_email_delivery(delivery)
         now = datetime.now(UTC)
         minutes.status = MinutesStatus.SENT
         minutes.sent_at = now
         minutes.updated_at = now
         minutes.last_error = None
         self.repository.save_minutes(minutes)
-        self.events.recap_sent(meeting_id, delivery.id, len(delivery.recipients))
+        return delivery
+
+    async def send_again(self, meeting_id: UUID, request: MinutesEmailRequest, *,
+                         on_attempt: Callable[[UUID], None] | None = None) -> EmailDelivery:
+        """Email the already-sent MOM again to ``request.recipients``; the MOM itself is unchanged."""
+        meeting = self.repository.get_meeting(meeting_id)
+        minutes = self.get(meeting_id)
+        if minutes.status is not MinutesStatus.SENT:
+            raise MinutesConflictError("send the recap first; resending is for a recap that was already sent")
+        # Every resend is its own email (a deliberate repeat), so the key is the delivery itself.
+        return await self._deliver(meeting, minutes, request, None, on_attempt,
+                                   lambda delivery_id: f"minutes-resend-{delivery_id}")
+
+    async def _deliver(self, meeting, minutes: MeetingMinutes, request: MinutesEmailRequest,
+                       groups: list[dict[str, object]] | None, on_attempt: Callable[[UUID], None] | None,
+                       idempotency_key: Callable[[UUID], str]) -> EmailDelivery:
+        """Render and send the recap email, record the delivery and tell the workspace."""
+        transcript = self.repository.get_transcript(meeting.id)
+        html, plain_text = _email_content(minutes, transcript, include_transcript=request.include_transcript, meeting=meeting)
+        attachments = _email_attachments(meeting.title or minutes.title, transcript if request.include_transcript else [])
+        delivery = EmailDelivery(
+            meeting_id=meeting.id,
+            recipients=request.recipients,
+            status="failed",
+            groups=list(groups or []),
+        )
+        if on_attempt is not None:
+            on_attempt(delivery.id)
+        try:
+            delivery.provider_message_id = await self.resend.send(
+                recipients=request.recipients,
+                subject=f"Meeting recap: {_human_text(minutes.title or meeting.title or 'Untitled meeting', _evidence_times(transcript))}",
+                html=html,
+                text=plain_text,
+                attachments=attachments,
+                idempotency_key=idempotency_key(delivery.id),
+            )
+        except EmailDeliveryError as exc:
+            delivery.error = str(exc)
+            self.repository.save_email_delivery(delivery)
+            self.events.recap_failed(meeting.id, delivery.id, delivery.error)
+            raise
+        delivery.status = "sent"
+        self.repository.save_email_delivery(delivery)
+        self.events.recap_sent(meeting.id, delivery.id, len(delivery.recipients))
         return delivery
 
     def _require_current_transcript(self, meeting_id: UUID) -> None:

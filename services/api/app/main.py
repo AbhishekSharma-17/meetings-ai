@@ -53,6 +53,8 @@ from .calendar_schedule import CalendarScheduleError, CalendarSchedulePublic, Ca
 from .calendar_accounts import CalendarAccountOverview, CalendarAccountService, CalendarDisconnectResult, ScheduledChoice
 from .calendar_cache import CalendarCacheService, CalendarSyncRequest, CalendarSyncResponse, CachedCalendarResponse
 from .calendar_relink import CalendarRelinker
+from .meeting_sharing import MeetingSharingService
+from .routes_sharing import register_sharing_routes, sharing_route_allowed
 from .calendar_watch import CalendarWatchService, WatchSettings
 from .calendar_watch_apply import CalendarChangeApplier
 from .routes_calendar_changes import register_calendar_change_routes
@@ -357,6 +359,10 @@ def create_app(
     calendar_schedule.coordination = meeting_service.coordination = calendar_cache.coordination = call_coordination
     app.state.call_coordination = call_coordination
     register_call_coordination_routes(app, coordination=call_coordination, minutes_service=minutes_service)
+    # Share a meeting's transcript and minutes with workspace members; resend the recap; history.
+    meeting_sharing = MeetingSharingService(database, minutes_service, app.state.notifications)
+    app.state.meeting_sharing = meeting_sharing
+    register_sharing_routes(app, meeting_sharing, minutes_service)
     balances = ProviderBalanceService(database, vault, app.state.notifications)
     app.state.provider_balances = balances
     service.credit_alerts = balances  # out-of-credit model calls raise an alert (see ProfileService)
@@ -446,6 +452,7 @@ def create_app(
                         or member_route_allowed(method, path)
                         or in_person_route_allowed(method, path, actor.role)
                         or research_route_allowed(method, path, actor.role)
+                        or sharing_route_allowed(method, path)
                     )
                     if not allowed:
                         return JSONResponse(status_code=403, content={"detail": "workspace role does not permit this action"})
@@ -453,7 +460,8 @@ def create_app(
                         return JSONResponse(status_code=403, content={"detail": "viewers cannot create knowledge bases"})
                     match = re.fullmatch(r"/v1/meetings/([0-9a-f-]+)(?:/transcript|/leave)?", path)
                     # A meeting whose assistant covers this person (owner or sharing) is readable at any status.
-                    if match and not (method == "GET" and call_coordination.can_read(actor, match.group(1))):
+                    if match and not (method == "GET" and (call_coordination.can_read(actor, match.group(1))
+                                                           or meeting_sharing.can_read(actor, match.group(1)))):
                         try:
                             meeting = repository.get_meeting(UUID(match.group(1)))
                             if meeting.status is not MeetingStatus.COMPLETED or not meeting.knowledge_enabled or not meeting.knowledge_base_id:
@@ -1399,16 +1407,17 @@ def create_app(
         response_model=EmailDeliveryPublic,
     )
     async def send_meeting_minutes(
-        meeting_id: UUID, payload: MinutesEmailRequest
+        meeting_id: UUID, payload: MinutesEmailRequest, request: Request,
     ) -> EmailDeliveryPublic:
         try:
-            delivery = await minutes_service.send(meeting_id, payload)
+            delivery = await minutes_service.send(meeting_id, payload, on_attempt=lambda delivery_id: meeting_sharing.record_sender(
+                request.state.actor, meeting_id, delivery_id, "recap", payload.include_transcript))
             return minutes_service.delivery_to_public(delivery)
         except MINUTES_EXCEPTIONS as exc:
             raise api_error(exc) from exc
 
     @app.post("/v1/meetings/{meeting_id}/minutes/send-configured", response_model=EmailDeliveryPublic)
-    async def send_configured_minutes(meeting_id: UUID) -> EmailDeliveryPublic:
+    async def send_configured_minutes(meeting_id: UUID, request: Request) -> EmailDeliveryPublic:
         try:
             settings = repository.get_delivery_settings(meeting_id)
             # Teams are expanded to their current members now, at send time.
@@ -1426,8 +1435,9 @@ def create_app(
                 raise MinutesConflictError(
                     f"this recap would go to {len(recipients)} addresses; the limit is {MAX_RECAP_RECIPIENTS} per send")
             payload = MinutesEmailRequest(recipients=recipients, include_transcript=settings.include_transcript)
-            return minutes_service.delivery_to_public(
-                await minutes_service.send(meeting_id, payload, groups=expansion.groups))
+            return minutes_service.delivery_to_public(await minutes_service.send(
+                meeting_id, payload, groups=expansion.groups, on_attempt=lambda delivery_id: meeting_sharing.record_sender(
+                    request.state.actor, meeting_id, delivery_id, "recap", payload.include_transcript)))
         except RecipientGroupNotFoundError as exc:
             # A targeted team was deleted between reading the settings and sending.
             raise HTTPException(status_code=422, detail="a selected team no longer exists; review the recipients and send again") from exc

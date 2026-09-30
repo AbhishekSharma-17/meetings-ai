@@ -213,14 +213,15 @@ def test_v30_database_upgrades_to_v31_with_research_tables(tmp_path) -> None:
     database = Database(url)
     database.migrate()
     with database.engine.begin() as connection:
-        for table in ("research_messages", "research_conversations", "research_profiles"):
+        # Back to a real v30 database: later versions' tables go too (v32: meeting shares).
+        for table in ("research_messages", "research_conversations", "research_profiles", "meeting_shares", "email_delivery_senders"):
             connection.execute(text(f"DROP TABLE {table}"))
-        connection.execute(text("DELETE FROM schema_version WHERE version = 31"))
+        connection.execute(text("DELETE FROM schema_version WHERE version >= 31"))
     database.engine.dispose()
     upgraded = Database(url)
     upgraded.migrate()
     with upgraded.session_factory() as session:
-        assert max(session.execute(select(SchemaVersionRow.version)).scalars().all()) == 31 == Database.SCHEMA_VERSION
+        assert max(session.execute(select(SchemaVersionRow.version)).scalars().all()) == Database.SCHEMA_VERSION >= 31
     with upgraded.engine.connect() as connection:
         names = set(upgraded.engine.dialect.get_table_names(connection))
     assert {"research_profiles", "research_conversations", "research_messages"} <= names

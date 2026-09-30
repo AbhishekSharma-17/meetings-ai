@@ -7,6 +7,7 @@ import { leaveService, meetingsService } from "@/lib/meetings-service";
 import { MeetingBadge } from "./meeting-badge";
 import type { CalendarEvent, CalendarSchedule, MeetingDetail, MeetingParticipants, SpeakerIdentity, TranscriptSegment, TranscriptionRoute } from "@/lib/types";
 import { MinutesPanel } from "./minutes-panel";
+import { MeetingSharingCard } from "./meeting-sharing-card";
 import { MeetingTranscript, namedSpeakersOf, relativeTime, transcriptSeconds } from "./meeting-transcript";
 import { MeetingPeopleCard } from "./meeting-people-card";
 import { MeetingKnowledgeSettings } from "./meeting-knowledge-settings";
@@ -39,6 +40,7 @@ const lifecycleDetail: Record<MeetingDetail["status"], string> = {
 
 export function MeetingDetailScreen({ meetingId, focusSegmentId, backLabel = "All meetings", onBack, onMeetingChange, onDeleted }: { meetingId: string; focusSegmentId?: string | null; backLabel?: string; onBack(): void; onMeetingChange(meeting: MeetingDetail): void; onDeleted(id: string): void }) {
   const [meeting, setMeeting] = useState<MeetingDetail | null>(null);
+  const [deliveryRevision, setDeliveryRevision] = useState(0);
   const [schedule, setSchedule] = useState<CalendarSchedule | null>(null);
   const [source, setSource] = useState<CalendarEvent | null>(null);
   const [segments, setSegments] = useState<TranscriptSegment[]>([]);
@@ -295,7 +297,8 @@ export function MeetingDetailScreen({ meetingId, focusSegmentId, backLabel = "Al
             <p className="field-hint">Tell the host: “Meetings AI has joined and will record and transcribe this conversation.”</p>
           </div>
         </section> : null}
-        <MinutesPanel key={`${meeting.id}:${speakerRevision}`} meeting={meeting} transcriptCount={finalizedCount} segments={segments} />
+        <MinutesPanel key={`${meeting.id}:${speakerRevision}`} meeting={meeting} transcriptCount={finalizedCount} segments={segments} onDelivered={() => setDeliveryRevision((value) => value + 1)} />
+        <MeetingSharingCard meetingId={meeting.id} revision={deliveryRevision} />
         <MeetingTranscript meetingTitle={meeting.title} assistantName={meeting.botName} segments={segments} focusSegmentId={activeFocus} isPolling={pollableStatuses.has(meeting.status)} isLive={meeting.status === "live"} saving={savingSpeaker} onSaveSpeaker={saveSpeaker} onDownload={downloadTranscript} />
       </div>
       <aside className="record-side" aria-label="Meeting information">

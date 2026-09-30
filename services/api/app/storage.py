@@ -111,6 +111,7 @@ _MEETING_TABLES = (
     "transcript_segments", "transcript_segment_metadata", "transcript_speaker_corrections",
     "meeting_speaker_identities", "transcript_review_state", "minutes_source", "meeting_minutes_evidence",
     "meeting_minutes", "meeting_delivery_groups", "email_delivery_groups", "email_deliveries",
+    "meeting_shares", "email_delivery_senders",
 )
 
 CATEGORIES: tuple[CategorySpec, ...] = (

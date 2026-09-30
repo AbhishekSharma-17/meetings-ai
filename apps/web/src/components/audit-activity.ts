@@ -1,7 +1,7 @@
 import {
   Archive, BookOpen, CalendarCheck, CalendarClock, CalendarPlus, CalendarX, CircleCheck, Cpu, Database, FilePen, FileText,
   FileUp, KeyRound, LogIn, type LucideIcon, MessageSquare, MessageSquareX, Mic, MicOff, PenLine, RefreshCw, Search, Send,
-  Settings2, ShieldAlert, ShieldCheck, Trash2, UserCog, UserMinus, UserPen, UserPlus, Users, UsersRound, Video,
+  Settings2, Share2, ShieldAlert, ShieldCheck, Trash2, UserCog, UserMinus, UserPen, UserPlus, Users, UsersRound, Video,
 } from "lucide-react";
 import type { AuditEvent } from "@/lib/types";
 import { formatDate, zonedDayKey } from "@/lib/time-store";
@@ -53,6 +53,9 @@ const rules: Rule[] = [
   { path: "/v1/meetings/{id}/minutes/approve", category: "minutes", icon: CircleCheck, verb: "approved the minutes for", target: "meeting", fallback: "a meeting" },
   { path: "/v1/meetings/{id}/minutes/send", category: "minutes", icon: Send, verb: "sent the recap for", target: "meeting", fallback: "a meeting" },
   { path: "/v1/meetings/{id}/minutes/send-configured", category: "minutes", icon: Send, verb: "sent the recap for", target: "meeting", fallback: "a meeting" },
+  { path: "/v1/meetings/{id}/minutes/resend", category: "minutes", icon: Send, verb: "sent the recap again for", target: "meeting", fallback: "a meeting" },
+  { method: "POST", path: "/v1/meetings/{id}/shares", category: "meetings", icon: Share2, verb: "shared", target: "meeting", fallback: "a meeting" },
+  { method: "DELETE", path: "/v1/meetings/{id}/shares/{id}", category: "meetings", icon: UserMinus, verb: "removed someone's access to", target: "meeting", fallback: "a meeting" },
   { method: "DELETE", path: "/v1/meetings/{id}/minutes", category: "minutes", icon: Trash2, verb: "discarded the draft minutes for", target: "meeting", fallback: "a meeting" },
   { path: "/v1/meetings/{id}/minutes", category: "minutes", icon: FilePen, verb: "edited the minutes for", target: "meeting", fallback: "a meeting" },
   { path: "/v1/meetings/{id}/delivery-settings", category: "minutes", icon: Send, verb: "updated recap recipients for", target: "meeting", fallback: "a meeting" },

@@ -13,6 +13,7 @@ import { TranscriptTurn } from "./meeting-transcript";
 import { PageHeader } from "./ui/page-header";
 import { EmptyState, LoadingRow } from "./ui/feedback";
 import { inPersonService } from "@/lib/in-person-service";
+import { sharingService, type SharedMeetingView } from "@/lib/sharing-service";
 import { InPersonMemberMeeting } from "./in-person-member-meeting";
 
 const POLL_MS = 15_000;
@@ -24,29 +25,36 @@ function elapsed(value: TranscriptSegment["startedAt"]): string {
 }
 
 /**
- * A meeting opened by someone who is not an owner or admin: a teammate's assistant they share
- * (read-only status, transcript and approved minutes), else a cited knowledge source.
+ * A meeting opened by someone who is not an owner or admin: a teammate's assistant they share, or a
+ * meeting an admin shared with them (read-only status, transcript and approved minutes), else a
+ * cited knowledge source.
  */
 export function MemberMeetingScreen({ meetingId, focusSegmentId, backLabel, onBack, onBackToKnowledge }: {
   meetingId: string; focusSegmentId: string | null; backLabel: string; onBack(): void; onBackToKnowledge(): void;
 }) {
   const [coverage, setCoverage] = useState<MeetingCoordination | null | undefined>(undefined);
+  const [shared, setShared] = useState<SharedMeetingView | null | undefined>(undefined);
   // A meeting this person recorded in person (only the recorder can read its recording session).
   const [recorded, setRecorded] = useState<boolean | undefined>(undefined);
   useEffect(() => {
     let active = true;
     void coordinationService.forMeeting(meetingId).then((view) => { if (active) setCoverage(view.your_role ? view : null); })
       .catch(() => { if (active) setCoverage(null); });
+    void sharingService.sharedView(meetingId).then((view) => { if (active) setShared(view); }).catch(() => { if (active) setShared(null); });
     void inPersonService.get(meetingId).then((session) => { if (active) setRecorded(session.is_recorder); }).catch(() => { if (active) setRecorded(false); });
     return () => { active = false; };
   }, [meetingId]);
   if (recorded) return <InPersonMemberMeeting meetingId={meetingId} backLabel={backLabel} onBack={onBack} />;
-  if (coverage === undefined || recorded === undefined) return <section className="page narrow"><LoadingRow>Opening meeting…</LoadingRow></section>;
-  if (!coverage) return <KnowledgeEvidenceScreen meetingId={meetingId} focusSegmentId={focusSegmentId} onBack={onBackToKnowledge} />;
-  return <SharedMeetingScreen meetingId={meetingId} coverage={coverage} backLabel={backLabel} onBack={onBack} />;
+  if (coverage === undefined || recorded === undefined || shared === undefined) return <section className="page narrow"><LoadingRow>Opening meeting…</LoadingRow></section>;
+  if (coverage) return <SharedMeetingScreen meetingId={meetingId} coverage={coverage} backLabel={backLabel} onBack={onBack} />;
+  if (shared) return <SharedMeetingScreen meetingId={meetingId} share={shared} backLabel={backLabel} onBack={onBack} />;
+  return <KnowledgeEvidenceScreen meetingId={meetingId} focusSegmentId={focusSegmentId} onBack={onBackToKnowledge} />;
 }
 
-function SharedMeetingScreen({ meetingId, coverage, backLabel, onBack }: { meetingId: string; coverage: MeetingCoordination; backLabel: string; onBack(): void }) {
+/** `coverage`: a teammate's assistant this person shares; `share`: a meeting an admin shared with them. */
+function SharedMeetingScreen({ meetingId, coverage, share, backLabel, onBack }: {
+  meetingId: string; coverage?: MeetingCoordination; share?: SharedMeetingView; backLabel: string; onBack(): void;
+}) {
   const [meeting, setMeeting] = useState<MeetingDetail | null>(null);
   const [segments, setSegments] = useState<TranscriptSegment[]>([]);
   const [minutes, setMinutes] = useState<MeetingMinutes | null>(null);
@@ -62,7 +70,7 @@ function SharedMeetingScreen({ meetingId, coverage, backLabel, onBack }: { meeti
         if (next.status !== "created") {
           const [turns, approved] = await Promise.all([
             meetingsService.getTranscript(meetingId).catch(() => [] as TranscriptSegment[]),
-            coordinationService.sharedMinutes(meetingId).catch(() => null),
+            share ? Promise.resolve(share.minutes) : coordinationService.sharedMinutes(meetingId).catch(() => null),
           ]);
           if (active) { setSegments(turns.filter((turn) => turn.isFinal)); setMinutes(approved); }
         }
@@ -74,16 +82,17 @@ function SharedMeetingScreen({ meetingId, coverage, backLabel, onBack }: { meeti
     let timer: number | undefined;
     void load();
     return () => { active = false; if (timer) window.clearTimeout(timer); };
-  }, [meetingId]);
+  }, [meetingId, share]);
 
-  const owner = coverage.owner;
+  const owner = coverage?.owner ?? (share?.shared_by ? { ...share.shared_by, is_you: false } : null);
   return <section className="page narrow shared-meeting" aria-labelledby="shared-meeting-title">
     <PageHeader back={{ label: backLabel, onClick: onBack }} eyebrow={`Shared by ${owner?.display_name ?? "a teammate"}`} titleId="shared-meeting-title"
       title={meeting?.title ?? (error ? "Meeting unavailable" : <span className="skeleton record-title-skeleton" aria-hidden="true" />)}
       badge={meeting ? <MeetingBadge meeting={meeting} /> : undefined}
       description={meeting ? `${meeting.platform} · ${meeting.joinedAt ? `Joined ${formatFullDateTime(meeting.joinedAt)}` : `${possessive(firstName(owner))} assistant hasn't joined yet`}` : undefined} />
     {error ? <p className="form-error" role="alert">{error}</p> : null}
-    <CallCoordinationPanel meetingId={meetingId} onChanged={() => void coordinationService.forMeeting(meetingId).catch(() => onBack())} />
+    {coverage ? <CallCoordinationPanel meetingId={meetingId} onChanged={() => void coordinationService.forMeeting(meetingId).catch(() => onBack())} /> : null}
+    {share?.note ? <p className="shared-note"><b>Note from {share.shared_by?.display_name ?? "the sender"}:</b> {share.note}</p> : null}
     {meeting ? <>
       <section className="card" aria-labelledby="shared-minutes-title">
         <div className="card-header"><div><h2 id="shared-minutes-title">Minutes</h2><p>Shown once {owner?.display_name ?? "the owner"} approves them.</p></div></div>

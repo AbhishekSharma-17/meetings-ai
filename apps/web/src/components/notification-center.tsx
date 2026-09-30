@@ -5,7 +5,7 @@ import { formatFullDateTime } from "@/lib/time-preferences";
 import { Popover } from "@base-ui/react/popover";
 import {
   Bell, BellOff, BookCheck, BrainCircuit, CalendarClock, CheckCheck, CircleAlert, CircleCheck, Clock, DoorOpen, FileCheck2,
-  FileText, FileWarning, Info, MailCheck, MailWarning, NotebookPen, TriangleAlert, Video, VideoOff, X,
+  FileText, FileWarning, Info, MailCheck, MailWarning, NotebookPen, Share2, TriangleAlert, Video, VideoOff, X,
 } from "lucide-react";
 import type { AppNotification } from "@/lib/types";
 import { groupNotifications, notificationTarget, relativeTime, useNotificationFeed, type NotificationTarget } from "./notification-feed";
@@ -18,7 +18,7 @@ const kindIcons: Record<string, ReactNode> = {
   "assistant.scheduled": <CalendarClock {...hidden} />, "meeting.reminder": <Clock {...hidden} />, "assistant.lobby": <DoorOpen {...hidden} />,
   "assistant.joined": <Video {...hidden} />, "assistant.attention": <TriangleAlert {...hidden} />, "assistant.join_failed": <VideoOff {...hidden} />,
   "assistant.capture_failed": <VideoOff {...hidden} />, "assistant.capture_finished": <FileCheck2 {...hidden} />, "assistant.schedule_missed": <CalendarClock {...hidden} />,
-  "minutes.ready": <FileText {...hidden} />, "minutes.failed": <FileWarning {...hidden} />, "recap.sent": <MailCheck {...hidden} />, "recap.failed": <MailWarning {...hidden} />,
+  "minutes.ready": <FileText {...hidden} />, "minutes.failed": <FileWarning {...hidden} />, "recap.sent": <MailCheck {...hidden} />, "recap.failed": <MailWarning {...hidden} />, "meeting.shared": <Share2 {...hidden} />,
   "document.processed": <BookCheck {...hidden} />, "document.failed": <FileWarning {...hidden} />, "knowledge.indexed": <BrainCircuit {...hidden} />, "knowledge.index_failed": <BrainCircuit {...hidden} />,
 };
 const severityIcons: Record<AppNotification["severity"], ReactNode> = {

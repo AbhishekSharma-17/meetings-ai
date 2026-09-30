@@ -286,8 +286,8 @@ def test_v29_database_upgrades_to_v30_with_in_person_tables(tmp_path) -> None:
     with database.engine.begin() as connection:
         connection.execute(text("DROP TABLE in_person_chunks"))
         connection.execute(text("DROP TABLE in_person_sessions"))
-        # Back to a real v29 database: later versions' tables go too (v31: research profiles).
-        for table in ("research_messages", "research_conversations", "research_profiles"):
+        # Back to a real v29 database: later versions' tables go too (v31: research, v32: meeting shares).
+        for table in ("research_messages", "research_conversations", "research_profiles", "meeting_shares", "email_delivery_senders"):
             connection.execute(text(f"DROP TABLE {table}"))
         connection.execute(text("DELETE FROM schema_version WHERE version >= 30"))
     database.engine.dispose()

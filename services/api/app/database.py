@@ -8,6 +8,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     Float,
+    Index,
     ForeignKey,
     Integer,
     JSON,
@@ -915,6 +916,48 @@ class MeetingLeaveStateRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class MeetingShareRow(Base):
+    """A meeting shared in the app with one workspace member (v32).
+
+    Grants read access to the meeting's status, transcript and approved minutes, nothing else.
+    A revoke keeps the row (``revoked_at``) so the meeting's sharing history stays complete;
+    sharing again adds a new row.
+    """
+
+    __tablename__ = "meeting_shares"
+    # One active share per person and meeting (two simultaneous shares can't both be live).
+    __table_args__ = (Index("uq_meeting_shares_active", "meeting_id", "user_id", unique=True,
+                            postgresql_where=text("revoked_at IS NULL"), sqlite_where=text("revoked_at IS NULL")),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+    meeting_id: Mapped[str] = mapped_column(String(36), ForeignKey("meetings.id"), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    shared_by: Mapped[str | None] = mapped_column(String(36))
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_by: Mapped[str | None] = mapped_column(String(36))
+
+
+class EmailDeliverySenderRow(Base):
+    """Who sent a recap email and whether it was the first send or a resend (v32).
+
+    Written just before sending with the delivery's id, so a failed send is attributed too;
+    history reads it joined to ``email_deliveries`` (older deliveries have no sender row).
+    """
+
+    __tablename__ = "email_delivery_senders"
+
+    delivery_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+    meeting_id: Mapped[str] = mapped_column(String(36), ForeignKey("meetings.id"), nullable=False, index=True)
+    sent_by: Mapped[str | None] = mapped_column(String(36))
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)  # recap | resend
+    include_transcript: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class MeetingCoverageRow(Base):
     """Who a meeting's assistant covers: its owner and teammates sharing its notes (v28).
 
@@ -1146,6 +1189,7 @@ SCHEMA_TABLES_BY_VERSION: dict[int, tuple[str, ...]] = {
     29: ("workspace_integrations", "apollo_cache"),
     30: ("in_person_sessions", "in_person_chunks"),
     31: ("research_profiles", "research_conversations", "research_messages"),
+    32: ("meeting_shares", "email_delivery_senders"),
 }
 
 SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
@@ -1221,6 +1265,8 @@ SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
     "research_profiles": ("id", "organization_id", "kind", "apollo_id", "domain", "name", "title", "company", "data", "created_by", "created_at", "updated_at", "fetched_at", "apollo_calls"),
     "research_conversations": ("id", "organization_id", "profile_id", "user_id", "title", "created_at", "updated_at"),
     "research_messages": ("id", "conversation_id", "position", "role", "content", "citations", "provider", "model", "created_at"),
+    "meeting_shares": ("id", "organization_id", "meeting_id", "user_id", "shared_by", "note", "created_at", "revoked_at", "revoked_by"),
+    "email_delivery_senders": ("delivery_id", "organization_id", "meeting_id", "sent_by", "kind", "include_transcript", "created_at"),
 }
 
 
@@ -1303,7 +1349,7 @@ def _migrate_to_v22(connection) -> None:
 class Database:
     """Upgrades known schemas and rejects unknown or incomplete ones."""
 
-    SCHEMA_VERSION = 31
+    SCHEMA_VERSION = 32
 
     def __init__(self, url: str) -> None:
         engine_options: dict[str, object] = {"pool_pre_ping": True}
