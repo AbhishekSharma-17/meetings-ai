@@ -145,7 +145,7 @@ export type AccountLinkPreview = {
 
 export type KnowledgeSource = {
   source_id: string;
-  kind: "transcript" | "question" | "action" | "contribution";
+  kind: "transcript" | "question" | "action" | "contribution" | "decision" | "summary";
   meeting_id: string;
   knowledge_base_id: string | null;
   meeting_title: string;

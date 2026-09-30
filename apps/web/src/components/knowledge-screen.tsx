@@ -355,7 +355,9 @@ export function KnowledgeScreen({ identity, onOpenSource, onOpenProviders, accou
 
   const baseTitle = selectedBase?.name ?? (selectedBaseId ? "Knowledge base" : "All opted-in meetings");
   const indexed = indexStatus?.indexed_sources ?? 0;
-  const retrievalHint = indexed ? "Hybrid search" : "Keyword search";
+  const emptyBase = Boolean(selectedBase) && selectedBase?.meeting_count === 0;
+  // Hybrid = meaning (vector) + keyword search; a base searches by keyword until its index has sources.
+  const retrievalHint = emptyBase ? "No meetings in this base yet" : indexed ? "Hybrid search" : "Keyword search (not indexed yet)";
   const defaultProfile = selectedBase?.text_profile_id ?? "";
   const picker = <ChatModelInfo
     settings={aiSettings}

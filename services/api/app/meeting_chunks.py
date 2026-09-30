@@ -13,7 +13,8 @@ from collections import OrderedDict
 from .chunking import ChunkDraft, TurnSegment, group_turns, turn_source_id
 from .knowledge_service import KnowledgeSource
 
-_MOM_LABELS = {"question": "Question asked", "action": "Action item", "contribution": "Speaker contribution"}
+_MOM_LABELS = {"question": "Question asked", "action": "Action item", "contribution": "Speaker contribution",
+               "decision": "Decision", "summary": "Meeting summary"}
 
 
 def meeting_drafts(sources: list[KnowledgeSource]) -> list[tuple[ChunkDraft, KnowledgeSource]]:

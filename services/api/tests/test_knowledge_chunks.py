@@ -53,14 +53,15 @@ def test_turn_chunks_map_back_to_identical_citation_shapes(tmp_path) -> None:
         meeting_id = _meeting(client, app, base_id)
         indexed = client.post(f"/v1/knowledge-bases/{base_id}/reindex")
         assert indexed.status_code == 200, indexed.text
-        assert indexed.json()["indexed_sources"] == 3  # two speaker turns + one approved action item
+        assert indexed.json()["indexed_sources"] == 4  # two speaker turns + the summary + one approved action item
         with app.state.database.session_factory() as session:
             rows = session.execute(select(KnowledgeChunkRow).order_by(KnowledgeChunkRow.position)).scalars().all()
-        assert [row.source_type for row in rows] == ["transcript", "transcript", "mom"]
+        assert [row.source_type for row in rows] == ["transcript", "transcript", "mom", "mom"]
         assert rows[0].details["segment_ids"] == ["seg-1", "seg-2"] and rows[0].meeting_id == meeting_id
         assert rows[0].scope == "knowledge_base" and rows[0].scope_id == base_id
         assert rows[0].content.startswith("Alice: The contract renewal")
-        assert rows[2].details["evidence_segment_ids"] == ["seg-2"]
+        assert rows[2].details["kind"] == "summary" and rows[2].content == "Meeting summary: Renewal planned."
+        assert rows[3].details["evidence_segment_ids"] == ["seg-2"]
         assert all(row.context.startswith("LLM note") for row in rows)
 
         result = client.post("/v1/knowledge/search", json={"query": "contract renewal", "knowledge_base_id": base_id}).json()
@@ -91,7 +92,7 @@ def test_access_invalidation_and_deletion_purge_chunks(tmp_path) -> None:
         profile = configure_providers(client, app, fake, vision=False)
         base_id = client.post("/v1/knowledge-bases", json={"name": "Contracts"}).json()["id"]
         meeting_id = _meeting(client, app, base_id)
-        assert client.post(f"/v1/knowledge-bases/{base_id}/reindex").json()["indexed_sources"] == 3
+        assert client.post(f"/v1/knowledge-bases/{base_id}/reindex").json()["indexed_sources"] == 4
         retriever = app.state.chunk_retriever
         found = asyncio.run(retriever.search(LEGACY_ORGANIZATION_ID, "contract renewal",
                                              scopes=[("knowledge_base", base_id)]))
@@ -104,7 +105,7 @@ def test_access_invalidation_and_deletion_purge_chunks(tmp_path) -> None:
         assert client.delete(f"/v1/provider-profiles/{profile['id']}").status_code == 204
         assert client.get(f"/v1/knowledge-bases/{base_id}/index").json()["indexed_sources"] == 0
         with app.state.database.session_factory() as session:
-            assert session.execute(select(func.count()).select_from(KnowledgeChunkRow)).scalar_one() == 3
+            assert session.execute(select(func.count()).select_from(KnowledgeChunkRow)).scalar_one() == 4
 
         # Opting the meeting out removes its text copies immediately.
         assert client.patch(f"/v1/meetings/{meeting_id}/knowledge", json={

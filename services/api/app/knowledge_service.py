@@ -44,7 +44,7 @@ class KnowledgeQuery(BaseModel):
 
 class KnowledgeSource(BaseModel):
     source_id: str
-    kind: Literal["transcript", "question", "action", "contribution"]
+    kind: Literal["transcript", "question", "action", "contribution", "decision", "summary"]
     meeting_id: UUID
     knowledge_base_id: UUID | None = None
     meeting_title: str
@@ -198,6 +198,13 @@ class KnowledgeService:
                 ("contribution", item.summary, item.evidence_segment_ids)
                 for item in minutes.speaker_contributions
             ]
+            # Decisions and the summary carry no evidence ids: anchor each to the transcript line it
+            # shares the most words with (else the start of the meeting, cited without a moment).
+            for kind, value in [("summary", minutes.executive_summary), *(("decision", item) for item in minutes.decisions)]:
+                if value and value.strip() and segments:
+                    anchor = _closest_segment(value, segments)
+                    sources.append(self._source(meeting, anchor or segments[0], kind, value.strip(),
+                                                [anchor.segment_id] if anchor else []))
             for kind, value, evidence_ids in facts:
                 evidence = [by_id[item] for item in evidence_ids if item in by_id]
                 if not evidence:
@@ -434,9 +441,21 @@ class KnowledgeService:
             meeting_created_at=meeting.created_at, meeting_joined_at=meeting.joined_at,
             segment_id=segment.segment_id,
             start_seconds=segment.start_seconds, end_seconds=segment.end_seconds,
-            speaker=segment.speaker, text=text, tags=meeting.tags,
+            # A decision or the summary is the meeting's, not the anchor line speaker's.
+            speaker=None if kind in {"decision", "summary"} else segment.speaker, text=text, tags=meeting.tags,
             evidence_segment_ids=evidence_ids,
         )
+
+
+def _closest_segment(text: str, segments: list) -> object | None:
+    """The transcript segment sharing the most meaningful words with ``text`` (at least two)."""
+    words = {word for word in re.findall(r"\w+", text.lower()) if len(word) >= 3 and word not in _STOPWORDS}
+    best, best_score = None, 1
+    for segment in segments:
+        score = len(words & set(re.findall(r"\w+", segment.text.lower())))
+        if score > best_score:
+            best, best_score = segment, score
+    return best
 
 
 def _score(source: KnowledgeSource, terms: list[str]) -> int:

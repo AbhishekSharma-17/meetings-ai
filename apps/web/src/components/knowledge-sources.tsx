@@ -34,6 +34,9 @@ export function SourceCard({ source, onOpenSource, index, highlighted = false }:
   highlighted?: boolean;
 }) {
   const speaker = source.speaker ?? "Unidentified";
+  // Decisions and the summary belong to the meeting; the time shows only when a transcript line backs them.
+  const meetingWide = source.kind === "decision" || source.kind === "summary";
+  const anchored = !meetingWide || source.evidence_segment_ids.length > 0;
   return <article className={highlighted ? "knowledge-source highlighted" : "knowledge-source"} id={index ? `citation-${source.source_id}` : undefined}>
     <header className="knowledge-source-head">
       {index ? <span className="citation-index" aria-label={`Source ${index}`}>{index}</span> : null}
@@ -43,8 +46,9 @@ export function SourceCard({ source, onOpenSource, index, highlighted = false }:
     </header>
     <p className="knowledge-source-text">{source.text}</p>
     <footer className="knowledge-source-foot">
-      <span className="knowledge-source-speaker"><Avatar name={speaker} size="sm" kind={isAssistantName(speaker, DEFAULT_ASSISTANT_NAME) ? "assistant" : "person"} /><span>{source.kind === "transcript" ? "Speaker" : "Evidence speaker"}: {speaker}</span></span>
-      <span className="knowledge-source-time">{formatOffset(source.start_seconds)} into transcript</span>
+      {meetingWide ? <span className="knowledge-source-speaker">{source.kind === "decision" ? "Decision" : "Meeting summary"}</span>
+        : <span className="knowledge-source-speaker"><Avatar name={speaker} size="sm" kind={isAssistantName(speaker, DEFAULT_ASSISTANT_NAME) ? "assistant" : "person"} /><span>{source.kind === "transcript" ? "Speaker" : "Evidence speaker"}: {speaker}</span></span>}
+      {anchored ? <span className="knowledge-source-time">{formatOffset(source.start_seconds)} into transcript</span> : null}
       {source.tags.length ? <span className="tag-list">{source.tags.map((tag) => <span className="tag" key={tag}>#{tag}</span>)}</span> : null}
       <button className="text-button knowledge-source-open" type="button" onClick={() => onOpenSource(source.meeting_id, source.segment_id)}>Open cited transcript <ArrowUpRight /></button>
     </footer>

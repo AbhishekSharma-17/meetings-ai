@@ -171,9 +171,10 @@ def test_named_knowledge_bases_scope_search_and_save_chat(tmp_path) -> None:
         assert approved_overview["meetings"][0]["decisions"] == ["Launch on Friday"]
         assert client.get(f"/v1/meetings/{meeting_id}").json()["knowledge_base_id"] == base_id
         assert client.get("/v1/knowledge-bases").json()[0]["meeting_count"] == 1
+        # The transcript line, the summary and the decision (the meeting is tagged "roadmap").
         assert client.post("/v1/knowledge/search", json={
             "query": "roadmap", "knowledge_base_id": base_id,
-        }).json()["count"] == 1
+        }).json()["count"] == 3
         assert client.post("/v1/knowledge/search", json={
             "query": "roadmap", "knowledge_base_id": other,
         }).json()["count"] == 0
@@ -297,3 +298,38 @@ def test_knowledge_opt_out_erases_saved_answers_citing_meeting(tmp_path) -> None
             "knowledge_enabled": False, "tags": [],
         }).status_code == 200
         assert client.get(f"/v1/knowledge-bases/{base_id}/conversations/{conversation_id}").status_code == 404
+
+
+def test_decisions_and_summary_are_searchable_and_anchored_to_the_transcript(tmp_path) -> None:
+    app = create_app(
+        database_url=f"sqlite+pysqlite:///{tmp_path / 'decisions.db'}",
+        credential_key="test-credential-key",
+    )
+    with TestClient(app) as client:
+        repository = app.state.repository
+        meeting_id = _create_completed_meeting(client, repository, opted_in=True, title="Launch planning")
+        repository.save_minutes(MeetingMinutes(
+            meeting_id=meeting_id, title="Launch planning",
+            executive_summary="The team set the quarterly pricing direction.",
+            decisions=["Alice submits the roadmap every Friday", "Pricing stays flat this quarter"],
+            status=MinutesStatus.APPROVED,
+        ))
+
+        decided = client.post("/v1/knowledge/search", json={"query": "pricing flat"}).json()["sources"]
+        kinds = {item["kind"]: item for item in decided}
+        assert kinds["decision"]["text"] == "Pricing stays flat this quarter"
+        assert kinds["decision"]["evidence_segment_ids"] == []  # nothing in the transcript says it
+        assert kinds["decision"]["speaker"] is None
+        assert kinds["summary"]["text"] == "The team set the quarterly pricing direction."
+
+        anchored = client.post("/v1/knowledge/search", json={"query": "Friday roadmap"}).json()["sources"]
+        decision = next(item for item in anchored if item["kind"] == "decision")
+        assert decision["evidence_segment_ids"] == ["segment-1"] and decision["start_seconds"] == 13.2
+
+        # Unapproved minutes stay out of search.
+        repository.save_minutes(MeetingMinutes(
+            meeting_id=meeting_id, title="Launch planning", executive_summary="Draft summary.",
+            decisions=["Pricing stays flat this quarter"], status=MinutesStatus.DRAFT,
+        ))
+        assert all(item["kind"] == "transcript"
+                   for item in client.post("/v1/knowledge/search", json={"query": "pricing flat"}).json()["sources"])
