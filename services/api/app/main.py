@@ -50,7 +50,9 @@ from .adapters.resend import EmailDeliveryError, ResendAdapter
 from .adapters.base import ProviderExecutionError
 from .composio_calendar import CalendarConnection, WorkspaceCalendarConnection, CalendarConnectRequest, CalendarAliasRequest, CalendarConnectResponse, CalendarEvent, CalendarEventsResponse, CalendarError, CalendarProvider, CalendarRange, ComposioCalendar, calendar_callback_url
 from .calendar_schedule import CalendarScheduleError, CalendarSchedulePublic, CalendarScheduleService, ManualScheduleCreate, ScheduleCreate
+from .calendar_accounts import CalendarAccountOverview, CalendarAccountService, CalendarDisconnectResult, ScheduledChoice
 from .calendar_cache import CalendarCacheService, CalendarSyncRequest, CalendarSyncResponse, CachedCalendarResponse
+from .calendar_relink import CalendarRelinker
 from .calendar_watch import CalendarWatchService, WatchSettings
 from .calendar_watch_apply import CalendarChangeApplier
 from .routes_calendar_changes import register_calendar_change_routes
@@ -224,6 +226,9 @@ def create_app(
     # Scheduled joins re-verify with the calendar first; manual syncs report moved events.
     calendar_schedule.watcher = calendar_watch
     calendar_cache.changes = calendar_watch
+    # Reconnecting an account keeps its assistants and briefings (the same event on the new account).
+    calendar_cache.relinker = calendar_watch.relinker = CalendarRelinker(database, calendar)
+    calendar_accounts = CalendarAccountService(database, calendar, calendar_cache)
     document_service = DocumentService(database, VisionService(database, service, ai_settings), chunk_store)
     ai_settings.vision = document_service.vision
     indexing_worker = IndexingWorker(database, document_service, chunk_store, knowledge_index, service)
@@ -977,23 +982,21 @@ def create_app(
         STTRouteError,
     )
 
-    @app.get("/v1/calendar/connections", response_model=list[CalendarConnection])
-    async def calendar_connections(request: Request) -> list[CalendarConnection]:
+    @app.get("/v1/calendar/connections", response_model=list[CalendarAccountOverview])
+    async def calendar_connections(request: Request) -> list[CalendarAccountOverview]:
         try:
-            return await calendar.connections(request.state.actor)
+            return await calendar_accounts.overview(request.state.actor)
         except CalendarError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    @app.delete("/v1/calendar/connections/{connection_id}", status_code=204)
-    async def calendar_disconnect(connection_id: str, request: Request) -> Response:
+    @app.delete("/v1/calendar/connections/{connection_id}", response_model=CalendarDisconnectResult)
+    async def calendar_disconnect(connection_id: str, request: Request,
+                                  scheduled: ScheduledChoice = "keep") -> CalendarDisconnectResult:
         try:
-            await calendar.disconnect(request.state.actor, connection_id)
+            return await calendar_accounts.disconnect(request.state.actor, connection_id, scheduled)
         except CalendarError as exc:
             code = 404 if "not found for your account" in str(exc) else 503
             raise HTTPException(status_code=code, detail=str(exc)) from exc
-        # The account's meetings disappear from the calendar immediately, not on the next sync.
-        calendar_cache.forget_connection(request.state.actor, connection_id)
-        return Response(status_code=204)
 
     @app.patch("/v1/calendar/connections/{connection_id}", response_model=CalendarConnection)
     async def calendar_rename(connection_id: str, payload: CalendarAliasRequest, request: Request) -> CalendarConnection:

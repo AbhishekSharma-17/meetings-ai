@@ -166,6 +166,8 @@ class CalendarCacheService:
     changes: Any = _NoChangeHook()
     # Call coordination: heads-ups about teammates' assistants for synced calls; a no-op unless wired.
     coordination: Any = NO_EVENTS
+    # Re-attaches schedules and briefings stranded on a removed account (calendar_relink); None: off.
+    relinker: Any = None
 
     def __init__(self, database: Database, calendar: ComposioCalendar) -> None:
         self.database = database
@@ -263,6 +265,14 @@ class CalendarCacheService:
         except Exception:  # recording the history must never fail the sync itself
             logger.exception("could not record moved calendar events after a sync")
 
+    def _relink(self, actor: Actor, connection: Any, events: list[CalendarEvent], active_ids: set[str]) -> None:
+        if self.relinker is None:
+            return
+        try:
+            self.relinker.after_sync(actor, connection, events, active_ids)
+        except Exception:  # re-attaching stranded schedules must never fail the sync itself
+            logger.exception("could not re-attach scheduled assistants after a sync")
+
     async def sync(self, actor: Actor, request: CalendarSyncRequest) -> CalendarSyncResponse:
         timezone = request.timezone or "UTC"
         start, end = calendar_date_window(request.start_date, request.end_date, timezone)
@@ -336,6 +346,7 @@ class CalendarCacheService:
                     state.truncated = found.truncated
             if moves:
                 await self._announce_moves(actor, connection_id, moves)
+            self._relink(actor, connections[connection_id], found.events, set(connections))
         # Teammates' assistants for calls on this calendar (call coordination; failure-safe).
         self.coordination.after_sync(actor)
         snapshot = self.list(actor, request.start_date, request.end_date, timezone)

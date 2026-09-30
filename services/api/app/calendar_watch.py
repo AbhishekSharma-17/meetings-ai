@@ -32,6 +32,7 @@ from .calendar_cache import CacheMove, rekey_moved_rows
 from .calendar_reconcile import (
     CALENDLY_MATCH_WINDOW, UNKNOWN, CalendarLookup, Reconciliation, StoredEvent, reconcile,
 )
+from .calendar_relink import NoRelink
 from .calendar_watch_apply import CalendarChangeApplier, WatchedSchedule
 from .composio_calendar import CalendarConnection, CalendarError, CalendarEventsResponse
 from .database import (
@@ -92,6 +93,9 @@ class WatchSettings:
 
 
 class CalendarWatchService:
+    # Moves schedules of a removed account to the same event on a reconnected one (calendar_relink).
+    relinker: Any = NoRelink()
+
     def __init__(self, database: Database, calendar: Any, applier: CalendarChangeApplier,
                  settings: WatchSettings | None = None) -> None:
         self.database, self.calendar, self.applier = database, calendar, applier
@@ -197,6 +201,16 @@ class CalendarWatchService:
         connection = next((item for item in cached[1] if item.id == connection_id), None)
         return connection if connection is not None and connection.status == "ACTIVE" else None
 
+    async def _relink(self, actor: Actor, key: ConnectionKey, schedules: list[WatchedSchedule], now: datetime) -> set[str]:
+        if not schedules:
+            return set()
+        cached = self._connections.get((key[0], key[1]))
+        try:
+            return await self.relinker.relink_orphans(actor, key[2], schedules, cached[1] if cached else [], now)
+        except Exception:
+            logger.exception("could not look for stranded schedules on another account")
+            return set()
+
     def _window(self, schedules: list[WatchedSchedule], scan: bool, now: datetime) -> tuple[datetime, datetime]:
         starts = [schedule.stored.starts_at for schedule in schedules]
         low = [start - timedelta(days=1) for start in starts] + ([now - timedelta(hours=1)] if scan else [])
@@ -227,7 +241,9 @@ class CalendarWatchService:
         try:
             connection = await self._connection(actor, connection_id, now)
             if connection is None:
-                self._flag(schedules, owner_left=False, now=now)
+                # Reconnected under a new id? Follow the same event there; flag only what isn't found.
+                moved = await self._relink(actor, key, schedules, now)
+                self._flag([item for item in schedules if item.meeting_id not in moved], owner_left=False, now=now)
                 self._scanned[key] = now
                 return
             start, end = self._window(schedules, scan, now)

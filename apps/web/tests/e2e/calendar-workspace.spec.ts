@@ -114,7 +114,7 @@ test("disconnect confirms one account and leaves the other integration connected
     const path = new URL(route.request().url()).pathname;
     if (route.request().method() === "DELETE") {
       removed = path;
-      return route.fulfill({ status: 204 });
+      return route.fulfill({ json: { cancelled: 0, kept: 0 } });
     }
     return route.fulfill({ json: [
       ...(removed ? [] : [{ id: "ca-work", provider: "googlecalendar", status: "ACTIVE", label: "work@example.test" }]),
@@ -125,12 +125,39 @@ test("disconnect confirms one account and leaves the other integration connected
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Calendar" }).click();
   await page.getByRole("tab", { name: /Integrations/ }).click();
   await page.locator(".calendar-account-row", { hasText: "work@example.test" }).getByRole("button", { name: "Disconnect" }).click();
-  await expect(page.getByText("Saved meetings and scheduled assistants remain.")).toBeVisible();
+  await expect(page.getByText("Saved meetings and briefings remain.", { exact: false })).toBeVisible();
   expect(removed).toBeNull();
   await page.locator(".calendar-account-row", { hasText: "work@example.test" }).getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => removed).toBe("/v1/calendar/connections/ca-work");
   await expect(page.getByText("work@example.test")).toHaveCount(0);
   await expect(page.getByText("personal@example.test")).toBeVisible();
+});
+
+test("disconnect asks what happens to scheduled assistants and warns about a personal Microsoft account", async ({ page }) => {
+  let removed: string | null = null;
+  await page.route("**/v1/calendar/connections**", (route) => {
+    const url = new URL(route.request().url());
+    if (route.request().method() === "DELETE") {
+      removed = `${url.pathname}${url.search}`;
+      return route.fulfill({ json: { cancelled: 2, kept: 0 } });
+    }
+    return route.fulfill({ json: [
+      ...(removed ? [] : [{ id: "ca-work", provider: "googlecalendar", status: "ACTIVE", label: "work@example.test", meetings_found: 4, scheduled: 2, last_synced_at: "2026-09-30T08:00:00Z" }]),
+      { id: "ca-personal", provider: "outlook", status: "ACTIVE", label: "personal@example.test", account_type: "personal", meetings_found: 0, scheduled: 0 },
+    ] });
+  });
+  await page.goto("/");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Calendar" }).click();
+  await page.getByRole("tab", { name: /Integrations/ }).click();
+  const work = page.locator(".calendar-account-row", { hasText: "work@example.test" });
+  await expect(work).toContainText("4 meetings found · 2 assistants scheduled");
+  await expect(page.locator(".calendar-account-row", { hasText: "personal@example.test" })).toContainText("This is a personal Microsoft account");
+  await work.getByRole("button", { name: "Disconnect" }).click();
+  await expect(work).toContainText("2 assistants are scheduled from it.");
+  await expect(work.getByRole("button", { name: "Keep assistants" })).toBeVisible();
+  await work.getByRole("button", { name: "Cancel 2 assistants" }).click();
+  await expect.poll(() => removed).toBe("/v1/calendar/connections/ca-work?scheduled=cancel");
+  await expect(page.getByText("2 scheduled assistants were cancelled.", { exact: false })).toBeVisible();
 });
 
 test("calendar connections can be named when added and renamed later", async ({ page }) => {

@@ -1,4 +1,4 @@
-import type { AccountLinkPreview, AuditEvent, BriefDocument, CalendarConnection, CalendarEvent, CalendarPeriod, CalendarSchedule, CalendarSnapshot, Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeTextProfile, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, MinutesStatus, MomGuidance, OrganizationBrief, PostMeetingJob, PrepReport, AiSettingsInput, AiSettingsView, CredentialTestResult, ModelCatalog, ModelCatalogQuery, ProfileKeyChoice, ProfileKind, ProviderProfile, ResendStatus, VaultCredential, VaultCredentialInput, VaultProviderType, RetentionPolicy, SpeakerIdentity, SpeakerSuggestion, Team, TeamInput, TextModelCatalog, TranscriptSegment, TranscriptionRoute, UsageSummary, Workspace, WorkspaceCalendarConnection, WorkspaceMember, WorkspaceOperations, WorkspaceOption } from "./types";
+import type { AccountLinkPreview, AuditEvent, BriefDocument, CalendarConnection, CalendarDisconnectResult, ScheduledOnDisconnect, CalendarEvent, CalendarPeriod, CalendarSchedule, CalendarSnapshot, Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeTextProfile, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, MinutesStatus, MomGuidance, OrganizationBrief, PostMeetingJob, PrepReport, AiSettingsInput, AiSettingsView, CredentialTestResult, ModelCatalog, ModelCatalogQuery, ProfileKeyChoice, ProfileKind, ProviderProfile, ResendStatus, VaultCredential, VaultCredentialInput, VaultProviderType, RetentionPolicy, SpeakerIdentity, SpeakerSuggestion, Team, TeamInput, TextModelCatalog, TranscriptSegment, TranscriptionRoute, UsageSummary, Workspace, WorkspaceCalendarConnection, WorkspaceMember, WorkspaceOperations, WorkspaceOption } from "./types";
 import { formatDateTime } from "./time-store";
 
 export interface MeetingsService {
@@ -64,7 +64,7 @@ export interface MeetingsService {
   /** Returns the provider consent URL. `popup` asks for the callback page that reports back to the opening tab. */
   connectCalendar(provider: CalendarConnection["provider"], alias?: string, options?: { popup?: boolean }): Promise<string>;
   renameCalendarConnection(connectionId: string, alias: string): Promise<CalendarConnection>;
-  disconnectCalendar(connectionId: string): Promise<void>;
+  disconnectCalendar(connectionId: string, scheduled?: ScheduledOnDisconnect): Promise<CalendarDisconnectResult>;
   scanCalendar(connectionId: string, period: CalendarPeriod, timezone: string): Promise<CalendarEvent[]>;
   getSyncedCalendar(startDate: string, endDate: string, timezone: string): Promise<CalendarSnapshot>;
   syncCalendar(startDate: string, endDate: string, timezone: string, connectionIds?: string[]): Promise<CalendarSnapshot>;
@@ -717,8 +717,9 @@ class HttpMeetingsService implements MeetingsService {
     });
   }
 
-  async disconnectCalendar(connectionId: string): Promise<void> {
-    await api<void>(`/v1/calendar/connections/${encodeURIComponent(connectionId)}`, { method: "DELETE" });
+  async disconnectCalendar(connectionId: string, scheduled: ScheduledOnDisconnect = "keep"): Promise<CalendarDisconnectResult> {
+    const params = new URLSearchParams({ scheduled });
+    return api<CalendarDisconnectResult>(`/v1/calendar/connections/${encodeURIComponent(connectionId)}?${params}`, { method: "DELETE" });
   }
 
   async scanCalendar(connectionId: string, period: CalendarPeriod, timezone: string): Promise<CalendarEvent[]> {

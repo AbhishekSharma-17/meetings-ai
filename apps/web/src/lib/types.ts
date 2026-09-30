@@ -403,7 +403,20 @@ export type MomGuidance = {
   focus_fields: string[];
 };
 
-export type CalendarConnection = { id: string; provider: "googlecalendar" | "outlook" | "calendly" | "zoom"; status: string; label: string; identity?: string | null };
+export type CalendarConnection = {
+  id: string; provider: "googlecalendar" | "outlook" | "calendly" | "zoom"; status: string; label: string; identity?: string | null;
+  /** Outlook only: a work/school (Microsoft 365) or a personal Microsoft account; null when unknown. */
+  account_type?: "work" | "personal" | null;
+  /** Meetings with a join link found by the last sync (null: never synced). */
+  meetings_found?: number | null;
+  last_synced_at?: string | null;
+  /** Pending assistants scheduled from this account. */
+  scheduled?: number;
+  /** Another connection id for the same mailbox (connected twice). */
+  same_account_as?: string | null;
+};
+export type ScheduledOnDisconnect = "keep" | "cancel";
+export type CalendarDisconnectResult = { cancelled: number; kept: number };
 export type WorkspaceCalendarConnection = CalendarConnection & { user_id: string; user_name: string; user_email: string | null };
 export type CalendarPeriod = "today" | "tomorrow" | "this_week" | "next_week";
 export type CalendarInvitee = { name: string; email: string | null; response_status: string | null };

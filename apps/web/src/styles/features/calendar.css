@@ -22,12 +22,14 @@
 .calendar-spin { animation:spin 1s linear infinite; }
 .calendar-error { margin-bottom:16px; }
 .calendar-connect-hint { margin-bottom:14px; align-items:center; }
-.calendar-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px 16px; flex-wrap:wrap; margin-bottom:14px; }
-.calendar-month-nav { display:flex; align-items:center; gap:6px; min-width:0; }
+/* Two rows: month navigation and sync status, then the filters (search takes the spare width). */
+.calendar-toolbar { display:grid; grid-template-columns:minmax(0,1fr) auto; grid-template-areas:"nav status" "filters filters"; align-items:center; gap:12px 16px; margin-bottom:14px; }
+.calendar-month-nav { grid-area:nav; display:flex; align-items:center; gap:6px; min-width:0; }
 .calendar-month-nav h2 { margin:0 4px 0 8px; font-size:18px; letter-spacing:-.014em; white-space:nowrap; }
-.calendar-toolbar-end { display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; min-width:0; }
-.calendar-sync-status { margin-right:4px; color:var(--text-tertiary); font-size:12px; white-space:nowrap; font-variant-numeric:tabular-nums; }
-.calendar-account-select { width:250px; }
+.calendar-sync-status { grid-area:status; justify-self:end; color:var(--text-tertiary); font-size:12px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.calendar-toolbar-end { grid-area:filters; display:flex; align-items:center; gap:8px; flex-wrap:wrap; min-width:0; }
+.calendar-toolbar-end .calendar-search { flex:1 1 260px; min-width:0; }
+.calendar-account-select { flex:0 1 240px; min-width:180px; }
 .calendar-range-trigger { font-variant-numeric:tabular-nums; }
 .calendar-range-popover { display:grid; gap:12px; width:min(340px,calc(100vw - 32px)); padding:14px; }
 .calendar-range-title { font-size:13px; font-weight:600; }
@@ -145,6 +147,10 @@
 .calendar-disconnect-confirm { align-items:center; background:var(--destructive-subtle); border-color:var(--destructive-border); }
 .calendar-disconnect-confirm p { flex:1 1 240px; font-size:13px; line-height:1.5; }
 .calendar-disconnect-confirm p span { color:var(--text-secondary); }
+.calendar-account-meta small { display:block; text-align:right; }
+.calendar-account-facts { margin-top:1px; color:var(--text-secondary); }
+.calendar-account-notices { display:grid; gap:8px; margin:0 20px 14px 52px; }
+.calendar-account-notices .alert { font-size:13px; line-height:1.5; }
 .calendar-teams-note { max-width:72ch; }
 .calendar-alias-dialog { width:min(calc(100vw - 32px),480px); }
 .calendar-alias-title { display:flex; align-items:flex-start; gap:14px; padding-right:28px; }
@@ -266,9 +272,10 @@ a.prep-citation:hover { text-decoration:none; background:var(--card); }
   .prep-report-grid { grid-template-columns:minmax(0,1fr); }
 }
 @media (max-width: 640px) {
-  .calendar-toolbar-end { width:100%; justify-content:flex-start; }
-  .calendar-account-select { flex:1 1 160px; width:auto; }
-  .calendar-sync-status { flex-basis:100%; order:3; }
+  .calendar-toolbar { grid-template-columns:minmax(0,1fr); grid-template-areas:"nav" "filters" "status"; }
+  .calendar-sync-status { justify-self:start; }
+  .calendar-toolbar-end .calendar-search { flex-basis:100%; }
+  .calendar-account-select { flex:1 1 160px; min-width:0; }
   .calendar-month-nav h2 { font-size:16px; }
   .calendar-weekdays span { padding:6px 0; text-align:center; }
   .calendar-day { align-items:center; gap:3px; min-height:50px; padding:5px 2px; }
@@ -286,7 +293,8 @@ a.prep-citation:hover { text-decoration:none; background:var(--card); }
   .calendar-account-main { flex-wrap:wrap; padding:10px 16px; }
   .calendar-account-copy { flex-basis:calc(100% - 32px); }
   .calendar-account-meta { flex:1; padding-left:32px; }
-  .calendar-row-panel { margin:0 16px 14px; }
+  .calendar-account-meta small { text-align:left; }
+  .calendar-row-panel, .calendar-account-notices { margin:0 16px 14px; }
   .calendar-import-controls { grid-template-columns:minmax(0,1fr); }
   .nm-collapsible-summary { display:none; }
   .nm-collapsible-trigger { grid-template-columns:minmax(0,1fr) 16px; }

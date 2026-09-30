@@ -244,7 +244,8 @@ def test_disconnect_only_deletes_own_account_and_requests_upstream_revocation(tm
         assert denied.status_code == 404
         assert not any(request.method == "DELETE" for request in requests)
         removed = client.delete("/v1/calendar/connections/ca-own")
-        assert removed.status_code == 204
+        assert removed.status_code == 200
+        assert removed.json() == {"cancelled": 0, "kept": 0}
 
     deletes = [request for request in requests if request.method == "DELETE"]
     assert len(deletes) == 1

@@ -5,7 +5,7 @@ import { Popover } from "@base-ui/react/popover";
 import { Tabs } from "@base-ui/react/tabs";
 import { CalendarDays, CalendarRange, ChevronLeft, ChevronRight, Mic, Plug, Plus, RefreshCw } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
-import type { CachedCalendarEvent, CalendarConnection, CalendarSchedule, CalendarSnapshot } from "@/lib/types";
+import type { CachedCalendarEvent, CalendarConnection, CalendarSchedule, CalendarSnapshot, ScheduledOnDisconnect } from "@/lib/types";
 import type { CalendarSelection } from "./calendar-import-dialog";
 import { CalendarIntegrations } from "./calendar-integrations";
 import { CalendarConnectWaiting } from "./calendar-connect-waiting";
@@ -40,8 +40,7 @@ function validDate(value: unknown): value is string {
 function initialPreferences(storageKey: string): CalendarPreferences {
   const first = currentMonth();
   const fallback: CalendarPreferences = {
-    startDate: dayKey(first), endDate: dayKey(new Date(first.getFullYear(), first.getMonth() + 1, 0)),
-    selectedDay: todayKey(), month: dayKey(first), accountFilter: "all", tab: "calendar", selectedEventId: null,
+    ...gridRange(first), selectedDay: todayKey(), month: dayKey(first), accountFilter: "all", tab: "calendar", selectedEventId: null,
   };
   if (typeof window === "undefined") return fallback;
   try {
@@ -49,10 +48,16 @@ function initialPreferences(storageKey: string): CalendarPreferences {
     if (!saved || !validDate(saved.startDate) || !validDate(saved.endDate)) return fallback;
     const days = (Date.parse(`${saved.endDate}T00:00:00Z`) - Date.parse(`${saved.startDate}T00:00:00Z`)) / 86_400_000 + 1;
     if (days < 1 || days > 90) return fallback;
+    const month = validDate(saved.month) ? saved.month : fallback.month;
+    const [year, monthIndex] = month.split("-").map(Number);
+    const shown = new Date(year, monthIndex - 1, 1);
+    // A range saved before the grid fetched its edge days covered only the month itself: widen it
+    // to the whole grid so the neighbouring months' days shown there aren't empty.
+    const monthOnly = saved.startDate === dayKey(shown) && saved.endDate === dayKey(new Date(year, monthIndex, 0));
     return {
-      startDate: saved.startDate, endDate: saved.endDate,
+      ...(monthOnly ? gridRange(shown) : { startDate: saved.startDate, endDate: saved.endDate }),
       selectedDay: validDate(saved.selectedDay) ? saved.selectedDay : fallback.selectedDay,
-      month: validDate(saved.month) ? saved.month : fallback.month,
+      month,
       accountFilter: typeof saved.accountFilter === "string" ? saved.accountFilter : "all",
       tab: saved.tab === "integrations" ? "integrations" : "calendar",
       selectedEventId: typeof saved.selectedEventId === "string" ? saved.selectedEventId : null,
@@ -68,6 +73,15 @@ function coveredBySync(startDate: string, endDate: string, timezone: string, ran
 
 /** The first of this month, in the person's time zone (as a civil date). */
 function currentMonth(): Date { const [year, month] = todayKey().split("-").map(Number); return new Date(year, month - 1, 1); }
+
+const GRID_DAYS = 42; // six weeks, Sunday first: what MonthGrid shows
+
+/** Every day the month grid shows (including the neighbouring months' edge days), so none of them looks empty. */
+function gridRange(month: Date): { startDate: string; endDate: string } {
+  const start = new Date(month.getFullYear(), month.getMonth(), 1 - new Date(month.getFullYear(), month.getMonth(), 1).getDay());
+  const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + GRID_DAYS - 1);
+  return { startDate: dayKey(start), endDate: dayKey(end) };
+}
 
 function formatDay(key: string): string {
   return validDate(key) ? formatDayHeading(key, shortDate) : "—";
@@ -196,7 +210,7 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
   const monthDays = useMemo(() => {
     const first = new Date(month.getFullYear(), month.getMonth(), 1);
     const gridStart = new Date(first); gridStart.setDate(1 - first.getDay());
-    return Array.from({ length: 42 }, (_, index) => new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + index));
+    return Array.from({ length: GRID_DAYS }, (_, index) => new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + index));
   }, [month]);
   const lastSynced = snapshot.syncs
     .filter((item) => accountFilter === "all" || item.connection_id === accountFilter)
@@ -205,15 +219,15 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
 
   function changeMonth(offset: number) {
     const next = new Date(month.getFullYear(), month.getMonth() + offset, 1);
-    setMonth(next); setStartDate(dayKey(next));
-    setEndDate(dayKey(new Date(next.getFullYear(), next.getMonth() + 1, 0)));
+    const range = gridRange(next);
+    setMonth(next); setStartDate(range.startDate); setEndDate(range.endDate);
     setSelectedDay(dayKey(next)); setSelectedEvent(null);
   }
 
   function goToToday() {
     const next = currentMonth();
-    setMonth(next); setStartDate(dayKey(next));
-    setEndDate(dayKey(new Date(next.getFullYear(), next.getMonth() + 1, 0)));
+    const range = gridRange(next);
+    setMonth(next); setStartDate(range.startDate); setEndDate(range.endDate);
     setSelectedDay(todayKey()); setSelectedEvent(null);
   }
 
@@ -271,10 +285,14 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
     finally { setBusy(false); }
   }
 
-  async function disconnect(connectionId: string): Promise<boolean> {
+  async function disconnect(connectionId: string, scheduled: ScheduledOnDisconnect): Promise<boolean> {
     setBusy(true); setError(null);
     try {
-      await meetingsService.disconnectCalendar(connectionId);
+      const result = await meetingsService.disconnectCalendar(connectionId, scheduled);
+      const kept = result?.kept ?? 0, cancelled = result?.cancelled ?? 0;
+      if (kept || cancelled) setNotice({ tone: "success", text: kept
+        ? `Disconnected. ${kept} scheduled ${kept === 1 ? "assistant still joins" : "assistants still join"} at the saved time; reconnect this account to keep ${kept === 1 ? "it" : "them"} in step with calendar changes.`
+        : `Disconnected. ${cancelled} scheduled ${cancelled === 1 ? "assistant was" : "assistants were"} cancelled.` });
       // The server forgets this account's meetings; drop them here too so nothing lingers until the next sync.
       setSnapshot((current) => ({ ...current, events: current.events.filter((event) => event.connection_id !== connectionId), syncs: current.syncs.filter((state) => state.connection_id !== connectionId) }));
       setConnections(await meetingsService.listCalendarConnections());
@@ -317,8 +335,8 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
             <h2>{formatDayHeading(dayKey(month), { month: "long", year: "numeric" })}</h2>
             <button type="button" className="button ghost sm" onClick={goToToday}>Today</button>
           </div>
+          {lastSynced ? <span className="calendar-sync-status">{accountFilter === "all" && active.length > 1 ? `${active.length} accounts · ` : ""}Synced {formatDateTime(lastSynced)}</span> : null}
           <div className="calendar-toolbar-end">
-            {lastSynced ? <span className="calendar-sync-status">{accountFilter === "all" && active.length > 1 ? `${active.length} accounts · ` : ""}Synced {formatDateTime(lastSynced)}</span> : null}
             <FilterInput id="calendar-search" className="calendar-search" label="Search meetings in range" value={query} onChange={setQuery} placeholder="Search title, person or company" />
             <RangePicker startDate={startDate} endDate={endDate} timezone={timezone} onStartChange={(value) => { setStartDate(value); setSelectedEvent(null); }} onEndChange={(value) => { setEndDate(value); setSelectedEvent(null); }} />
             <UiSelect id="calendar-account-filter" label="Account" hideLabel size="sm" className="calendar-account-select" value={accountFilter} onChange={setAccountFilter} options={accountOptions} disabled={!active.length} />

@@ -2,7 +2,7 @@ import type { CachedCalendarEvent, CalendarConnection, CalendarEvent, CalendarSc
 import { DEMO_CALENDARS_KEY, DEMO_PENDING_NOTICE_KEY } from "../../demo-mode";
 import { calendarEventId, localTime } from "../fixtures/ids";
 import { demoMove } from "../fixtures/calendar";
-import { json, noContent, notify, problem, str, strList, wait } from "../http";
+import { json, notify, problem, str, strList, wait } from "../http";
 import type { DemoRouter } from "../router";
 import type { AddedCalendar, DemoStore } from "../store";
 import { createMeeting, startJoin } from "./meetings";
@@ -70,7 +70,14 @@ function schedule(store: DemoStore, meetingId: string, event: CalendarEvent): Ca
 
 export function registerCalendar(router: DemoRouter): void {
   router
-    .on("GET", "/v1/calendar/connections", ({ store }) => json(store.connections))
+    .on("GET", "/v1/calendar/connections", ({ store }) => json(store.connections.map((connection) => {
+      const sync = store.syncs.find((item) => item.connection_id === connection.id);
+      return {
+        ...connection, last_synced_at: sync?.last_synced_at ?? null,
+        meetings_found: sync ? store.events.filter((event) => event.connection_id === connection.id).length : null,
+        scheduled: store.schedules.filter((item) => item.connection_id === connection.id && item.status === "pending").length,
+      };
+    })))
     .on("POST", "/v1/calendar/connect/:provider", ({ store, params, body }) => {
       const provider = PROVIDERS.find((item) => item === params.provider);
       if (!provider) return problem(404, "Unknown calendar provider.");
@@ -94,13 +101,16 @@ export function registerCalendar(router: DemoRouter): void {
       saveAdded(store);
       return json(updated);
     })
-    .on("DELETE", "/v1/calendar/connections/:id", ({ store, params }) => {
+    .on("DELETE", "/v1/calendar/connections/:id", ({ store, params, query }) => {
+      const pending = store.schedules.filter((item) => item.connection_id === params.id && item.status === "pending");
+      const cancel = query.get("scheduled") === "cancel";
+      if (cancel) store.schedules = store.schedules.map((item) => pending.includes(item) ? { ...item, status: "cancelled", last_error: "Cancelled when the calendar was disconnected" } : item);
       store.connections = store.connections.filter((item) => item.id !== params.id);
       store.events = store.events.filter((event) => event.connection_id !== params.id);
       store.syncs = store.syncs.filter((sync) => sync.connection_id !== params.id);
       saveAdded(store);
       notify("Demo: the account was disconnected in the sample only. Reload the demo to restore it.");
-      return noContent();
+      return json({ cancelled: cancel ? pending.length : 0, kept: cancel ? 0 : pending.length });
     })
     .on("GET", "/v1/calendar/events", ({ store, query }) => {
       const period = query.get("period") ?? "this_week";

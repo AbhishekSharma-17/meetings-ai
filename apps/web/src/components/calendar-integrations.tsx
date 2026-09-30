@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { formatDateTime } from "@/lib/time-preferences";
 import { Link2, RefreshCw } from "lucide-react";
-import type { CalendarConnection, CalendarSyncState } from "@/lib/types";
+import type { CalendarConnection, CalendarSyncState, ScheduledOnDisconnect } from "@/lib/types";
+import { AccountNotices, DisconnectConfirm, accountFacts } from "./calendar-account-notices";
 import { AccountRow, CalendarAliasDialog, ProviderGrid, connectionStatusLabel } from "./calendar-connections";
 import { calendarProviderNames, type CalendarProvider } from "./calendar-providers";
 import { NoMatches, SearchToolbar } from "./scroll-panel";
@@ -26,7 +27,7 @@ export function CalendarIntegrations({ connections, syncs, busy, connecting = fa
   onSync(connectionId: string): void;
   onConnect(provider: CalendarProvider, alias: string): void;
   onRename(connectionId: string, alias: string): Promise<boolean>;
-  onDisconnect(connectionId: string): Promise<boolean>;
+  onDisconnect(connectionId: string, scheduled: ScheduledOnDisconnect): Promise<boolean>;
 }) {
   const [connectProvider, setConnectProvider] = useState<CalendarProvider | null>(null);
   const [editTarget, setEditTarget] = useState<string | null>(null);
@@ -61,8 +62,9 @@ export function CalendarIntegrations({ connections, syncs, busy, connecting = fa
           const confirming = disconnectTarget === item.id;
           const rowSyncing = syncingIds.includes(item.id);
           const syncLabel = rowSyncing ? "Syncing…" : sync ? `Synced ${formatDateTime(sync.last_synced_at, syncFormat)}` : "Not synced yet";
+          const facts = accountFacts(item);
           const meta = item.status === "ACTIVE"
-            ? <small role={rowSyncing ? "status" : undefined}>{syncLabel}</small>
+            ? <><small role={rowSyncing ? "status" : undefined}>{syncLabel}</small>{facts ? <small className="calendar-account-facts">{facts}</small> : null}</>
             : <Badge tone="warning" dot>{connectionStatusLabel(item.status)}</Badge>;
           const actions = editing || confirming ? null : <>
             {item.status === "ACTIVE" ? <button type="button" className="button ghost icon sm calendar-row-sync" aria-label={`Sync ${item.label}`} title={`Sync ${item.label}`} aria-busy={rowSyncing || undefined} disabled={busy || rowSyncing || !canSync} onClick={() => onSync(item.id)}>
@@ -82,13 +84,9 @@ export function CalendarIntegrations({ connections, syncs, busy, connecting = fa
                 <button type="submit" className="button primary sm" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
               </div>
             </form> : null}
-            {confirming ? <div className="calendar-row-panel calendar-disconnect-confirm" role="group" aria-label={`Disconnect ${item.label}`}>
-              <p><b>Disconnect this account?</b> <span>Saved meetings and scheduled assistants remain.</span></p>
-              <div className="button-group">
-                <button type="button" className="button ghost sm" disabled={busy} onClick={() => setDisconnectTarget(null)}>Cancel</button>
-                <button type="button" className="button danger sm" disabled={busy} onClick={() => void onDisconnect(item.id).then((done) => { if (done) setDisconnectTarget(null); })}>{busy ? "Disconnecting…" : "Confirm"}</button>
-              </div>
-            </div> : null}
+            {confirming ? <DisconnectConfirm connection={item} busy={busy} onCancel={() => setDisconnectTarget(null)}
+              onConfirm={(scheduled) => void onDisconnect(item.id, scheduled).then((done) => { if (done) setDisconnectTarget(null); })} /> : null}
+            {editing || confirming ? null : <AccountNotices connection={item} connections={connections} />}
           </AccountRow>;
         })}
       </ul> : <div className="card-body"><EmptyState plain icon={<Link2 />} title="No accounts yet">Connect a source above to bring in your meetings.</EmptyState></div>}

@@ -252,7 +252,7 @@ def test_disconnected_account_meetings_leave_the_calendar(tmp_path):
         assert {event["connection_id"] for event in _sync(client).json()["events"]} == {"google", "outlook"}
 
         # Disconnecting through the app hides the account's meetings immediately.
-        assert client.delete("/v1/calendar/connections/google").status_code == 204
+        assert client.delete("/v1/calendar/connections/google").status_code == 200
         listed = client.get("/v1/calendar/synced", params=params).json()
         assert {event["connection_id"] for event in listed["events"]} == {"outlook"}
         assert {state["connection_id"] for state in listed["syncs"]} == {"outlook"}

@@ -420,6 +420,14 @@ class ComposioCalendar:
             result = data
         return result
 
+    async def outlook_profile(self, actor: Actor, connection: CalendarConnection) -> dict:
+        """The signed-in Microsoft account (Graph ``/me``) behind an Outlook connection."""
+        if connection.provider != "outlook":
+            raise CalendarError("only Outlook connections have a Microsoft profile")
+        data = await self._execute(actor, connection, "OUTLOOK_GET_PROFILE", {})
+        nested = data.get("response_data")
+        return nested if isinstance(nested, dict) else data
+
     async def events(self, actor: Actor, connection_id: str, preset: CalendarRange, timezone: str) -> CalendarEventsResponse:
         timezone = _TIMEZONE_ALIASES.get(timezone, timezone)
         start, end = calendar_window(preset, timezone)
