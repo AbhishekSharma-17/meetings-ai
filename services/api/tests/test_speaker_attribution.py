@@ -122,7 +122,7 @@ def test_multispeaker_review_persists_and_stale_mom_cannot_be_sent():
 
         draft = client.post(f"/v1/meetings/{meeting_id}/minutes/generate")
         assert draft.status_code == 200
-        assert "ID=s1" in model.prompts[-1] and "SPEAKER=Carol" in model.prompts[-1]
+        assert "ID=S1" in model.prompts[-1] and "SPEAKER=Carol" in model.prompts[-1]  # short IDs in the prompt
         assert draft.json()["questions_asked"][0]["speaker"] == "Alice"
         assert draft.json()["speaker_contributions"][2]["speaker"] == "Carol"
         assert client.post(f"/v1/meetings/{meeting_id}/minutes/approve").status_code == 200

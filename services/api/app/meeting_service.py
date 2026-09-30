@@ -472,10 +472,26 @@ def _enum_or_current(value: object, enum_type: type, current: object) -> object:
         return current
 
 
+# Vexa publishes a segment as `<speaker key>:<start in epoch ms>` and may later re-publish the same
+# sentence as `<speaker key>:<sequence number>`. Speaker corrections and minutes evidence are stored by
+# segment ID, so both forms are mapped to the original time-based one: each sentence keeps one ID.
+_EPOCH_SECONDS = 1_000_000_000   # starts above this are absolute times, not offsets into the call
+_MAX_SEQUENCE = 1_000_000        # a real sequence number, never an epoch-ms timestamp
+
+
+def _stable_segment_id(raw_id: str, speaker_key: object, start: float) -> str:
+    key = str(speaker_key or "")
+    prefix, separator, suffix = raw_id.rpartition(":")
+    if (not key or not separator or prefix != key or not suffix.isdigit()
+            or int(suffix) >= _MAX_SEQUENCE or start < _EPOCH_SECONDS):
+        return raw_id
+    return f"{key}:{round(start * 1000)}"
+
+
 def _segment(item: dict[str, object]) -> MeetingTranscriptSegment:
     start = max(_number(item.get("start"), 0), 0)
     end = max(_number(item.get("end"), start), start)
-    raw_id = str(item.get("segment_id") or "").strip()
+    raw_id = _stable_segment_id(str(item.get("segment_id") or "").strip(), item.get("speaker_key"), start)
     if len(raw_id) > 255:
         raw_id = f"vexa-{sha256(raw_id.encode()).hexdigest()}"
     raw_speaker = str(item["speaker"]) if item.get("speaker") is not None else None

@@ -1,6 +1,7 @@
 """Post-meeting MOM generation, review, approval, and delivery workflow."""
 
 import json
+import logging
 import re
 from base64 import b64encode
 from hashlib import sha256
@@ -28,6 +29,8 @@ from .adapters.resend import EmailDeliveryError, ResendAdapter
 from .notification_events import NO_EVENTS
 from .repository import MinutesNotFoundError
 from .service import ProviderProfileService, ProviderSelectionError
+
+logger = logging.getLogger(__name__)
 
 
 class MinutesConflictError(RuntimeError):
@@ -90,8 +93,12 @@ class MinutesService:
         source_revision = self.repository.get_transcript_revision(meeting_id)
         guidance = self.repository.get_mom_guidance(meeting_id)
         first_start = min(segment.start_seconds for segment in finalized)
+        # Long transcript IDs are easy for a model to mis-copy; it cites short ones (S1, S2, …) that we
+        # map back to the real IDs after generation.
+        aliases = {f"S{index}": segment.segment_id for index, segment in enumerate(finalized, 1)}
+        alias_of = {segment_id: alias for alias, segment_id in aliases.items()}
         transcript = "\n".join(
-            f"ID={segment.segment_id}\n"
+            f"ID={alias_of.get(segment.segment_id, segment.segment_id)}\n"
             f"TIME={max(0, segment.start_seconds - first_start):.1f}s into meeting\n"
             f"SPEAKER={segment.speaker or 'Unidentified speaker'}\n"
             f"TEXT={segment.text.strip()}"
@@ -104,7 +111,7 @@ class MinutesService:
                 "Do not invent names, owners, dates, commitments, decisions, or context. "
                 "Treat Unidentified speaker as unknown, never infer their name from context. "
                 "Use null when an action owner or due date was not explicitly stated. "
-                "Attach exact segment IDs only in evidence_segment_ids arrays for attributed claims and actions. "
+                "Attach exact segment IDs (such as S12) only in evidence_segment_ids arrays for attributed claims and actions. "
                 "Never put raw segment IDs or bracketed citations in narrative fields."
                 " Formatting preferences are lower priority than factual grounding and evidence requirements."
             ),
@@ -134,8 +141,12 @@ class MinutesService:
             profile, result = await self.providers.generate_text(request)
             payload = result.structured_output or _parse_json(result.text)
             draft = MeetingMinutesDraft.model_validate(payload)
-            _normalize_generated_evidence(draft, finalized)
-            _validate_generated_evidence(draft, finalized)
+            _normalize_generated_evidence(draft, finalized, aliases)
+            _check_speaker_coverage(draft, finalized)
+            left_out = _drop_unsupported_generated_claims(draft, finalized)
+            if left_out:
+                logger.info("MOM for %s: left out %s unsupported citation(s) or claim(s)", meeting_id, left_out)
+            _validate_references(draft, finalized)
             times = _evidence_times(finalized)
             draft.title = _human_text(draft.title, times)
             draft.executive_summary = _human_text(draft.executive_summary, times)
@@ -384,23 +395,86 @@ def _validate_references(draft: MeetingMinutesDraft, segments: list[object]) -> 
             )
 
 
-def _normalize_generated_evidence(draft: MeetingMinutesDraft, segments: list[object]) -> None:
-    """Remove a copied timestamp only when the remaining ID exactly exists."""
+def _normalize_generated_evidence(
+    draft: MeetingMinutesDraft, segments: list[object], aliases: dict[str, str] | None = None,
+) -> None:
+    """Map short IDs (S12) back to real ones; remove a copied timestamp only when the ID then exists."""
     valid_ids = {segment.segment_id for segment in segments if segment.segment_id}
+    aliases = {alias.upper(): segment_id for alias, segment_id in (aliases or {}).items()}
     for claim in [*draft.speaker_contributions, *draft.questions_asked, *draft.action_items]:
         normalized = []
         for raw in claim.evidence_segment_ids:
-            candidate = raw.strip().removeprefix("[").removesuffix("]")
-            if candidate not in valid_ids:
-                id_part, separator, _ = candidate.partition(" @ ")
-                if separator and id_part in valid_ids:
-                    candidate = id_part
+            candidate = raw.strip().removeprefix("[").removesuffix("]").strip()
+            id_part, separator, _ = candidate.partition(" @ ")
+            if separator and (id_part in valid_ids or id_part.upper() in aliases):
+                candidate = id_part
+            if candidate not in valid_ids:  # a real ID always wins over a look-alike short ID
+                candidate = aliases.get(candidate.upper(), candidate)
             normalized.append(candidate)
         claim.evidence_segment_ids = normalized
 
 
+def _drop_unsupported_generated_claims(draft: MeetingMinutesDraft, segments: list[object]) -> int:
+    """Leave out what the transcript does not support, instead of failing the whole generated draft.
+
+    Citations to unavailable segments are removed and a claim left without evidence is dropped; an
+    action owner, or a question's asker, that the cited evidence does not support becomes unknown;
+    a contribution attributed to someone who did not say the cited turns is dropped. Human edits are
+    still checked strictly by _validate_references before approval. Returns how many things changed.
+    """
+    by_id = {segment.segment_id: segment for segment in segments if segment.segment_id and segment.completed}
+    changes = 0
+
+    def supported(claim) -> list[object]:
+        nonlocal changes
+        kept = list(dict.fromkeys(item for item in claim.evidence_segment_ids if item in by_id))
+        changes += len(claim.evidence_segment_ids) - len(kept)
+        claim.evidence_segment_ids = kept
+        return [by_id[item] for item in kept]
+
+    actions = []
+    for action in draft.action_items:
+        cited = supported(action)
+        if not cited:
+            changes += 1
+            continue
+        owner = (action.owner or "").strip().casefold()
+        if owner and not any((segment.speaker or "").casefold() == owner or owner in segment.text.casefold()
+                             for segment in cited):
+            action.owner = None
+            changes += 1
+        actions.append(action)
+    draft.action_items = actions
+
+    contributions = []
+    for contribution in draft.speaker_contributions:
+        cited = supported(contribution)
+        if not cited or not any(segment.speaker == contribution.speaker for segment in cited):
+            changes += 1
+            continue
+        contributions.append(contribution)
+    draft.speaker_contributions = contributions
+
+    questions = []
+    for question in draft.questions_asked:
+        cited = supported(question)
+        if not cited:
+            changes += 1
+            continue
+        if question.speaker and not any(segment.speaker == question.speaker for segment in cited):
+            question.speaker = None
+            changes += 1
+        questions.append(question)
+    draft.questions_asked = questions
+    return changes
+
+
 def _validate_generated_evidence(draft: MeetingMinutesDraft, segments: list[object]) -> None:
     _validate_references(draft, segments)
+    _check_speaker_coverage(draft, segments)
+
+
+def _check_speaker_coverage(draft: MeetingMinutesDraft, segments: list[object]) -> None:
     substantive = {
         segment.speaker for segment in segments
         if segment.speaker and len(segment.text.strip()) >= 20

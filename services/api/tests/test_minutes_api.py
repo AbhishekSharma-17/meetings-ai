@@ -136,6 +136,8 @@ def test_generate_review_approve_and_send_minutes() -> None:
         assert generated.json()["status"] == "draft"
         assert generated.json()["action_items"][0]["owner"] == "Abhishek"
         assert generated.json()["provider"] == "fake-openai"
+        real_ids = {item["segment_id"] for item in client.get(f"/v1/meetings/{meeting_id}/transcript").json()["segments"]}
+        assert set(generated.json()["action_items"][0]["evidence_segment_ids"]) <= real_ids  # short IDs mapped back
 
         unapproved = client.post(
             f"/v1/meetings/{meeting_id}/minutes/send",
@@ -267,3 +269,75 @@ def test_generated_evidence_only_normalizes_a_real_id_with_copied_timestamp() ->
     _normalize_generated_evidence(draft, [segment])
     with pytest.raises(MinutesGenerationError, match="unavailable transcript segment"):
         _validate_references(draft, [segment])
+
+
+def _segments(*rows):
+    return [SimpleNamespace(segment_id=sid, speaker=speaker, text=text, completed=True) for sid, speaker, text in rows]
+
+
+def test_generated_evidence_accepts_short_segment_ids_and_maps_them_back() -> None:
+    from app.minutes_service import _normalize_generated_evidence
+
+    segments = _segments(("csrc-840:1:1790750354645", "Anna", "We approved the plan."),
+                         ("csrc-2970:11:1790752587221", "Ben", "I will send the deck."))
+    aliases = {"S1": segments[0].segment_id, "S2": segments[1].segment_id}
+    draft = MeetingMinutesDraft(
+        title="Review", executive_summary="Summary",
+        speaker_contributions=[{"speaker": "Ben", "summary": "Sends the deck.", "evidence_segment_ids": ["S2", "[s2]", "S2 @ 12.0s"]}],
+    )
+    _normalize_generated_evidence(draft, segments, aliases)
+    assert draft.speaker_contributions[0].evidence_segment_ids == [segments[1].segment_id] * 3
+
+
+def test_unsupported_generated_claims_are_left_out_instead_of_failing_the_draft() -> None:
+    from app.minutes_service import _drop_unsupported_generated_claims
+
+    segments = _segments(("s1", "Anna", "We approved the plan."), ("s2", "Ben", "I will send the deck by Friday."))
+    draft = MeetingMinutesDraft(
+        title="Review", executive_summary="Summary",
+        action_items=[
+            {"description": "Send the deck", "owner": "Ben", "evidence_segment_ids": ["s2", "csrc-9:1:123"]},
+            {"description": "Invented task", "owner": None, "evidence_segment_ids": ["csrc-2970:11:1790752587221"]},
+            {"description": "Book the room", "owner": "Carol", "evidence_segment_ids": ["s1"]},
+        ],
+        speaker_contributions=[
+            {"speaker": "Anna", "summary": "Approved the plan.", "evidence_segment_ids": ["s1"]},
+            {"speaker": "Anna", "summary": "Misattributed.", "evidence_segment_ids": ["s2"]},
+        ],
+        questions_asked=[{"speaker": "Ben", "question": "Who approves?", "evidence_segment_ids": ["s1"]}],
+    )
+    changes = _drop_unsupported_generated_claims(draft, segments)
+    assert changes > 0
+    actions = {item.description: item for item in draft.action_items}
+    assert actions["Send the deck"].evidence_segment_ids == ["s2"]  # the invented citation is removed
+    assert "Invented task" not in actions  # no evidence left, so the claim is left out
+    assert actions["Book the room"].owner is None  # owner not supported by the evidence: unassigned
+    assert [item.summary for item in draft.speaker_contributions] == ["Approved the plan."]
+    assert draft.questions_asked[0].speaker is None  # asker not supported: treated as unidentified
+    _validate_references(draft, segments)  # what remains passes the strict check used for approval
+
+
+def test_one_bad_citation_no_longer_sinks_the_whole_draft(monkeypatch) -> None:
+    """Regression: a Teams meeting's MOM failed every retry on one unavailable segment ID."""
+    import app.minutes_service as minutes_module
+
+    segment = MeetingTranscriptSegment(segment_id="csrc-2970:11:1790752587221", start_seconds=1790752587.221,
+                                       end_seconds=1790752590.0, speaker="Anna",
+                                       text="I will send the deck to the client on Friday.")
+    draft_payload = {
+        "title": "Client sync", "executive_summary": "The deck goes out on Friday.",
+        "discussion_points": [], "decisions": [], "open_questions": [], "questions_asked": [],
+        "action_items": [
+            {"description": "Send the deck", "owner": "Anna", "due_date": "Friday", "evidence_segment_ids": ["S1"]},
+            {"description": "Stale citation", "owner": None, "due_date": None, "evidence_segment_ids": ["csrc-2970:11:0"]},
+        ],
+        "speaker_contributions": [{"speaker": "Anna", "summary": "Owns the deck.", "evidence_segment_ids": ["S1"]}],
+    }
+    draft = MeetingMinutesDraft.model_validate(draft_payload)
+    aliases = {"S1": segment.segment_id}
+    minutes_module._normalize_generated_evidence(draft, [segment], aliases)
+    minutes_module._check_speaker_coverage(draft, [segment])
+    minutes_module._drop_unsupported_generated_claims(draft, [segment])
+    minutes_module._validate_references(draft, [segment])
+    assert [item.description for item in draft.action_items] == ["Send the deck"]
+    assert draft.action_items[0].evidence_segment_ids == [segment.segment_id]
