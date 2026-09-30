@@ -325,6 +325,22 @@ class MeetingKnowledgeUpdate(BaseModel):
         return MeetingCreate.normalize_tags(tags)
 
 
+class MeetingScheduleSummary(BaseModel):
+    """The automatic join behind a meeting, so every list can say "Scheduled", "Moved",
+    "Cancelled" or "Missed" instead of a bare "Created"."""
+
+    status: str  # pending | joining | joined | cancelled | missed | failed
+    provider: str  # manual | googlecalendar | outlook | calendly | zoom
+    starts_at: datetime
+    ends_at: datetime
+    # Why it changed, in the calendar's words (e.g. "Cancelled in Outlook Calendar").
+    note: str | None = None
+    # When the status last changed (for a cancel: when it was noticed).
+    changed_at: datetime
+    # The original start before the first detected move, while the meeting is at another time.
+    rescheduled_from: datetime | None = None
+
+
 class MeetingPublic(BaseModel):
     id: UUID
     meeting_url: str
@@ -348,6 +364,8 @@ class MeetingPublic(BaseModel):
     last_refreshed_at: datetime | None
     # Where the minutes are (draft, approved, sent); None until drafted. Filled in meeting lists.
     minutes_status: "MinutesStatus | None" = None
+    # The scheduled join, when the meeting came from a calendar or a manual schedule.
+    schedule: MeetingScheduleSummary | None = None
 
 
 class MeetingListResponse(BaseModel):

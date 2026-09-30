@@ -10,6 +10,22 @@ export type Meeting = {
   platform: "Google Meet" | "Zoom" | "Microsoft Teams" | "In person";
   /** Where the minutes are once drafted; null until then (older APIs omit it). */
   minutesStatus?: MinutesStatus | null;
+  /** The scheduled join behind the meeting (calendar or manual schedule); null for direct joins. */
+  schedule?: MeetingSchedule | null;
+};
+
+/** A meeting's automatic join: lets every list say Scheduled, Moved, Cancelled or Missed. */
+export type MeetingSchedule = {
+  status: "pending" | "joining" | "joined" | "cancelled" | "missed" | "failed" | string;
+  provider: string;
+  startsAt: string;
+  endsAt: string;
+  /** Why it changed, in the calendar's words ("Cancelled in Outlook Calendar"). */
+  note: string | null;
+  /** When the status last changed (for a cancel: when it was noticed). */
+  changedAt: string;
+  /** The start before the first detected move, while the meeting is at another time. */
+  rescheduledFrom: string | null;
 };
 
 export type MeetingDetail = Meeting & {

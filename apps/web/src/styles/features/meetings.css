@@ -238,3 +238,24 @@
   .sharing-list li { grid-template-columns:auto minmax(0,1fr); }
   .sharing-list li > :last-child { grid-column:2; justify-self:start; }
 }
+
+/* ---------- A meeting's scheduled join: scheduled, rescheduled, cancelled, missed ---------- */
+.status.cancelled { background:var(--muted); border-color:var(--border); color:var(--text-secondary); text-decoration:line-through; text-decoration-color:var(--text-tertiary); }
+.status.missed { background:var(--warning-subtle); border-color:var(--warning-border); color:var(--warning-text); }
+.schedule-panel { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:start; gap:14px; padding:16px 18px; border:1px solid var(--border); border-radius:var(--radius-lg, var(--radius)); background:var(--card); }
+.schedule-panel.info { background:var(--info-subtle); border-color:var(--info-border); }
+.schedule-panel.warning { background:var(--warning-subtle); border-color:var(--warning-border); }
+.schedule-panel.cancelled { background:var(--muted); }
+.schedule-panel-icon { display:grid; place-items:center; width:36px; height:36px; border-radius:999px; background:var(--card); border:1px solid var(--border); color:var(--text-secondary); }
+.schedule-panel.info .schedule-panel-icon { color:var(--info-text); }
+.schedule-panel.warning .schedule-panel-icon { color:var(--warning-text); }
+.schedule-panel-icon .lucide { width:18px; height:18px; }
+.schedule-panel-copy { display:grid; gap:4px; min-width:0; }
+.schedule-panel-copy h2 { font-size:15px; font-weight:600; line-height:1.4; }
+.schedule-panel-copy p { color:var(--text-secondary); font-size:13.5px; line-height:1.5; }
+.schedule-panel-copy small { color:var(--text-tertiary); font-size:12.5px; }
+.schedule-panel-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; }
+@media (max-width: 640px) {
+  .schedule-panel { grid-template-columns:auto minmax(0,1fr); }
+  .schedule-panel-actions { grid-column:1 / -1; justify-content:flex-start; }
+}

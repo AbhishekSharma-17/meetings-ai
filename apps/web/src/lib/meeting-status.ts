@@ -1,4 +1,4 @@
-import type { Meeting, MeetingStatus } from "./types";
+import type { Meeting, MeetingSchedule, MeetingStatus } from "./types";
 
 /** One vocabulary for meeting status everywhere: dashboard, library and detail. */
 export const meetingStatusLabel: Record<MeetingStatus, string> = {
@@ -14,11 +14,44 @@ export const meetingStatusLabel: Record<MeetingStatus, string> = {
   failed: "Needs attention",
 };
 
+export type ScheduleState = "scheduled" | "moved" | "cancelled" | "missed" | "join_failed";
+
 /**
- * The badge a meeting shows. Once the call is over, the minutes' progress is what matters, so a
- * finished meeting reads "Minutes approved" or "Recap sent" instead of staying "Ready to review".
+ * What a meeting that hasn't run yet is waiting for, from its scheduled join: null once the
+ * assistant has joined (or for a meeting sent straight to a call).
  */
-export function meetingBadge(meeting: Pick<Meeting, "status" | "minutesStatus">): { tone: string; label: string } {
+export function scheduleState(meeting: { status: Meeting["status"]; schedule?: Pick<MeetingSchedule, "status" | "rescheduledFrom"> | null }): ScheduleState | null {
+  const schedule = meeting.schedule;
+  if (!schedule || meeting.status !== "created") return null;
+  if (schedule.status === "pending") return schedule.rescheduledFrom ? "moved" : "scheduled";
+  if (schedule.status === "cancelled") return "cancelled";
+  if (schedule.status === "missed") return "missed";
+  if (schedule.status === "failed") return "join_failed";
+  return null;
+}
+
+const scheduleBadges: Record<ScheduleState, { tone: string; label: string }> = {
+  scheduled: { tone: "scheduled", label: "Scheduled" },
+  moved: { tone: "scheduled", label: "Rescheduled" },
+  cancelled: { tone: "cancelled", label: "Cancelled" },
+  missed: { tone: "missed", label: "Missed" },
+  join_failed: { tone: "failed", label: "Couldn't join" },
+};
+
+/** The meeting didn't happen and won't: cancelled in the calendar (or here), or its time passed. */
+export function didNotHappen(meeting: Parameters<typeof scheduleState>[0]): boolean {
+  const state = scheduleState(meeting);
+  return state === "cancelled" || state === "missed";
+}
+
+/**
+ * The badge a meeting shows. Before the call, its scheduled join ("Scheduled", "Cancelled"…);
+ * once the call is over, the minutes' progress, so a finished meeting reads "Minutes approved"
+ * or "Recap sent" instead of staying "Ready to review".
+ */
+export function meetingBadge(meeting: Pick<Meeting, "status" | "minutesStatus" | "schedule">): { tone: string; label: string } {
+  const state = scheduleState(meeting);
+  if (state) return scheduleBadges[state];
   if (isReviewed(meeting)) {
     return meeting.minutesStatus === "sent" ? { tone: "sent", label: "Recap sent" } : { tone: "approved", label: "Minutes approved" };
   }

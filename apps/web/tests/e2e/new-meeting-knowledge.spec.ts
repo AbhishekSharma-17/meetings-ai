@@ -151,7 +151,7 @@ test("queues a future manual meeting without joining immediately", async ({ page
   const localTime = new Date(tomorrow.getTime() - tomorrow.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
   await page.getByLabel(/Meeting start/).fill(localTime);
   await page.getByRole("button", { name: "Schedule assistant" }).click();
-  await expect(page.getByText("Scheduled assistant · pending")).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^Scheduled · the assistant joins/ })).toBeVisible();
   expect(mock.scheduledBody).toMatchObject({ meeting: { meeting_url: "https://meet.google.com/abc-defg-hij" } });
   expect(mock.meetingBody).toBeNull();
 });

@@ -5,6 +5,8 @@ import Image from "next/image";
 import { ExternalLink, LogIn, LogOut, RefreshCw } from "lucide-react";
 import { leaveService, meetingsService } from "@/lib/meetings-service";
 import { MeetingBadge } from "./meeting-badge";
+import { ScheduleStatusPanel, toMeetingSchedule } from "./meeting-schedule-panel";
+import { scheduleState } from "@/lib/meeting-status";
 import type { CalendarEvent, CalendarSchedule, MeetingDetail, MeetingParticipants, SpeakerIdentity, TranscriptSegment, TranscriptionRoute } from "@/lib/types";
 import { MinutesPanel } from "./minutes-panel";
 import { MeetingSharingCard } from "./meeting-sharing-card";
@@ -14,7 +16,7 @@ import { MeetingKnowledgeSettings } from "./meeting-knowledge-settings";
 import { CallCoordinationPanel } from "./call-coordination-panel";
 import { MeetingDetailsCard, MeetingDangerZone, MeetingSourceCard, formatTimestamp } from "./meeting-record-cards";
 import { PageHeader } from "./ui/page-header";
-import { LastChecked, MovedFrom, RescheduledBadge, ScheduleChangesCard } from "./calendar-change-history";
+import { ScheduleChangesCard } from "./calendar-change-history";
 import { Alert, LoadingRow, Skeleton } from "./ui/feedback";
 import { LeaveNowDialog, MeetingEndedLine, MeetingLeaveBanner, MeetingLeaveLine, useMeetingLeave } from "./meeting-leave-status";
 import { InPersonRecordMeta, InPersonStatusAlert, isInPerson, recordedOn, useInPersonSession } from "./in-person-meeting-panels";
@@ -240,7 +242,16 @@ export function MeetingDetailScreen({ meetingId, focusSegmentId, backLabel = "Al
   </section>;
 
   const scheduled = schedule?.status === "pending";
+  // The fresh schedule record (it changes on cancel) with when its status changed, from the meeting.
+  const planned = schedule ? toMeetingSchedule(schedule, meeting.schedule?.changedAt) : meeting.schedule ?? null;
+  const plan = scheduleState({ status: meeting.status, schedule: planned });
+  // Cancelled or missed: it didn't happen, so there's nothing to capture, review or share.
+  const didNotRun = plan === "cancelled" || plan === "missed";
   const canJoin = !inPerson && (meeting.status === "created" || meeting.status === "failed") && schedule?.status !== "pending" && schedule?.status !== "joining";
+  // What was planned and what the calendar did: the whole story of a meeting that didn't happen.
+  const sourceCard = source ? <MeetingSourceCard source={source} /> : null;
+  const changeHistory = schedule && schedule.provider && schedule.provider !== "manual"
+    ? <ScheduleChangesCard meetingId={meetingId} provider={schedule.provider} reloadKey={`${schedule.starts_at}:${schedule.status}:${schedule.event_id}`} /> : null;
   const canStop = !inPerson && stoppableStatuses.has(meeting.status);
   const finalizedCount = segments.filter((segment) => segment.isFinal).length;
   // In person, "Speaker A/B" are capture labels until a name is approved: no email linking for them yet.
@@ -252,7 +263,7 @@ export function MeetingDetailScreen({ meetingId, focusSegmentId, backLabel = "Al
       back={back}
       titleId="meeting-record-title"
       title={meeting.title}
-      badge={scheduled ? <span className="status scheduled">Scheduled</span> : <MeetingBadge meeting={meeting} />}
+      badge={<MeetingBadge meeting={{ ...meeting, schedule: planned }} />}
       description={inPerson ? <InPersonRecordMeta session={inPersonSession.session} /> : <span className="record-meta">
         <span>{meeting.platform}</span>
         {meeting.meetingUrl ? <span><a className="record-link" href={meeting.meetingUrl} target="_blank" rel="noopener noreferrer"><span>{meeting.meetingUrl}</span><ExternalLink aria-hidden="true" /></a></span> : <span>No meeting link recorded</span>}
@@ -261,7 +272,7 @@ export function MeetingDetailScreen({ meetingId, focusSegmentId, backLabel = "Al
       actions={<>
         <button className="button ghost" onClick={() => void runAction("refresh")} disabled={action !== null}><RefreshCw aria-hidden="true" className={action === "refresh" ? "record-spin" : undefined} />{action === "refresh" ? "Refreshing…" : "Refresh"}</button>
         {canStop ? <button className="button danger-outline" onClick={() => setConfirmLeave(true)} disabled={action !== null}><LogOut aria-hidden="true" />{action === "stop" ? "Leaving…" : "Leave now"}</button> : null}
-        {canJoin ? <button className="button primary" onClick={() => void runAction("join")} disabled={action !== null}><LogIn aria-hidden="true" />{action === "join" ? "Joining…" : meeting.status === "failed" ? "Retry join" : "Join meeting"}</button> : null}
+        {canJoin && !didNotRun ? <button className="button primary" onClick={() => void runAction("join")} disabled={action !== null}><LogIn aria-hidden="true" />{action === "join" ? "Joining…" : meeting.status === "failed" ? "Retry join" : "Join meeting"}</button> : null}
       </>}
     />
 
@@ -270,15 +281,9 @@ export function MeetingDetailScreen({ meetingId, focusSegmentId, backLabel = "Al
       {inPerson ? <InPersonStatusAlert session={inPersonSession.session} onChanged={inPersonSession.setSession} /> : null}
       {inPerson ? null : <MeetingLeaveBanner leave={leave} busy={keeping || action !== null} onKeep={() => void keepInCall()} onLeaveNow={() => setConfirmLeave(true)} />}
       {!inPerson && (!inCallStatuses.has(meeting.status) || meeting.status === "stopping") ? <MeetingEndedLine leave={leave} /> : null}
-      {schedule ? <Alert tone={scheduled ? (schedule.last_error ? "warning" : "info") : schedule.status === "failed" || schedule.status === "missed" ? "warning" : "neutral"} title={`${schedule.provider === "manual" ? "Scheduled assistant" : "Calendar assistant"} · ${schedule.status}`}
-        actions={scheduled ? <button className="button secondary sm" type="button" onClick={cancelSchedule}>Cancel auto-join</button> : undefined}>
-        Starts {formatTimestamp(schedule.starts_at)}. {scheduled ? schedule.last_error || "The assistant joins at the start time. Cancelling keeps this meeting." : schedule.last_error || "Review this meeting for capture updates."}
-        {schedule.rescheduled_from || (scheduled && schedule.provider !== "manual") ? <span className="schedule-watch">
-          <RescheduledBadge from={schedule.rescheduled_from} />
-          <MovedFrom from={schedule.rescheduled_from} />
-          {scheduled ? <LastChecked provider={schedule.provider} at={schedule.last_checked_at} /> : null}
-        </span> : null}
-      </Alert> : null}
+      {plan && planned ? <ScheduleStatusPanel state={plan} schedule={planned} lastCheckedAt={schedule?.last_checked_at} busy={action !== null || deleting}
+        onCancelAutoJoin={cancelSchedule} onJoinAnyway={canJoin ? () => void runAction("join") : undefined}
+        onDelete={didNotRun && deletableStatuses.has(meeting.status) ? () => document.getElementById("meeting-delete-title")?.scrollIntoView({ behavior: "smooth", block: "center" }) : undefined} /> : null}
       {inPerson ? null : failing ? <Alert tone="danger" title={lifecycleDetail[meeting.status]}>{meeting.errorMessage ?? undefined}</Alert>
         : meeting.errorMessage ? <Alert tone="warning" title="Adapter message">{meeting.errorMessage}</Alert> : null}
       {!inPerson && (meeting.status === "processing" || (meeting.status === "created" && !schedule)) ? <Alert tone="info">{lifecycleDetail[meeting.status]}</Alert> : null}
@@ -297,16 +302,18 @@ export function MeetingDetailScreen({ meetingId, focusSegmentId, backLabel = "Al
             <p className="field-hint">Tell the host: “Meetings AI has joined and will record and transcribe this conversation.”</p>
           </div>
         </section> : null}
-        <MinutesPanel key={`${meeting.id}:${speakerRevision}`} meeting={meeting} transcriptCount={finalizedCount} segments={segments} onDelivered={() => setDeliveryRevision((value) => value + 1)} />
-        <MeetingSharingCard meetingId={meeting.id} revision={deliveryRevision} />
-        <MeetingTranscript meetingTitle={meeting.title} assistantName={meeting.botName} segments={segments} focusSegmentId={activeFocus} isPolling={pollableStatuses.has(meeting.status)} isLive={meeting.status === "live"} saving={savingSpeaker} onSaveSpeaker={saveSpeaker} onDownload={downloadTranscript} />
+        {didNotRun ? null : <>
+          <MinutesPanel key={`${meeting.id}:${speakerRevision}`} meeting={meeting} transcriptCount={finalizedCount} segments={segments} onDelivered={() => setDeliveryRevision((value) => value + 1)} />
+          <MeetingSharingCard meetingId={meeting.id} revision={deliveryRevision} />
+        </>}
+        {didNotRun ? <>{changeHistory}{sourceCard}</> : null}
+        {didNotRun && !segments.length ? null : <MeetingTranscript meetingTitle={meeting.title} assistantName={meeting.botName} segments={segments} focusSegmentId={activeFocus} isPolling={pollableStatuses.has(meeting.status)} isLive={meeting.status === "live"} saving={savingSpeaker} onSaveSpeaker={saveSpeaker} onDownload={downloadTranscript} />}
       </div>
       <aside className="record-side" aria-label="Meeting information">
-        {inPerson ? null : <CallCoordinationPanel meetingId={meetingId} reloadKey={`${meeting.status}:${schedule?.status ?? ""}`} onChanged={() => void meetingsService.getCalendarSchedule(meetingId).then(setSchedule).catch(() => undefined)} />}
+        {inPerson || didNotRun ? null : <CallCoordinationPanel meetingId={meetingId} reloadKey={`${meeting.status}:${schedule?.status ?? ""}`} onChanged={() => void meetingsService.getCalendarSchedule(meetingId).then(setSchedule).catch(() => undefined)} />}
         <MeetingDetailsCard meeting={meeting} route={transcriptionRoute} inPerson={inPerson ? { recordedOn: inPersonSession.session ? recordedOn(inPersonSession.session) : "Recorded in person" } : undefined} />
         <MeetingPeopleCard meetingId={meetingId} participants={participants} assistantName={meeting.botName} namedSpeakers={namedSpeakers} speakerIdentities={speakerIdentities} source={source} onSaveIdentity={saveIdentity} onIdentitiesSaved={setSpeakerIdentities} />
-        {source ? <MeetingSourceCard source={source} /> : null}
-        {schedule && schedule.provider && schedule.provider !== "manual" ? <ScheduleChangesCard meetingId={meetingId} provider={schedule.provider} reloadKey={`${schedule.starts_at}:${schedule.status}:${schedule.event_id}`} /> : null}
+        {didNotRun ? null : <>{sourceCard}{changeHistory}</>}
         <MeetingKnowledgeSettings key={meeting.id} meeting={meeting} onSaved={acceptMeeting} />
         {deletableStatuses.has(meeting.status) ? <MeetingDangerZone deleting={deleting} onDelete={() => void deleteMeeting()} /> : null}
       </aside>

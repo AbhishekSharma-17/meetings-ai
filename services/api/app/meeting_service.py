@@ -11,6 +11,7 @@ from meetings_contracts import (
     MeetingKnowledgeUpdate,
     MeetingListResponse,
     MeetingPublic,
+    MeetingScheduleSummary,
     MeetingParticipant,
     MeetingParticipantsResponse,
     MeetingPlatform,
@@ -106,8 +107,10 @@ class MeetingService:
 
     def list(self) -> MeetingListResponse:
         meetings = self.repository.list_meetings()
-        statuses = self.repository.minutes_statuses([item.id for item in meetings])
-        items = [self.to_public(item, statuses.get(str(item.id))) for item in meetings]
+        ids = [item.id for item in meetings]
+        statuses = self.repository.minutes_statuses(ids)
+        schedules = self.repository.schedule_summaries(ids)
+        items = [self.to_public(item, statuses.get(str(item.id)), schedules.get(str(item.id))) for item in meetings]
         return MeetingListResponse(items=items, count=len(items))
 
     async def delete(self, meeting_id: UUID) -> None:
@@ -392,14 +395,16 @@ class MeetingService:
         )
 
     def to_public_with_minutes(self, meeting: Meeting) -> MeetingPublic:
-        """One meeting with where its minutes are (draft, approved, sent), for the meeting page."""
-        return self.to_public(meeting, self.repository.minutes_statuses([meeting.id]).get(str(meeting.id)))
+        """One meeting with where its minutes are (draft, approved, sent) and its scheduled join."""
+        return self.to_public(meeting, self.repository.minutes_statuses([meeting.id]).get(str(meeting.id)),
+                              self.repository.schedule_summaries([meeting.id]).get(str(meeting.id)))
 
     @staticmethod
-    def to_public(meeting: Meeting, minutes_status: MinutesStatus | None = None) -> MeetingPublic:
-        # minutes_status lives with the minutes, not the meeting record; lists pass it in.
-        fields = {field: getattr(meeting, field) for field in MeetingPublic.model_fields if field != "minutes_status"}
-        return MeetingPublic(**fields, minutes_status=minutes_status)
+    def to_public(meeting: Meeting, minutes_status: MinutesStatus | None = None,
+                  schedule: MeetingScheduleSummary | None = None) -> MeetingPublic:
+        # minutes_status and schedule live beside the meeting record; lists pass them in.
+        fields = {field: getattr(meeting, field) for field in MeetingPublic.model_fields if field not in {"minutes_status", "schedule"}}
+        return MeetingPublic(**fields, minutes_status=minutes_status, schedule=schedule)
 
 
 def _integer(value: object, label: str) -> int:

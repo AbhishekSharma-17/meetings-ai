@@ -146,6 +146,7 @@ type BackendDefault = {
 type BackendMeeting = {
   id: string;
   minutes_status?: string | null;
+  schedule?: { status: string; provider: string; starts_at: string; ends_at: string; note?: string | null; changed_at: string; rescheduled_from?: string | null } | null;
   title?: string | null;
   meeting_url?: string | null;
   url?: string | null;
@@ -350,6 +351,10 @@ function toMeetingDetail(meeting: BackendMeeting): MeetingDetail {
     knowledgeEnabled: meeting.knowledge_enabled ?? false,
     knowledgeBaseId: meeting.knowledge_base_id ?? null,
     minutesStatus: minutesStatusFrom(meeting.minutes_status),
+    schedule: meeting.schedule ? {
+      status: meeting.schedule.status, provider: meeting.schedule.provider, startsAt: meeting.schedule.starts_at, endsAt: meeting.schedule.ends_at,
+      note: meeting.schedule.note ?? null, changedAt: meeting.schedule.changed_at, rescheduledFrom: meeting.schedule.rescheduled_from ?? null,
+    } : null,
     startsAt: relativeTimestamp(createdAt),
     duration: meeting.duration || "—",
     participants: meeting.participant_count ?? meeting.participants ?? 0,

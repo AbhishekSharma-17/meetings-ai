@@ -212,6 +212,39 @@ def test_cancelled_in_google_stops_the_join(tmp_path) -> None:
         app.state.calendar_schedule.meetings.join.assert_not_awaited()
 
 
+def test_meetings_say_they_were_cancelled_or_moved_not_just_created(tmp_path) -> None:
+    fake = FakeGoogle()
+    start = datetime.now(UTC).replace(microsecond=0) + timedelta(hours=4)
+    fake.add("evt-1", start)
+    fake.add("evt-2", start + timedelta(hours=1), title="Pricing review")
+    app = _app(tmp_path, fake)
+    with TestClient(app) as client:
+        cancelled_id = _schedule(client, start)
+        moved_id = _schedule(client, start + timedelta(hours=1), event_id="evt-2")
+        listed = {item["id"]: item for item in client.get("/v1/meetings").json()["items"]}
+        assert listed[cancelled_id]["schedule"]["status"] == "pending"
+        assert datetime.fromisoformat(listed[cancelled_id]["schedule"]["starts_at"]) == start
+
+        fake.items["evt-1"]["status"] = "cancelled"
+        fake.move("evt-2", start + timedelta(days=1))
+        asyncio.run(app.state.calendar_watch.tick())
+
+        cancelled = client.get(f"/v1/meetings/{cancelled_id}").json()
+        assert cancelled["status"] == "created"  # the meeting itself never ran
+        assert cancelled["schedule"]["status"] == "cancelled"
+        assert cancelled["schedule"]["note"] == "Cancelled in Google Calendar"
+        assert cancelled["schedule"]["provider"] == "googlecalendar" and cancelled["schedule"]["changed_at"]
+        listed = {item["id"]: item for item in client.get("/v1/meetings").json()["items"]}
+        assert listed[cancelled_id]["schedule"]["status"] == "cancelled"
+        moved = listed[moved_id]["schedule"]
+        assert moved["status"] == "pending"
+        assert datetime.fromisoformat(moved["starts_at"]) == start + timedelta(days=1)
+        assert datetime.fromisoformat(moved["rescheduled_from"]) == start + timedelta(hours=1)
+        # A meeting sent straight to a call has no schedule.
+        direct = client.post("/v1/meetings", json={"meeting_url": "https://meet.google.com/xyz-wxyz-xyz", "title": "Ad hoc"}).json()
+        assert client.get(f"/v1/meetings/{direct['id']}").json()["schedule"] is None
+
+
 def test_absent_event_is_cancelled_only_when_the_wide_lookup_is_complete(tmp_path) -> None:
     fake = FakeGoogle()
     start = datetime.now(UTC).replace(microsecond=0) + timedelta(hours=4)

@@ -5,27 +5,32 @@ import { formatFullDateTime } from "@/lib/time-preferences";
 import { ArrowRight, CalendarClock, Mic, Plus } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
 import { useUiPreference } from "@/lib/ui-preferences";
-import { attentionStatuses, inProgressStatuses, isReviewed, meetingBadge, meetingStatusLabel, needsReview, platformMonogram } from "@/lib/meeting-status";
+import { attentionStatuses, didNotHappen, inProgressStatuses, isReviewed, meetingBadge, meetingStatusLabel, needsReview, platformMonogram } from "@/lib/meeting-status";
+import { toMeetingSchedule } from "./meeting-schedule-panel";
 import { MeetingBadge } from "./meeting-badge";
 import type { CalendarSchedule, Meeting } from "@/lib/types";
 import { PageHeader } from "./ui/page-header";
 import { EmptyState } from "./ui/feedback";
-import { RescheduledBadge } from "./calendar-change-history";
 import { CoverageChip, useCoverageSummaries } from "./coordination-chips";
 import type { CoverageSummary } from "@/lib/coordination";
 import { FilterInput, NoMatches } from "./scroll-panel";
 import { matchesQuery } from "@/lib/search";
 import { InPersonChip, isInPerson } from "./in-person-meeting-panels";
 
-type Filter = "all" | "scheduled" | "live" | "review" | "reviewed" | "attention" | "completed";
+type Filter = "all" | "scheduled" | "live" | "review" | "reviewed" | "attention" | "completed" | "cancelled";
 
-const filters: Filter[] = ["all", "scheduled", "live", "review", "reviewed", "attention", "completed"];
+const filters: Filter[] = ["all", "scheduled", "live", "review", "reviewed", "attention", "completed", "cancelled"];
 const filterLabels: { key: Filter; label: string }[] = [
   { key: "all", label: "All" }, { key: "scheduled", label: "Scheduled" }, { key: "live", label: "In progress" },
   { key: "review", label: "Ready to review" }, { key: "reviewed", label: "Reviewed" },
-  { key: "attention", label: "Needs attention" }, { key: "completed", label: "Stopped" },
+  { key: "attention", label: "Needs attention" }, { key: "completed", label: "Stopped" }, { key: "cancelled", label: "Cancelled or missed" },
 ];
 const sourceNames: Record<string, string> = { manual: "Manual schedule", googlecalendar: "Google Calendar", outlook: "Outlook", calendly: "Calendly", zoom: "Zoom" };
+
+/** The meeting with its scheduled join: the freshly loaded schedule when there is one. */
+function withSchedule(meeting: Meeting, schedule: CalendarSchedule | undefined): Meeting {
+  return schedule ? { ...meeting, schedule: toMeetingSchedule(schedule, meeting.schedule?.changedAt) } : meeting;
+}
 
 function matchesFilter(filter: Filter, meeting: Meeting, schedule: CalendarSchedule | undefined): boolean {
   if (filter === "all") return true;
@@ -34,13 +39,15 @@ function matchesFilter(filter: Filter, meeting: Meeting, schedule: CalendarSched
   if (filter === "review") return needsReview(meeting);
   if (filter === "reviewed") return isReviewed(meeting);
   if (filter === "attention") return attentionStatuses.has(meeting.status);
+  if (filter === "cancelled") return didNotHappen(withSchedule(meeting, schedule));
   return meeting.status === "stopped" && !isReviewed(meeting);
 }
 
 function countFilters(meetings: Meeting[], byId: Map<string, CalendarSchedule>): Record<Filter, number> {
-  const counts: Record<Filter, number> = { all: meetings.length, scheduled: 0, live: 0, review: 0, reviewed: 0, attention: 0, completed: 0 };
+  const counts: Record<Filter, number> = { all: meetings.length, scheduled: 0, live: 0, review: 0, reviewed: 0, attention: 0, completed: 0, cancelled: 0 };
   for (const meeting of meetings) {
     if (byId.get(meeting.id)?.status === "pending") counts.scheduled++;
+    else if (didNotHappen(withSchedule(meeting, byId.get(meeting.id)))) counts.cancelled++;
     else if (inProgressStatuses.has(meeting.status)) counts.live++;
     else if (isReviewed(meeting)) counts.reviewed++;
     else if (meeting.status === "ready") counts.review++;
@@ -89,13 +96,14 @@ export function MeetingsLibrary({ identity, meetings, onOpen, onNew, onCalendar,
 /** What a person would search a meeting by: title, platform, status, source and the date as shown. */
 function meetingSearchFields(meeting: Meeting, schedule: CalendarSchedule | undefined) {
   return [meeting.title, meeting.platform, meeting.status, meetingStatusLabel[meeting.status], meetingBadge(meeting).label, schedule?.status === "pending" ? "Scheduled" : null,
-    schedule?.rescheduled_from ? "Rescheduled" : null,
+    schedule?.rescheduled_from ? "Rescheduled" : null, didNotHappen(withSchedule(meeting, schedule)) ? "Cancelled" : null,
     schedule ? [sourceNames[schedule.provider ?? ""] ?? schedule.provider, formatWhen(schedule.starts_at)] : meeting.startsAt];
 }
 
 function LibraryRow({ meeting, schedule, coverage, onOpen }: { meeting: Meeting; schedule: CalendarSchedule | undefined; coverage?: CoverageSummary; onOpen(): void }) {
   const scheduled = schedule?.status === "pending";
-  const when = schedule ? `${sourceNames[schedule.provider ?? ""] ?? schedule.provider ?? "Calendar"} · ${formatWhen(schedule.starts_at)}` : meeting.startsAt;
+  const moved = scheduled && schedule?.rescheduled_from ? ` (was ${formatWhen(schedule.rescheduled_from)})` : "";
+  const when = schedule ? `${sourceNames[schedule.provider ?? ""] ?? schedule.provider ?? "Calendar"} · ${formatWhen(schedule.starts_at)}${moved}` : meeting.startsAt;
   return <li>
     <button type="button" className="library-row" aria-label={`Open ${meeting.title}`} onClick={onOpen}>
       <span className="library-platform" aria-hidden="true">{platformMonogram(meeting.platform)}</span>
@@ -103,8 +111,7 @@ function LibraryRow({ meeting, schedule, coverage, onOpen }: { meeting: Meeting;
       <span className="library-row-duration">{meeting.duration === "—" ? "" : meeting.duration}</span>
       <span className="library-row-status">
         <CoverageChip summary={coverage} />
-        {scheduled && schedule?.rescheduled_from ? <RescheduledBadge from={schedule.rescheduled_from} /> : null}
-        {scheduled ? <span className="status scheduled">Scheduled</span> : <MeetingBadge meeting={meeting} />}
+        <MeetingBadge meeting={withSchedule(meeting, schedule)} />
       </span>
       <ArrowRight className="library-row-arrow" aria-hidden="true" />
     </button>

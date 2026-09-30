@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy import delete, select, update
 
 from meetings_contracts import (
+    MeetingScheduleSummary,
     ActionItem,
     AttributedQuestion,
     Capability,
@@ -75,6 +76,7 @@ from .database import (
 )
 from .repository import MeetingNotFoundError, MinutesNotFoundError, ProfileNotFoundError, RecipientGroupNotFoundError
 from .security import CredentialCipher
+from .calendar_changes import first_moves
 from .tenant import current_organization_id
 
 
@@ -363,6 +365,28 @@ class SQLAlchemyRepository:
                 MeetingMinutesRow.meeting_id.in_([str(item) for item in meeting_ids])
             ).all()
         return {meeting_id: status for meeting_id, status in rows}
+
+    def schedule_summaries(self, meeting_ids: list[UUID]) -> dict[str, MeetingScheduleSummary]:
+        """Each meeting's scheduled join (status, time, the calendar's note, any move), in two queries."""
+        if not meeting_ids:
+            return {}
+        organization_id = str(current_organization_id())
+        with self.database.session_factory() as session:
+            rows = session.query(CalendarScheduleRow).filter(
+                CalendarScheduleRow.organization_id == organization_id,
+                CalendarScheduleRow.meeting_id.in_([str(item) for item in meeting_ids]),
+            ).all()
+            moved = first_moves(session, organization_id, meeting_ids=[row.meeting_id for row in rows]) if rows else {}
+        summaries = {}
+        for row in rows:
+            starts_at = _utc(row.starts_at)
+            original = moved.get(row.meeting_id)
+            summaries[row.meeting_id] = MeetingScheduleSummary(
+                status=row.status, provider=row.provider, starts_at=starts_at, ends_at=_utc(row.ends_at),
+                note=row.last_error, changed_at=_utc(row.updated_at),
+                rescheduled_from=original if original is not None and _utc(original) != starts_at else None,
+            )
+        return summaries
 
     def list_meetings(self) -> list[Meeting]:
         with self.database.session_factory() as session:

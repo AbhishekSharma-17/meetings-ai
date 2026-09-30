@@ -91,9 +91,9 @@ test("a rescheduled join shows its chip, where it moved from, the last check and
   await expect(row.getByText("Rescheduled")).toBeVisible();
   await row.click();
 
-  const alert = page.getByRole("status").filter({ hasText: "Calendar assistant · pending" });
-  await expect(alert.getByText("Rescheduled")).toBeVisible();
-  await expect(alert.getByText(/^Moved from /)).toBeVisible();
+  const alert = page.locator(".schedule-panel");
+  await expect(alert.getByRole("heading", { name: /^Rescheduled · the assistant joins/ })).toBeVisible();
+  await expect(alert.getByText(/^Moved in Google Calendar from /)).toBeVisible();
   await expect(alert.getByText("Last checked with Google Calendar 2 min ago")).toBeVisible();
   const card = page.getByRole("region", { name: /Calendar changes/ });
   await expect(card.getByText(/^Moved to /)).toBeVisible();
@@ -149,7 +149,7 @@ test("the demo workspace shows a rescheduled meeting and its notification withou
   const row = page.getByRole("button", { name: "Open Initech — pilot scoping workshop" });
   await expect(row.getByText("Rescheduled")).toBeVisible();
   await row.click();
-  await expect(page.getByRole("status").filter({ hasText: "Calendar assistant · pending" }).getByText(/^Moved from /)).toBeVisible();
+  await expect(page.locator(".schedule-panel").getByText(/^Moved in .* from /)).toBeVisible();
   await expect(page.getByRole("region", { name: /Calendar changes/ }).getByText(/^Moved to /)).toBeVisible();
 
   await page.getByRole("button", { name: /^Notifications/ }).click();
