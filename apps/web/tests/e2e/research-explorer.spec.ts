@@ -215,8 +215,11 @@ test("demo mode: Research works from sample data with no network", async ({ page
     return route.fulfill({ status: 599, json: { detail: "A demo request reached the network." } });
   });
   await page.goto("/");
+  // The signed-out session check (run twice by React in development) happens before the demo starts.
+  const explore = page.getByRole("button", { name: "Explore the demo" });
+  await explore.waitFor();
   allowSessionCheck = false;
-  await page.getByRole("button", { name: "Explore the demo" }).click();
+  await explore.click();
   await nav(page).getByRole("button", { name: "Research" }).click();
   await expect(page.getByRole("heading", { name: "Research", exact: true })).toBeVisible();
   const saved = page.getByRole("complementary", { name: "Saved research" });
