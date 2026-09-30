@@ -26,7 +26,7 @@
    **429** immediately and doesn't queue. Our API then marks the meeting *failed*, and the owner
    gets "Assistant could not join" (`services/api/app/meeting_service.py`). A 4th overlapping
    meeting is lost.
-2. **The container's CPU and memory.** The only per-bot figures are:
+2. **The container's CPU and memory** (measured on 2026-09-30; see Load test results). Before the test, the only per-bot figures were:
    - about **1.15 vCPU** per bot (one measurement, Zoom web client, `browser-args.ts`);
    - **1–2 GiB RAM** per bot (the Helm defaults, which Vexa says to raise for real meetings);
    - about **2 GiB `/dev/shm`**, used most heavily by Teams.
@@ -233,6 +233,30 @@ Scale in phases, and let measurements decide the next step:
 - **Recall.ai supports a bot image natively.** Confirm the details if option D is chosen.
 - **Recommendation:** decide together with the scaling path. On Recall it's a setting; on Vexa,
   option 1 should be load-tested alongside Phase 0.
+
+## Load test results (2026-09-30, first run)
+
+Measured on the production assistant server, using a separate Vexa test user (limit 10) so
+production's limit of 3 was untouched. Each call was a public Jitsi room (meet.ffmuc.net) with a
+headless speaker playing recorded speech.
+
+| Measure | Result |
+|---|---|
+| Server allowance | 32 vCPU, 32 GB RAM (cgroup `cpu.max`, `memory.max`) |
+| Idle | 1.1 GB RAM, 0.02 cores |
+| Memory per assistant | +0.45 GB |
+| `/dev/shm` (62 MB) | 0 KB used; Playwright launches Chromium with `--disable-dev-shm-usage` |
+| CPU, one Jitsi assistant with speech | 16–32 cores, throttled at the 32-core cap |
+| CPU, real Meet/Teams assistants | about 0.5–1 core each (the server's total CPU over 5 days ÷ assistant time; estimate) |
+| Transcription | 21 segments, 276 words in 2 minutes |
+
+- **Memory and shared memory are not the constraints; CPU is**, and it depends on the platform.
+  Jitsi's web client renders video in software, so it is a worst case and is not representative.
+- **Scaling to 3, 5 and 8 assistants was not run on Jitsi,** because it would only have pinned the
+  production server at its cap. It needs Meet and Teams test calls that anyone can join without
+  waiting in a lobby.
+- **Vexa's runtime leaves finished assistant processes as zombies.** This is harmless for now and
+  should be reported upstream.
 
 ## Consequences
 
