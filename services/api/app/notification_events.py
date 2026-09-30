@@ -160,6 +160,16 @@ class NotificationEvents:
         )
 
     @_safe
+    def assistants_busy(self, organization_id: UUID | str, meeting_id: UUID | str) -> None:
+        """Once per meeting: every assistant is in another call, so this one waits for a free one."""
+        self.notifications.notify_meeting(
+            organization_id, meeting_id, kind="assistant.waiting", severity="warning",
+            title=f"Waiting for a free assistant for {self._meeting_title(meeting_id, organization_id)}",
+            body="Every assistant is in another call. It joins as soon as one is free, for up to 10 minutes after the start.",
+            dedupe_key=f"assistant-busy:{meeting_id}",
+        )
+
+    @_safe
     def schedule_reminders(self, now: datetime | None = None) -> int:
         """~10 minutes before each pending scheduled join, remind the meeting audience once."""
         now = now or datetime.now(UTC)

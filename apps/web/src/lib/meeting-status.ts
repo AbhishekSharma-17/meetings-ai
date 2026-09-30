@@ -14,16 +14,22 @@ export const meetingStatusLabel: Record<MeetingStatus, string> = {
   failed: "Needs attention",
 };
 
-export type ScheduleState = "scheduled" | "moved" | "cancelled" | "missed" | "join_failed";
+export type ScheduleState = "scheduled" | "moved" | "waiting" | "cancelled" | "missed" | "join_failed";
+
+/** The API's note while a join waits for a free assistant (every one is in another call). */
+export const WAITING_FOR_ASSISTANT = "Waiting for a free assistant";
 
 /**
  * What a meeting that hasn't run yet is waiting for, from its scheduled join: null once the
  * assistant has joined (or for a meeting sent straight to a call).
  */
-export function scheduleState(meeting: { status: Meeting["status"]; schedule?: Pick<MeetingSchedule, "status" | "rescheduledFrom"> | null }): ScheduleState | null {
+export function scheduleState(meeting: { status: Meeting["status"]; schedule?: Pick<MeetingSchedule, "status" | "rescheduledFrom" | "note"> | null }): ScheduleState | null {
   const schedule = meeting.schedule;
   if (!schedule || meeting.status !== "created") return null;
-  if (schedule.status === "pending") return schedule.rescheduledFrom ? "moved" : "scheduled";
+  if (schedule.status === "pending") {
+    if (schedule.note?.startsWith(WAITING_FOR_ASSISTANT)) return "waiting";
+    return schedule.rescheduledFrom ? "moved" : "scheduled";
+  }
   if (schedule.status === "cancelled") return "cancelled";
   if (schedule.status === "missed") return "missed";
   if (schedule.status === "failed") return "join_failed";
@@ -33,6 +39,7 @@ export function scheduleState(meeting: { status: Meeting["status"]; schedule?: P
 const scheduleBadges: Record<ScheduleState, { tone: string; label: string }> = {
   scheduled: { tone: "scheduled", label: "Scheduled" },
   moved: { tone: "scheduled", label: "Rescheduled" },
+  waiting: { tone: "missed", label: "Waiting for assistant" },
   cancelled: { tone: "cancelled", label: "Cancelled" },
   missed: { tone: "missed", label: "Missed" },
   join_failed: { tone: "failed", label: "Couldn't join" },

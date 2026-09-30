@@ -45,7 +45,8 @@ from meetings_contracts import (
     ProfileUpdate,
 )
 
-from .adapters.vexa import VexaAPIError, VexaCaptureAdapter
+from .adapters.vexa import AssistantsBusyError, VexaAPIError, VexaCaptureAdapter
+from .assistant_capacity import AssistantCapacity, AssistantCapacityService
 from .adapters.resend import EmailDeliveryError, ResendAdapter
 from .adapters.base import ProviderExecutionError
 from .composio_calendar import CalendarConnection, WorkspaceCalendarConnection, CalendarConnectRequest, CalendarAliasRequest, CalendarConnectResponse, CalendarEvent, CalendarEventsResponse, CalendarError, CalendarProvider, CalendarRange, ComposioCalendar, calendar_callback_url
@@ -196,6 +197,7 @@ def create_app(
         os.getenv("VEXA_BASE_URL", "http://localhost:8056"),
         os.getenv("VEXA_API_KEY") or os.getenv("VEXA_ADMIN_TOKEN") or None,
     )
+    assistant_capacity = AssistantCapacityService(database, vexa)
     meeting_service = MeetingService(
         repository, vexa, service,
         stt_signing_key=os.getenv("VEXA_STT_OVERRIDE_SECRET", ""),
@@ -895,6 +897,11 @@ def create_app(
             raise HTTPException(status_code=503, detail="database schema is not current")
         return {"status": "ready", "schema_version": version}
 
+    @app.get("/v1/assistants/capacity", response_model=AssistantCapacity)
+    async def assistant_capacity_snapshot() -> AssistantCapacity:
+        """Owners and admins: how many assistants can be in calls at once, are now, and are waiting."""
+        return await assistant_capacity.snapshot()
+
     @app.get("/v1/integrations/vexa/health")
     async def vexa_health() -> dict[str, object]:
         """Check Vexa connectivity and key scopes without launching a meeting bot."""
@@ -1253,6 +1260,10 @@ def create_app(
             joined = await meeting_service.join(meeting_id)
             call_coordination.announce(actor, meeting_id, coordination)
             return meeting_service.to_public(joined)
+        except AssistantsBusyError:
+            # Every assistant is in another call: queue it; the meeting page shows it waiting.
+            calendar_schedule.queue_until_free(request.state.actor.organization_id, request.state.actor.user_id, meeting_id)
+            return meeting_service.to_public_with_minutes(await meeting_service.get(meeting_id))
         except MEETING_EXCEPTIONS as exc:
             raise api_error(exc) from exc
 

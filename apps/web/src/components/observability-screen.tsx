@@ -17,6 +17,7 @@ import { formatCompact, formatDuration, formatUsd, providerLabel, purposeLabel }
 import { UsageProviderName } from "./provider-brand-icons";
 import { ProviderCreditsCard } from "./observability-credits";
 import { ActivityCard } from "./workspace-activity";
+import { AssistantCapacityCard } from "./assistant-capacity";
 
 type Tab = "overview" | "ledger" | "prep" | "storage" | "activity";
 const tabs: Tab[] = ["overview", "ledger", "prep", "storage", "activity"];
@@ -83,6 +84,7 @@ function Overview({ usage, operations, people, accounts, accountsError, meetings
   const prep = usage?.prep;
   const failedCalls = usage?.failed_requests;
   return <>
+    <AssistantCapacityCard />
     <div className="stat-grid obs-stats six" aria-label="Workspace summary">
       <Kpi icon={<Coins />} title="Estimated AI spend" value={usage ? formatUsd(usage.estimated_usd) : dash} hint={`${usage?.unpriced_requests ?? dash} unpriced calls excluded`} />
       <Kpi icon={<Cpu />} title="AI requests" value={usage?.total_requests ?? dash} hint={usage ? `${formatCompact(usage.input_tokens)} in · ${formatCompact(usage.output_tokens)} out tokens` : dash} />

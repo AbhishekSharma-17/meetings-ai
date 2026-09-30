@@ -14,6 +14,12 @@ export type Meeting = {
   schedule?: MeetingSchedule | null;
 };
 
+/** Assistants that can be in calls at once (shared by every workspace), in use and waiting. */
+export type AssistantCapacity = {
+  limit: number | null; in_use: number | null; available: number | null; waiting: number;
+  tested_capacity: number | null; checked_at: string; error: string | null;
+};
+
 /** A meeting's automatic join: lets every list say Scheduled, Moved, Cancelled or Missed. */
 export type MeetingSchedule = {
   status: "pending" | "joining" | "joined" | "cancelled" | "missed" | "failed" | string;

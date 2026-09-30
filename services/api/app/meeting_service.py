@@ -21,7 +21,7 @@ from meetings_contracts import (
     MinutesStatus,
 )
 
-from .adapters.vexa import VexaAPIError, VexaCaptureAdapter
+from .adapters.vexa import ASSISTANTS_BUSY, AssistantsBusyError, VexaAPIError, VexaCaptureAdapter
 from .leave_rules import LeaveReason
 from .meeting_links import parse_meeting_url
 from .notification_events import NO_EVENTS
@@ -198,6 +198,13 @@ class MeetingService:
                     )
             meeting.vexa_meeting_id = _integer(upstream.get("id"), "Vexa meeting id")
         except VexaAPIError as exc:
+            if exc.status_code == 429:
+                # Every assistant is in another call: the meeting waits (still "created"), it hasn't failed.
+                meeting.status = MeetingStatus.CREATED
+                meeting.last_error = ASSISTANTS_BUSY
+                meeting.updated_at = datetime.now(UTC)
+                self.repository.save_meeting(meeting)
+                raise AssistantsBusyError(exc.operation, 429, ASSISTANTS_BUSY) from exc
             meeting.status = MeetingStatus.FAILED
             # A teammate's assistant already in this call makes this one stand down (one bot per call).
             meeting.last_error = self.coordination.join_refused(meeting, exc) or str(exc)

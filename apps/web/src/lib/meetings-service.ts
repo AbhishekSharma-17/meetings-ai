@@ -1,4 +1,4 @@
-import type { AccountLinkPreview, AuditEvent, BriefDocument, CalendarConnection, CalendarDisconnectResult, ScheduledOnDisconnect, CalendarEvent, CalendarPeriod, CalendarSchedule, CalendarSnapshot, Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeTextProfile, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, MinutesStatus, MomGuidance, OrganizationBrief, PostMeetingJob, PrepReport, AiSettingsInput, AiSettingsView, CredentialTestResult, ModelCatalog, ModelCatalogQuery, ProfileKeyChoice, ProfileKind, ProviderProfile, ResendStatus, VaultCredential, VaultCredentialInput, VaultProviderType, RetentionPolicy, SpeakerIdentity, SpeakerSuggestion, Team, TeamInput, TextModelCatalog, TranscriptSegment, TranscriptionRoute, UsageSummary, Workspace, WorkspaceCalendarConnection, WorkspaceMember, WorkspaceOperations, WorkspaceOption } from "./types";
+import type { AccountLinkPreview, AssistantCapacity, AuditEvent, BriefDocument, CalendarConnection, CalendarDisconnectResult, ScheduledOnDisconnect, CalendarEvent, CalendarPeriod, CalendarSchedule, CalendarSnapshot, Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeTextProfile, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, MinutesStatus, MomGuidance, OrganizationBrief, PostMeetingJob, PrepReport, AiSettingsInput, AiSettingsView, CredentialTestResult, ModelCatalog, ModelCatalogQuery, ProfileKeyChoice, ProfileKind, ProviderProfile, ResendStatus, VaultCredential, VaultCredentialInput, VaultProviderType, RetentionPolicy, SpeakerIdentity, SpeakerSuggestion, Team, TeamInput, TextModelCatalog, TranscriptSegment, TranscriptionRoute, UsageSummary, Workspace, WorkspaceCalendarConnection, WorkspaceMember, WorkspaceOperations, WorkspaceOption } from "./types";
 import { formatDateTime } from "./time-store";
 
 export interface MeetingsService {
@@ -35,6 +35,7 @@ export interface MeetingsService {
   updateTeam(id: string, input: Partial<TeamInput>): Promise<Team>;
   deleteTeam(id: string): Promise<void>;
   listWorkspaceAudit(): Promise<AuditEvent[]>;
+  getAssistantCapacity(): Promise<AssistantCapacity>;
   /** The signed-in person's own recent actions (any role). */
   listMyActivity(): Promise<AuditEvent[]>;
   getWorkspaceOperations(): Promise<WorkspaceOperations>;
@@ -516,6 +517,10 @@ class HttpMeetingsService implements MeetingsService {
 
   async deleteTeam(id: string): Promise<void> {
     await api<void>(`/v1/workspace/teams/${id}`, { method: "DELETE" });
+  }
+
+  async getAssistantCapacity(): Promise<AssistantCapacity> {
+    return api<AssistantCapacity>("/v1/assistants/capacity");
   }
 
   async listMyActivity(): Promise<AuditEvent[]> {

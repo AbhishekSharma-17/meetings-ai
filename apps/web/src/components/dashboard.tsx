@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { CurrentAccount, Meeting } from "@/lib/types";
 import { attentionStatuses, inProgressStatuses, needsReview, platformMonogram } from "@/lib/meeting-status";
 import { MeetingBadge } from "./meeting-badge";
+import { AssistantCapacityStat } from "./assistant-capacity";
 import { ArrowRight, CalendarDays, CircleAlert, CircleCheck, FileText, Mic, Plus, Radio, BrainCircuit, Video } from "lucide-react";
 import { ProvidersIcon } from "./ui-icons";
 import { PageHeader } from "./ui/page-header";
@@ -40,6 +41,7 @@ export function Dashboard({ meetings, account, onNewMeeting, onRecordInPerson, o
       <div className="stat-grid dashboard-stats" aria-label="Meeting summary">
         <Stat icon={<Video />} label="All meetings" value={meetings.length} hint="Capture records in this workspace" />
         <Stat icon={<Radio />} label="Live now" value={liveCount} hint={liveCount ? "Transcripts are updating" : "No active captures"} />
+        <AssistantCapacityStat />
         <Stat icon={<FileText />} label="Ready to review" value={readyCount} hint="Completed, awaiting minutes review" />
         <Stat icon={<CircleAlert />} label="Needs attention" value={attentionCount} hint={attentionCount ? "Open to retry or resolve" : "Nothing blocked"} />
       </div>

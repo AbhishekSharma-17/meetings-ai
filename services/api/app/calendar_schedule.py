@@ -16,7 +16,7 @@ from .accounts import Actor
 from .calendar_changes import first_moves
 from .composio_calendar import CalendarError, CalendarEvent, CalendarRange, ComposioCalendar, calendar_date_window
 from .database import CalendarScheduleRow, Database, MeetingSourceRow
-from .adapters.vexa import VexaAPIError
+from .adapters.vexa import ASSISTANTS_BUSY, AssistantsBusyError, VexaAPIError
 from .meeting_service import MeetingService
 from .notification_events import NO_EVENTS
 from .tenant import tenant_scope
@@ -174,6 +174,9 @@ class CalendarScheduleService:
         self.coordination.record_owner(actor.organization_id, meeting.id, actor.user_id)
         try:
             joined = self.meetings.to_public(await self.meetings.join(meeting.id))
+        except AssistantsBusyError:
+            self.queue_until_free(actor.organization_id, actor.user_id, meeting.id)
+            return self.meetings.to_public_with_minutes(self.meetings.repository.get_meeting(meeting.id))
         except VexaAPIError:
             return self.meetings.to_public(self.meetings.repository.get_meeting(meeting.id))
         self.coordination.announce(actor, meeting.id, payload.coordination)
@@ -242,6 +245,24 @@ class CalendarScheduleService:
         self.coordination.announce(actor, meeting.id, payload.coordination)
         return _public(row), self.meetings.to_public(meeting)
 
+    def queue_until_free(self, organization_id: UUID | str, user_id: UUID | str, meeting_id: UUID | str,
+                         now: datetime | None = None) -> None:
+        """Every assistant is busy: join as soon as one frees up (the scheduler retries every 15 s and
+        gives up 10 minutes after now, as for any scheduled start)."""
+        now = now or datetime.now(UTC)
+        with self.database.session_factory.begin() as session:
+            row = session.get(CalendarScheduleRow, str(meeting_id))
+            if row is None:
+                session.add(CalendarScheduleRow(
+                    meeting_id=str(meeting_id), organization_id=str(organization_id), user_id=str(user_id),
+                    connection_id="manual", provider="manual", event_id=str(meeting_id), starts_at=now,
+                    ends_at=now + timedelta(hours=4), status="pending", attempts=0, last_error=ASSISTANTS_BUSY,
+                    created_at=now, updated_at=now,
+                ))
+            elif row.status in {"pending", "joining", "failed"}:
+                row.status, row.last_error, row.updated_at = "pending", ASSISTANTS_BUSY, now
+        self.events.assistants_busy(organization_id, meeting_id)
+
     def cancel(self, actor: Actor, meeting_id: UUID) -> CalendarSchedulePublic:
         with self.database.session_factory.begin() as session:
             row = session.get(CalendarScheduleRow, str(meeting_id))
@@ -260,6 +281,11 @@ class CalendarScheduleService:
             except Exception:
                 logger.exception("calendar schedule reconciliation failed")
             await asyncio.sleep(15)
+
+    def _was_waiting(self, meeting_id: str) -> bool:
+        with self.database.session_factory() as session:
+            row = session.get(CalendarScheduleRow, meeting_id)
+            return bool(row and row.last_error == ASSISTANTS_BUSY)
 
     async def _due_after_recheck(self, meeting_id: str, provider: str, now: datetime) -> tuple[datetime, datetime] | None:
         """Re-verify a calendar-backed join with its calendar first (bounded; see calendar_watch).
@@ -304,11 +330,14 @@ class CalendarScheduleService:
                     continue
                 starts_at, ends_at = fresh
             if now >= ends_at or now > starts_at + timedelta(minutes=10):
+                waited = self._was_waiting(meeting_id)
                 with self.database.session_factory.begin() as session:
                     session.execute(update(CalendarScheduleRow).where(
                         CalendarScheduleRow.meeting_id == meeting_id,
                         CalendarScheduleRow.status == "pending",
-                    ).values(status="missed", last_error="scheduled start was missed; use a fresh meeting link to join manually", updated_at=now))
+                    ).values(status="missed", updated_at=now, last_error=(
+                        "No assistant was free within 10 minutes of the start" if waited
+                        else "scheduled start was missed; use a fresh meeting link to join manually")))
                 self.events.schedule_missed(organization_id, meeting_id)
                 continue
             if self._stand_aside(meeting_id, now):
@@ -324,6 +353,13 @@ class CalendarScheduleService:
             try:
                 with tenant_scope(UUID(organization_id)):
                     await self.meetings.join(UUID(meeting_id))
+            except AssistantsBusyError:
+                # Every assistant is in another call: wait in line (retried next round) instead of failing.
+                with self.database.session_factory.begin() as session:
+                    session.execute(update(CalendarScheduleRow).where(
+                        CalendarScheduleRow.meeting_id == meeting_id, CalendarScheduleRow.status == "joining",
+                    ).values(status="pending", last_error=ASSISTANTS_BUSY, updated_at=datetime.now(UTC)))
+                self.events.assistants_busy(organization_id, meeting_id)
             except Exception as exc:
                 logger.warning("scheduled join failed for meeting %s: %s", meeting_id, exc)
                 if not isinstance(exc, VexaAPIError):  # a Vexa failure is announced by the meeting status hook

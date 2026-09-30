@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarCheck2, CalendarClock, CalendarX2, LogIn, Trash2, TriangleAlert } from "lucide-react";
+import { CalendarCheck2, CalendarClock, CalendarX2, Hourglass, LogIn, Trash2, TriangleAlert } from "lucide-react";
 import type { ScheduleState } from "@/lib/meeting-status";
 import type { CalendarSchedule, MeetingSchedule } from "@/lib/types";
 import { formatFullDateTime } from "@/lib/time-preferences";
@@ -38,6 +38,19 @@ export function ScheduleStatusPanel({ state, schedule, lastCheckedAt, busy, onCa
   const from = source(schedule.provider);
   // A calendar note like "Couldn't re-check with Outlook Calendar: reconnect the calendar".
   const attention = state === "scheduled" || state === "moved" ? schedule.note : null;
+
+  if (state === "waiting") {
+    return <section className="schedule-panel warning" aria-labelledby="schedule-panel-title">
+      <span className="schedule-panel-icon" aria-hidden="true"><Hourglass /></span>
+      <div className="schedule-panel-copy">
+        <h2 id="schedule-panel-title">Waiting for a free assistant</h2>
+        <p>Every assistant is in another call. This one joins as soon as one is free, for up to 10 minutes after {when(schedule.startsAt)}.</p>
+      </div>
+      <div className="schedule-panel-actions">
+        <button className="button secondary sm" type="button" disabled={busy} onClick={onCancelAutoJoin}>Stop waiting</button>
+      </div>
+    </section>;
+  }
 
   if (state === "scheduled" || state === "moved") {
     return <section className={`schedule-panel ${attention ? "warning" : "info"}`} aria-labelledby="schedule-panel-title">

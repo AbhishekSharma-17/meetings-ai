@@ -49,6 +49,10 @@ function purge(store: DemoStore, category: StorageCategoryKey, ids: string[] | n
 
 export function registerUsage(router: DemoRouter): void {
   router
+    .on("GET", "/v1/assistants/capacity", ({ store }) => {
+      const inUse = Math.min(store.seeds.filter((seed) => ["live", "joining", "waiting_room"].includes(seed.meeting.status)).length, 3);
+      return json({ limit: 3, in_use: inUse, available: 3 - inUse, waiting: 0, tested_capacity: null, checked_at: new Date().toISOString(), error: null });
+    })
     .on("GET", "/v1/workspace/usage", ({ store, query }) => {
       const filters = filtersFrom(query);
       return json(summarize(filterLedger(store.usage, filters), filters.since, filters.until));

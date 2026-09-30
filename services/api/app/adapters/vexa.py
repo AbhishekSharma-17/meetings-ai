@@ -17,6 +17,14 @@ class VexaAPIError(RuntimeError):
         super().__init__(f"Vexa {operation} failed ({status_code}): {detail}")
 
 
+# What people see while a join waits for a free assistant (every one is in another call).
+ASSISTANTS_BUSY = "Waiting for a free assistant: all of them are in other calls right now"
+
+
+class AssistantsBusyError(VexaAPIError):
+    """Vexa refused a join because every assistant slot is taken (429): wait and retry, don't fail."""
+
+
 class VexaCaptureAdapter:
     def __init__(
         self,
