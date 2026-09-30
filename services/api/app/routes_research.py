@@ -16,6 +16,8 @@ from .documents import DocumentError, DocumentNotFoundError, KnowledgeDocument
 from .rate_limit import SlidingWindowLimiter
 from .research_actions import KnowledgeRequest, PrepareRequest, PrepareResult, ResearchActionError
 from .research_chat import ResearchChatError, ResearchChatRequest, ResearchChatResponse
+from .research_crm import ApolloCrmError
+from .research_crm_models import ApolloSavePreview, ApolloSaveRequest
 from .research_history import CompanyHistory, PersonHistory
 from .research_models import (
     CompanySearchRequest, CompanySearchResponse, LookupRequest, LookupResponse, PeopleSearchRequest, PeopleSearchResponse,
@@ -38,12 +40,18 @@ _MEMBER_ROUTES = (
     ("GET", re.compile(rf"{_PROFILE}(?:/history|/people|/conversations(?:/{_ID})?)?")),
     ("POST", re.compile(rf"{_PROFILE}/(?:refresh|chat|prepare|knowledge)")),
     ("DELETE", re.compile(rf"{_PROFILE}(?:/conversations/{_ID})?")),
-)
+)  # "Save to Apollo" ({_PROFILE}/apollo) is deliberately absent: owners and admins only.
+_SELF_AUDITED = re.compile(rf"{_PROFILE}/apollo")
 
 
 def research_route_allowed(method: str, path: str, role: str) -> bool:
     """Non-admin access for the ``require_admin`` middleware: members yes, viewers never."""
     return role == "member" and any(method == allowed and pattern.fullmatch(path) for allowed, pattern in _MEMBER_ROUTES)
+
+
+def research_self_audited(path: str) -> bool:
+    """Routes that write their own, more specific audit events, so the middleware's generic row is skipped."""
+    return bool(_SELF_AUDITED.fullmatch(path))
 
 
 def _actor(request: Request):
@@ -54,7 +62,7 @@ def _actor(request: Request):
 
 
 def _http(exc: Exception) -> HTTPException:
-    if isinstance(exc, (ResearchError, ResearchChatError, ResearchActionError)):
+    if isinstance(exc, (ResearchError, ResearchChatError, ResearchActionError, ApolloCrmError)):
         return HTTPException(status_code=exc.status_code, detail=exc.message)
     if isinstance(exc, (ProfileNotFoundError, DocumentNotFoundError)):
         return HTTPException(status_code=404, detail="Not found. It may have been deleted.")
@@ -66,7 +74,7 @@ def _http(exc: Exception) -> HTTPException:
 
 
 _HANDLED = (ResearchError, ResearchChatError, ResearchActionError, ProfileNotFoundError, DocumentNotFoundError,
-            ResearchPermissionError, DocumentError)
+            ResearchPermissionError, DocumentError, ApolloCrmError)
 
 
 def register_research_routes(app: FastAPI, *, research: ResearchService) -> None:
@@ -75,6 +83,8 @@ def register_research_routes(app: FastAPI, *, research: ResearchService) -> None
     save_limit = SlidingWindowLimiter(30, WINDOW, "Too many saves or refreshes. Try again in a few minutes.")
     chat_limit = SlidingWindowLimiter(20, WINDOW, "Too many questions. Try again in a few minutes.")
     action_limit = SlidingWindowLimiter(20, WINDOW, "Too many actions. Try again in a few minutes.")
+    crm_check_limit = SlidingWindowLimiter(20, WINDOW, "Too many Apollo checks. Try again in a few minutes.")
+    crm_write_limit = SlidingWindowLimiter(10, WINDOW, "Too many saves to Apollo. Try again in a few minutes.")
 
     def who(request: Request, limiter: SlidingWindowLimiter | None = None):
         actor = _actor(request)
@@ -203,3 +213,20 @@ def register_research_routes(app: FastAPI, *, research: ResearchService) -> None
             return await research.save_to_knowledge(who(request, action_limit), profile_id, payload)
         except _HANDLED as exc:
             raise _http(exc) from None
+
+    # ----- Save to Apollo (owners and admins; the middleware already refuses everyone else) -----------------------
+    @app.get("/v1/research/profiles/{profile_id}/apollo", response_model=ApolloSavePreview)
+    async def preview_apollo_save(profile_id: UUID, request: Request) -> ApolloSavePreview:
+        try:
+            return await research.crm.preview(who(request, crm_check_limit), profile_id)
+        except _HANDLED as exc:
+            raise _http(exc) from None
+
+    @app.post("/v1/research/profiles/{profile_id}/apollo", response_model=SaveProfileResponse)
+    async def save_to_apollo(profile_id: UUID, payload: ApolloSaveRequest, request: Request) -> SaveProfileResponse:
+        actor = who(request, crm_write_limit)
+        try:
+            profile = await research.crm.save(actor, profile_id, payload)
+        except _HANDLED as exc:
+            raise _http(exc) from None
+        return SaveProfileResponse(profile=profile, created=payload.action == "create", usage=research.explorer.usage(actor))

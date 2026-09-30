@@ -3,7 +3,8 @@
 Final pass (background job ``in_person_finalize``): assemble the stored chunks in order, split them
 into the largest parts the provider allows (adjacent parts share one chunk of overlap), transcribe
 each part with speaker diarization, reconcile speaker labels across parts, save the transcript as
-"Speaker A/B/…" segments, propose speaker names, mark the meeting completed (which starts the
+"Speaker A/B/…" segments, propose speaker names (from the transcript and, when the model accepts
+voice references, from attendees' saved voice samples — see ``in_person_voice``), mark the meeting completed (which starts the
 normal post-meeting pipeline: minutes draft, knowledge indexing, notifications) and delete the audio.
 
 Cleanup (``run``; only the background leader process runs it): audio of a session idle for 24 hours
@@ -27,7 +28,8 @@ from .in_person_naming import suggest_names
 from .in_person_reconcile import GlobalSegment, reconcile
 from .in_person_service import FINALIZE_JOB, InPersonService
 from .in_person_store import SessionSnapshot
-from .in_person_stt import SttError, SttResult, route_for
+from .in_person_stt import SttError, SttResult, route_for, supports_known_speakers
+from .in_person_voice import VoiceReference, merge, pick_attendees, references, voice_matches, voice_suggestions
 from .tenant import tenant_scope
 
 logger = logging.getLogger(__name__)
@@ -53,6 +55,7 @@ class InPersonFinalizer:
         self.service = service
         self.providers = providers
         self.retry_delays = retry_delays
+        self.voice_samples: Any = None  # VoiceSampleService; set by install_in_person
 
     @property
     def store(self):
@@ -88,12 +91,12 @@ class InPersonFinalizer:
         if snapshot.status != "finalizing":
             return {"meeting_id": str(meeting_id), "status": snapshot.status}
         try:
-            segments, diarized, profile, route = await self._transcribe(snapshot, progress)
+            segments, diarized, profile, route, voices = await self._transcribe(snapshot, progress)
             await self._stage(snapshot, "saving", "Saving the transcript", progress)
             self._save_transcript(meeting_id, segments, diarized, profile, route)
             self._save_moments(meeting_id, snapshot)
             await self._stage(snapshot, "naming", "Suggesting speaker names", progress)
-            suggestions = await self._names(meeting_id, snapshot) if diarized else []
+            suggestions = await self._names(meeting_id, snapshot, voices) if diarized else []
         except FinalizeError as exc:
             self._fail(organization_id, meeting_id, str(exc))
             raise
@@ -129,10 +132,11 @@ class InPersonFinalizer:
         await self._stage(snapshot, "transcribing", f"Transcribing {len(parts)} part{'s' if len(parts) != 1 else ''}",
                           progress, parts_total=len(parts), parts_done=0)
         meeting = self.service.repository.get_meeting(snapshot.meeting_id)
+        refs = self._voice_references(snapshot) if supports_known_speakers(route) else []
         results: list[tuple[Part, SttResult]] = []
         for part in parts:
             audio = self._part_audio(snapshot, part, headers)
-            results.append((part, await self._transcribe_part(profile, snapshot, part, audio, meeting.language)))
+            results.append((part, await self._transcribe_part(profile, snapshot, part, audio, meeting.language, refs)))
             await self._stage(snapshot, "transcribing", f"Transcribed part {part.index + 1} of {len(parts)}",
                               progress, parts_done=part.index + 1)
         diarized = any(result.diarized for _, result in results)
@@ -141,7 +145,22 @@ class InPersonFinalizer:
         segments = await reconcile(results, providers=self.providers, meeting_id=snapshot.meeting_id)
         if not any(item.text.strip() for item in segments):
             raise FinalizeError("No speech was recognised in this recording.")
-        return segments, diarized, profile, route
+        return segments, diarized, profile, route, voice_matches(segments, refs) if diarized else {}
+
+    def _voice_references(self, snapshot: SessionSnapshot) -> list[VoiceReference]:
+        """Saved voice samples of the people expected at this meeting (the recorder first), never others'."""
+        if self.voice_samples is None:
+            return []
+        try:
+            identities = self.voice_samples.identities(snapshot.organization_id)
+            if not identities:
+                return []
+            chosen = pick_attendees(identities, recorder_id=snapshot.recorded_by, expected=list(snapshot.expected_people),
+                                    invitees=self._invitee_people(snapshot.meeting_id, snapshot))
+            return references(self.voice_samples.load(snapshot.organization_id, chosen))
+        except Exception as exc:  # noqa: BLE001 - voice samples only add suggestions; transcription goes on without them
+            logger.warning("voice samples unavailable for %s: %s", snapshot.meeting_id, type(exc).__name__)
+            return []
 
     def _headers(self, snapshot: SessionSnapshot, meta) -> dict[int, bytes | None]:
         firsts = [group[0].seq for group in streams(meta)]
@@ -160,13 +179,13 @@ class InPersonFinalizer:
         return audio
 
     async def _transcribe_part(self, profile, snapshot: SessionSnapshot, part: Part, audio: bytes,
-                               language: str | None) -> SttResult:
+                               language: str | None, refs: list[VoiceReference] | None = None) -> SttResult:
         for attempt in range(PART_ATTEMPTS):
             try:
                 return await self.service.transcriber.transcribe(
                     profile, audio, snapshot.mime_type, diarize=True, language=language,
                     purpose="in_person_transcription", meeting_id=snapshot.meeting_id,
-                    audio_ms=part.duration_ms, part=part.index,
+                    audio_ms=part.duration_ms, part=part.index, known_speakers=tuple(ref.known for ref in refs or []),
                 )
             except SttError as exc:
                 if not exc.retryable or attempt == PART_ATTEMPTS - 1:
@@ -200,18 +219,24 @@ class InPersonFinalizer:
             template=guidance.template, instructions=combined[:GUIDANCE_LIMIT], focus_fields=guidance.focus_fields,
         ))
 
-    async def _names(self, meeting_id: UUID, snapshot: SessionSnapshot) -> list[dict[str, Any]]:
+    async def _names(self, meeting_id: UUID, snapshot: SessionSnapshot,
+                     voices: dict[str, VoiceReference] | None = None) -> list[dict[str, Any]]:
         segments = self.service.repository.get_transcript(meeting_id)
         invitees = self._invitees(meeting_id, snapshot)
+        voice = voice_suggestions(voices or {}, segments)
         try:
-            return await suggest_names(self.providers, meeting_id=meeting_id, segments=segments,
-                                       expected=[name for name in snapshot.expected_people if name not in invitees],
-                                       invitees=invitees)
+            spoken = await suggest_names(self.providers, meeting_id=meeting_id, segments=segments,
+                                         expected=[name for name in snapshot.expected_people if name not in invitees],
+                                         invitees=invitees)
         except Exception as exc:  # noqa: BLE001 - names can be suggested again later; the transcript is saved
             logger.warning("speaker naming failed for %s: %s", meeting_id, type(exc).__name__)
-            return []
+            spoken = []
+        return merge(spoken, voice)
 
     def _invitees(self, meeting_id: UUID, snapshot: SessionSnapshot) -> list[str]:
+        return [str(person.get("name")) for person in self._invitee_people(meeting_id, snapshot) if person.get("name")]
+
+    def _invitee_people(self, meeting_id: UUID, snapshot: SessionSnapshot) -> list[dict[str, Any]]:
         schedule = self.service.calendar_schedule
         if schedule is None:
             return []
@@ -221,7 +246,7 @@ class InPersonFinalizer:
             row = session.get(MeetingSourceRow, str(meeting_id))
             if row is None or row.organization_id != str(snapshot.organization_id):
                 return []
-            return [str(person.get("name")) for person in row.invitees or [] if isinstance(person, dict) and person.get("name")]
+            return [person for person in row.invitees or [] if isinstance(person, dict)]
 
     def _fail(self, organization_id: UUID, meeting_id: UUID, message: str) -> None:
         snapshot = self.store.find(organization_id, meeting_id)

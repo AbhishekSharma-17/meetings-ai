@@ -1,0 +1,25 @@
+/* Voice sample card on My profile. Layout only: buttons, badges, alerts and the level meter are shared primitives. */
+.voice-body { display:grid; gap:14px; }
+.voice-matching { display:grid; gap:6px; justify-items:start; }
+.voice-row { display:flex; align-items:center; gap:10px 12px; flex-wrap:wrap; }
+.voice-row > .button:last-child:not(.voice-play) { margin-left:auto; }
+.voice-consent { flex:1 1 280px; min-width:0; color:var(--text-secondary); font-size:13px; line-height:1.5; }
+.voice-consent-check { align-items:flex-start; font-size:13px; line-height:1.5; }
+.voice-consent-check input { margin-top:3px; }
+.voice-meta { display:inline-flex; align-items:center; gap:6px; min-width:0; color:var(--text-secondary); font-size:13px; }
+.voice-meta .lucide { width:15px; height:15px; flex:none; color:var(--brand); }
+.voice-preview, .voice-recording { display:grid; gap:12px; }
+.voice-script { padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius); background:var(--muted); font-size:14px; line-height:1.55; }
+.voice-clock { display:flex; align-items:baseline; justify-content:space-between; gap:6px 12px; flex-wrap:wrap; }
+.voice-timer { font-size:24px; font-weight:600; letter-spacing:-.01em; }
+.voice-timer small { color:var(--text-tertiary); font-size:13px; font-weight:500; }
+.voice-confirm { display:grid; gap:10px; padding:12px; border:1px solid var(--destructive-border); border-radius:var(--radius); background:var(--destructive-subtle); font-size:13px; }
+
+@media (max-width: 640px) {
+  .voice-row > .button:last-child:not(.voice-play) { margin-left:0; }
+  .voice-recording .button-group .button, .voice-preview .button-group .button { flex:1 1 auto; }
+}
+
+/* People & access (owners and admins): who has a voice sample. */
+.people-voice { flex:none; gap:4px; }
+.people-voice .lucide { width:12px; height:12px; color:var(--brand); }

@@ -7,6 +7,9 @@ speak at the same time in that overlap. Labels the overlap cannot settle (a pers
 overlap, or a new stream after a page reload) go to a continuity check by the workspace text model,
 which may only map a label to an existing speaker or declare it new. The overlap is then cut in its
 middle so no sentence appears twice.
+
+When the provider matched a label to a saved voice sample (a known-speaker key), that label keeps the
+same recording-wide letter in every part where the same key appears, and each segment carries the key.
 """
 
 from __future__ import annotations
@@ -46,6 +49,7 @@ class GlobalSegment:
     end: float
     text: str
     label: str | None  # "A", "B", … across the whole recording; None when the part had no speaker labels
+    known: str | None = None  # the known-speaker key the provider matched this line's voice to, if any
 
 
 class _Labels:
@@ -64,16 +68,20 @@ async def reconcile(parts: list[tuple[Part, SttResult]], *, providers: Any, meet
     labels = _Labels()
     output: list[GlobalSegment] = []
     previous: Part | None = None
+    known_letters: dict[str, str] = {}  # known-speaker key → recording-wide letter
     for part, result in parts:
         shifted = [RawSegment(item.start + part.start_ms / 1000, item.end + part.start_ms / 1000, item.text, item.speaker)
                    for item in result.segments]
         same_stream = previous is not None and previous.stream_first_seq == part.stream_first_seq
         overlap_start = part.start_ms / 1000
         overlap_end = overlap_start + part.overlap_ms / 1000 if same_stream else overlap_start
-        mapping: dict[str, str] = {}
+        mapping = _known_mapping(result.known_labels, known_letters)
         if same_stream and part.overlap_ms:
             before = [item for item in output if item.end > overlap_start and item.start < overlap_end]
-            mapping = _overlap_mapping(before, shifted, overlap_start, overlap_end)
+            overlap = _overlap_mapping(before, shifted, overlap_start, overlap_end)
+            taken = set(mapping.values())
+            mapping.update({local: running for local, running in overlap.items()
+                            if local not in mapping and running not in taken})
         unmapped = sorted({item.speaker for item in shifted if item.speaker and item.speaker not in mapping})
         if unmapped and output and any(item.label for item in output):
             mapping.update(await _continuity(providers, meeting_id, output, shifted, unmapped, mapping))
@@ -84,10 +92,24 @@ async def reconcile(parts: list[tuple[Part, SttResult]], *, providers: Any, meet
             cut = (overlap_start + overlap_end) / 2
             output = [item for item in output if item.start < cut]
             shifted = [item for item in shifted if item.start >= cut]
-        output.extend(GlobalSegment(item.start, item.end, item.text, mapping.get(item.speaker) if item.speaker else None)
+        for local, key in result.known_labels.items():
+            if local in mapping:
+                known_letters.setdefault(key, mapping[local])
+        output.extend(GlobalSegment(item.start, item.end, item.text, mapping.get(item.speaker) if item.speaker else None,
+                                    result.known_labels.get(item.speaker) if item.speaker else None)
                       for item in shifted)
         previous = part
     return sorted(output, key=lambda item: (item.start, item.end))
+
+
+def _known_mapping(known_labels: dict[str, str], known_letters: dict[str, str]) -> dict[str, str]:
+    """Part-local labels the provider matched to a voice sample that an earlier part already placed."""
+    mapping: dict[str, str] = {}
+    for local, key in sorted(known_labels.items()):
+        letter = known_letters.get(key)
+        if letter and letter not in mapping.values():
+            mapping[local] = letter
+    return mapping
 
 
 def _label_count(values) -> int:

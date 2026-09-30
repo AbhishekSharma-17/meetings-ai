@@ -16,7 +16,7 @@ from sqlalchemy import delete, func, select, update
 from .account_tokens import IssuedLink, has_usable_password, issue_link, revoke_links, unusable_password_hash
 from .database import (
     Database, KnowledgeBaseAccessRow, KnowledgeBaseRow, LEGACY_ADMIN_USER_ID, LEGACY_ORGANIZATION_ID,
-    MeetingShareRow, OrganizationMembershipRow, OrganizationRow, UserCredentialRow, UserRow,
+    MeetingShareRow, OrganizationMembershipRow, OrganizationRow, UserCredentialRow, UserRow, VoiceSampleRow,
 )
 from .workspace_preferences import (
     default_organization_id, forget_organization, preferred_organization_id, record_last_organization,
@@ -419,6 +419,9 @@ class AccountService:
                 MeetingShareRow.organization_id == str(requester.organization_id),
                 MeetingShareRow.user_id == str(user_id), MeetingShareRow.revoked_at.is_(None),
             ).values(revoked_at=now, revoked_by=str(requester.user_id)))
+            # Their voice sample belonged to this workspace only; it goes with the membership.
+            session.execute(delete(VoiceSampleRow).where(
+                VoiceSampleRow.organization_id == str(requester.organization_id), VoiceSampleRow.user_id == str(user_id)))
             session.delete(membership)
 
     @staticmethod

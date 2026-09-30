@@ -14,7 +14,8 @@ Tool request shapes (Composio ``POST /tools/execute/{TOOL}``; argument names fol
 Budget: each person may make ``APOLLO_DAILY_CALLS_PER_USER`` (default 100) Apollo calls per UTC day in a
 workspace, counted from the usage ledger (kind ``apollo``, any purpose). Looking up more than 10 people at
 once needs an explicit confirmation. Cached answers (searches 24 h, enrichment 30 days) cost nothing.
-Every real call is written to the ledger with purpose ``research_explorer`` and the person who made it.
+Every real call is written to the ledger with purpose ``research_explorer`` (``research_save_to_apollo`` for
+"Save to Apollo") and the person who made it.
 """
 
 from __future__ import annotations
@@ -54,6 +55,10 @@ TOOLS = {
     "person": "APOLLO_PEOPLE_ENRICHMENT", "bulk": "APOLLO_BULK_PEOPLE_ENRICHMENT",
     "org": "APOLLO_ORGANIZATION_ENRICHMENT", "news": "APOLLO_SEARCH_NEWS_ARTICLES",
     "jobs": "APOLLO_GET_ORGANIZATION_JOB_POSTINGS",
+    # "Save to Apollo" (research_crm.py): duplicate checks, pick-lists and the two writes.
+    "crm_contacts": "APOLLO_SEARCH_CONTACTS", "crm_accounts": "APOLLO_SEARCH_ACCOUNTS",
+    "contact_stages": "APOLLO_LIST_CONTACT_STAGES", "account_stages": "APOLLO_LIST_ACCOUNT_STAGES",
+    "users": "APOLLO_LIST_USERS", "create_contact": "APOLLO_CREATE_CONTACT", "create_account": "APOLLO_CREATE_ACCOUNT",
 }
 _MESSAGES = {
     "invalid_key": "Apollo rejected the workspace connection. An admin needs to reconnect Apollo in AI providers.",
@@ -256,33 +261,35 @@ class ExplorerApollo:
         return facts, calls
 
     # ----- plumbing ----------------------------------------------------------------------------
-    async def call(self, actor: Actor, account_id: str, kind: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def call(self, actor: Actor, account_id: str, kind: str, arguments: dict[str, Any], *,
+                   purpose: str = PURPOSE) -> dict[str, Any]:
         key = (str(actor.organization_id), str(actor.user_id))
         lock = self._budget_locks.setdefault(key, asyncio.Lock())
         async with lock:
-            return await self._call(actor, account_id, kind, arguments)
+            return await self._call(actor, account_id, kind, arguments, purpose)
 
-    async def _call(self, actor: Actor, account_id: str, kind: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def _call(self, actor: Actor, account_id: str, kind: str, arguments: dict[str, Any],
+                    purpose: str = PURPOSE) -> dict[str, Any]:
         tool = TOOLS[kind]
         self.require_budget(actor, 1)
         started = time.monotonic()
         try:
             data = await self.client.execute(actor.organization_id, account_id, tool, arguments)
         except ApolloError as error:
-            self._record(actor, tool, 0, started, "failed", {"error_kind": error.kind})
+            self._record(actor, tool, 0, started, "failed", {"error_kind": error.kind}, purpose)
             if self.on_failure is not None and error.kind in {"invalid_key", "out_of_credit"}:
                 self.on_failure(actor.organization_id, error)
             raise ExplorerError(_MESSAGES.get(error.kind, _MESSAGES["error"]), _STATUS.get(error.kind, 502),
                                 code=error.kind, error=error) from None
-        self._record(actor, tool, _count(data), started, "succeeded", {})
+        self._record(actor, tool, _count(data), started, "succeeded", {}, purpose)
         return data
 
     def _record(self, actor: Actor, tool: str, records: int, started: float, status: str,
-                details: dict[str, Any]) -> None:
+                details: dict[str, Any], purpose: str = PURPOSE) -> None:
         if self.ledger is None:
             return
         self.ledger.record_event(
-            kind="apollo", purpose=PURPOSE, provider="apollo", model=tool.lower(), units=records, unit_type="records",
+            kind="apollo", purpose=purpose, provider="apollo", model=tool.lower(), units=records, unit_type="records",
             estimated_usd=None, duration_ms=int((time.monotonic() - started) * 1000), status=status,
             actor_user_id=actor.user_id, organization_id=actor.organization_id, details={"tool": tool, **details},
         )
@@ -307,7 +314,7 @@ def _without_contact(record: Any) -> Any:
 
 
 def _count(data: dict[str, Any]) -> int:
-    for key in ("organization", "person"):
+    for key in ("organization", "person", "contact", "account"):
         if isinstance(data.get(key), dict):
             return 1
     for key in ("organizations", "people", "matches", "news_articles", "organization_job_postings", "accounts",

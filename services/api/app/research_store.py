@@ -16,9 +16,11 @@ from .accounts import Actor
 from .apollo_models import ApolloCompany, ApolloHiring, ApolloNewsItem, ApolloPerson
 from .database import Database, ResearchConversationRow, ResearchMessageRow, ResearchProfileRow, UserRow
 from .apollo_parsing import job_theme
-from .research_models import JobGroup, PersonRef, ProfileKind, ResearchProfilePublic
+from .research_models import ApolloCrmLink, JobGroup, PersonRef, ProfileKind, ResearchProfilePublic, apollo_record_url
 
 MAX_PROFILES = 500
+CRM_KEY = "apollo_crm"  # {record_type, record_id, record_name, action, by, at} once saved to / linked in Apollo
+_KEPT_ON_REFRESH = (CRM_KEY,)
 MAX_CONVERSATIONS = 50
 HISTORY_TURNS = 6
 
@@ -69,7 +71,29 @@ def job_groups(hiring: ApolloHiring | None) -> list[JobGroup]:
     return sorted(groups.values(), key=lambda group: group.count, reverse=True)
 
 
-def to_public(row: ResearchProfileRow, creator: str | None, actor: Actor) -> ResearchProfilePublic:
+def crm_link(data: dict[str, Any], names: dict[str, str]) -> ApolloCrmLink | None:
+    raw = data.get(CRM_KEY)
+    if not isinstance(raw, dict) or raw.get("record_type") not in {"contact", "account"} or not raw.get("record_id"):
+        return None
+    by = raw.get("by") if isinstance(raw.get("by"), str) else None
+    try:
+        return ApolloCrmLink(
+            record_type=raw["record_type"], record_id=str(raw["record_id"]), record_name=raw.get("record_name"),
+            action="linked" if raw.get("action") == "linked" else "created",
+            url=apollo_record_url(raw["record_type"], str(raw["record_id"])),
+            by=PersonRef(id=UUID(by), name=names.get(by) or "A former teammate") if by else None,
+            at=_aware(datetime.fromisoformat(str(raw.get("at")))))
+    except ValueError:
+        return None
+
+
+def crm_user(row: ResearchProfileRow) -> str | None:
+    raw = (row.data or {}).get(CRM_KEY)
+    return raw.get("by") if isinstance(raw, dict) and isinstance(raw.get("by"), str) else None
+
+
+def to_public(row: ResearchProfileRow, creator: str | None, actor: Actor,
+              names: dict[str, str] | None = None) -> ResearchProfilePublic:
     data = row.data or {}
     company = ApolloCompany.model_validate(data["company"]) if isinstance(data.get("company"), dict) else None
     person = ApolloPerson.model_validate(data["person"]) if isinstance(data.get("person"), dict) else None
@@ -82,6 +106,7 @@ def to_public(row: ResearchProfileRow, creator: str | None, actor: Actor) -> Res
         created_by=PersonRef(id=UUID(row.created_by), name=creator or "A former teammate") if row.created_by else None,
         created_at=_aware(row.created_at), updated_at=_aware(row.updated_at), fetched_at=_aware(row.fetched_at),
         apollo_calls=row.apollo_calls, can_delete=actor.is_admin or row.created_by == str(actor.user_id),
+        apollo_crm=crm_link(data, names or {}),
     )
 
 
@@ -98,7 +123,8 @@ class ResearchStore:
             return row
 
     def public(self, actor: Actor, row: ResearchProfileRow) -> ResearchProfilePublic:
-        return to_public(row, self._names({row.created_by} if row.created_by else set()).get(row.created_by or ""), actor)
+        names = self._names({value for value in (row.created_by, crm_user(row)) if value})
+        return to_public(row, names.get(row.created_by or ""), actor, names)
 
     def find(self, actor: Actor, kind: ProfileKind, *, apollo_id: str | None, domain: str | None) -> ResearchProfileRow | None:
         with self.database.session_factory() as session:
@@ -116,8 +142,8 @@ class ResearchStore:
             if kind:
                 query = query.where(ResearchProfileRow.kind == kind)
             rows = session.execute(query.order_by(ResearchProfileRow.updated_at.desc()).limit(MAX_PROFILES)).scalars().all()
-        names = self._names({row.created_by for row in rows if row.created_by})
-        return [to_public(row, names.get(row.created_by or ""), actor) for row in rows]
+        names = self._names({value for row in rows for value in (row.created_by, crm_user(row)) if value})
+        return [to_public(row, names.get(row.created_by or ""), actor, names) for row in rows]
 
     def saved_ids(self, actor: Actor, kind: ProfileKind, apollo_ids: list[str]) -> dict[str, UUID]:
         ids = [value for value in apollo_ids if value]
@@ -136,8 +162,8 @@ class ResearchStore:
             rows = session.execute(select(ResearchProfileRow).where(
                 ResearchProfileRow.organization_id == str(actor.organization_id), ResearchProfileRow.kind == "person",
                 ResearchProfileRow.domain == domain).order_by(ResearchProfileRow.name).limit(100)).scalars().all()
-        names = self._names({row.created_by for row in rows if row.created_by})
-        return [to_public(row, names.get(row.created_by or ""), actor) for row in rows]
+        names = self._names({value for row in rows for value in (row.created_by, crm_user(row)) if value})
+        return [to_public(row, names.get(row.created_by or ""), actor, names) for row in rows]
 
     def create(self, actor: Actor, *, kind: ProfileKind, apollo_id: str | None, domain: str | None, name: str,
                title: str | None, company: str | None, data: dict[str, Any], calls: int) -> ResearchProfileRow:
@@ -160,9 +186,33 @@ class ResearchStore:
                 raise ProfileNotFoundError("research profile not found")
             row.name, row.title, row.company = name[:200], (title or None) and title[:200], (company or None) and company[:200]
             row.domain = domain or row.domain
-            row.data, row.updated_at, row.fetched_at = data, now, now
+            kept = {key: (row.data or {})[key] for key in _KEPT_ON_REFRESH if key in (row.data or {})}
+            row.data, row.updated_at, row.fetched_at = {**data, **kept}, now, now
             row.apollo_calls = (row.apollo_calls or 0) + calls
         return self.get_row(actor, profile_id)
+
+    def set_crm(self, actor: Actor, profile_id: UUID, link: dict[str, Any]) -> ResearchProfileRow:
+        """Remember where this profile now lives in Apollo (kept across refreshes)."""
+        with self.database.session_factory.begin() as session:
+            row = session.get(ResearchProfileRow, str(profile_id))
+            if row is None or row.organization_id != str(actor.organization_id):
+                raise ProfileNotFoundError("research profile not found")
+            row.data = {**(row.data or {}), CRM_KEY: link}
+        return self.get_row(actor, profile_id)
+
+    def company_account(self, actor: Actor, domain: str | None) -> tuple[str, str] | None:
+        """(Apollo account id, name) of the saved company at ``domain`` when it is already in Apollo."""
+        if not domain:
+            return None
+        with self.database.session_factory() as session:
+            rows = session.execute(select(ResearchProfileRow).where(
+                ResearchProfileRow.organization_id == str(actor.organization_id), ResearchProfileRow.kind == "company",
+                ResearchProfileRow.domain == domain).limit(5)).scalars().all()
+        for row in rows:
+            raw = (row.data or {}).get(CRM_KEY)
+            if isinstance(raw, dict) and raw.get("record_type") == "account" and raw.get("record_id"):
+                return str(raw["record_id"]), str(raw.get("record_name") or row.name)
+        return None
 
     def delete(self, actor: Actor, profile_id: UUID) -> None:
         """Owners, admins and whoever saved it; everyone's chats about the profile go with it."""

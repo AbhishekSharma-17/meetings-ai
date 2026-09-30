@@ -1,6 +1,7 @@
 """Per-workspace cache of Apollo results so repeat briefings and lookups do not spend Apollo credits again.
 
-Enrichment results live 30 days; Research searches (``org_search`` / ``people_search``) live one day.
+Enrichment results live 30 days; Research searches (``org_search`` / ``people_search``) live one day;
+"Save to Apollo" stage/owner lists an hour and its duplicate checks 15 minutes.
 """
 
 from __future__ import annotations
@@ -20,9 +21,18 @@ logger = logging.getLogger(__name__)
 
 CACHE_DAYS = 30
 SEARCH_CACHE_HOURS = 24
-CacheKind = Literal["org", "person", "news", "jobs", "account", "contact", "org_search", "people_search"]
+CRM_LIST_MINUTES = 60
+CRM_MATCH_MINUTES = 15
+CacheKind = Literal["org", "person", "news", "jobs", "account", "contact", "org_search", "people_search",
+                    "contact_stages", "account_stages", "users", "crm_match"]
+# Stage and owner lists for "Save to Apollo" live an hour; a duplicate check only 15 minutes, so a
+# "create anyway" or "link to existing" decision is always made against a recent look at Apollo.
 _TTL: dict[str, timedelta] = {"org_search": timedelta(hours=SEARCH_CACHE_HOURS),
-                              "people_search": timedelta(hours=SEARCH_CACHE_HOURS)}
+                              "people_search": timedelta(hours=SEARCH_CACHE_HOURS),
+                              "contact_stages": timedelta(minutes=CRM_LIST_MINUTES),
+                              "account_stages": timedelta(minutes=CRM_LIST_MINUTES),
+                              "users": timedelta(minutes=CRM_LIST_MINUTES),
+                              "crm_match": timedelta(minutes=CRM_MATCH_MINUTES)}
 
 
 def ttl_for(kind: str) -> timedelta:

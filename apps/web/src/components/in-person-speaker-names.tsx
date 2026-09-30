@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Check, CheckCheck, Pencil, Quote, RefreshCw, UserRoundSearch, X } from "lucide-react";
+import { AudioLines, Check, CheckCheck, Pencil, Quote, RefreshCw, UserRoundSearch, X } from "lucide-react";
 import { inPersonService } from "@/lib/in-person-service";
 import type { SpeakerNameEvidence, SpeakerNameRow, SpeakerNamesView } from "@/lib/in-person-types";
 import { Alert, Badge, LoadingRow, type Tone } from "./ui/feedback";
@@ -15,6 +15,7 @@ const confidence: Record<"high" | "medium" | "low", { label: string; tone: Tone 
 };
 const evidenceKind: Record<SpeakerNameEvidence["kind"], string> = {
   addressed: "Called by name", self_introduction: "Introduced themselves", expected_person: "On the expected list", invitee: "Calendar invitee",
+  voice_sample: "Matched their saved voice sample",
 };
 export const SINGLE_SPEAKER_COPY = "The speech-to-text model didn't separate speakers, so everything is under one Speaker. You can rename or reassign individual lines in the transcript.";
 
@@ -113,7 +114,7 @@ function SpeakerRow({ row, busy, disabled, editing, onEdit, onCancel, onApprove,
       <p className="ip-suggestion-reason">{suggestion.reason}</p>
       {suggestion.evidence.length ? <ul className="ip-evidence" aria-label={`Evidence for ${suggestion.name}`}>
         {suggestion.evidence.map((item, index) => <li key={`${item.at_seconds}-${index}`}>
-          <Quote aria-hidden="true" />
+          {item.kind === "voice_sample" ? <AudioLines aria-hidden="true" /> : <Quote aria-hidden="true" />}
           <span><q>{item.quote}</q><small>{evidenceKind[item.kind]} · <button type="button" className="text-button neutral tabular" onClick={() => onFocusAt?.(item.at_seconds)} aria-label={`Show the line at ${formatClock(item.at_seconds * 1000)} in the transcript`}>{formatClock(item.at_seconds * 1000)}</button></small></span>
         </li>)}
       </ul> : null}

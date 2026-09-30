@@ -1,0 +1,48 @@
+/* Phone tab bar (≤ 640 px): Home/Shared, Record, Calendar, Knowledge, More. Hidden on tablets and desktops.
+   Hairline on top, the card surface behind, 48 px targets, the safe-area inset below the buttons. */
+.phone-tabbar { display:none; }
+
+@media (max-width: 640px) {
+  .app-frame.has-tabbar { --tabbar-height:60px; }
+  .phone-tabbar {
+    display:block; position:fixed; z-index:45; left:0; right:0; bottom:0;
+    padding:0 max(4px, env(safe-area-inset-right)) env(safe-area-inset-bottom) max(4px, env(safe-area-inset-left));
+    border-top:1px solid var(--border); background:var(--card);
+  }
+  .phone-tabbar ul { list-style:none; display:grid; grid-auto-flow:column; grid-auto-columns:minmax(0,1fr); height:var(--tabbar-height); align-items:center; }
+  .phone-tab {
+    position:relative; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+    width:100%; min-height:48px; padding:4px 2px; border:0; border-radius:var(--radius); background:transparent;
+    color:var(--text-secondary); font-size:11px; font-weight:500; line-height:1.2;
+    transition:color var(--duration-fast) ease, background var(--duration-fast) ease;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .phone-tab:hover { color:var(--foreground); }
+  .phone-tab:active { background:var(--muted); }
+  .phone-tab:focus-visible { outline:none; box-shadow:var(--focus-shadow); }
+  .phone-tab-icon { position:relative; display:grid; place-items:center; width:48px; height:26px; border-radius:999px; transition:background var(--duration-fast) ease; }
+  .phone-tab-icon .lucide { width:20px; height:20px; }
+  .phone-tab-label { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .phone-tab[aria-current="page"], .phone-tab[data-active] { color:var(--foreground); }
+  .phone-tab[aria-current="page"] .phone-tab-icon, .phone-tab[data-active] .phone-tab-icon { background:var(--brand-subtle); color:var(--brand); }
+  .phone-tab[aria-current="page"] .phone-tab-label { font-weight:600; }
+  .phone-tab[data-tab="record"] .phone-tab-icon { color:var(--destructive-text); }
+  .phone-tab-badge {
+    position:absolute; top:-3px; right:6px; min-width:16px; height:16px; padding:0 4px; display:grid; place-items:center;
+    border-radius:999px; background:var(--success); color:var(--success-foreground); font-size:10px; font-weight:600;
+    font-variant-numeric:tabular-nums; outline:2px solid var(--card);
+  }
+
+  /* Nothing is hidden behind the bar: the page, and bottom-anchored toasts, sit above it. */
+  .app-frame.has-tabbar .workspace-main { padding-bottom:calc(var(--tabbar-height) + env(safe-area-inset-bottom)); }
+  body:has(.phone-tabbar) .settings-toast-region,
+  body:has(.phone-tabbar) .notification-toast-region,
+  body:has(.phone-tabbar) .demo-notice-region { bottom:calc(var(--tabbar-height, 60px) + 12px + env(safe-area-inset-bottom)); }
+  /* The recorder page swaps the tab bar for its own action bar; toasts clear that bar too. */
+  body:has(.ip-recorder:not([hidden]) .ip-controls) .notification-toast-region,
+  body:has(.ip-recorder:not([hidden]) .ip-controls) .demo-notice-region { bottom:calc(84px + env(safe-area-inset-bottom)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .phone-tab, .phone-tab-icon { transition:none; }
+}

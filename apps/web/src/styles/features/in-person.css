@@ -40,7 +40,6 @@ fieldset.ip-section > legend.ip-section-title + * { clear:both; }
 .ip-finalize-body .prep-steps { margin-top:4px; }
 .ip-progress { position:relative; height:8px; overflow:hidden; border-radius:999px; background:var(--muted-strong); }
 .ip-progress span { position:absolute; inset:0; transform-origin:left center; background:var(--brand); transition:transform var(--duration-slow) ease; }
-.ip-stage { font-weight:500; }
 .ip-leave-hint { display:inline-flex; align-items:center; gap:8px; }
 .ip-leave-hint .lucide { width:15px; height:15px; flex:none; color:var(--brand); }
 

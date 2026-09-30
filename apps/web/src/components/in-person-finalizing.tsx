@@ -82,13 +82,14 @@ export function InPersonFinalizing({ session: initial, onDone, onLeave }: {
           <div className="ip-progress" role="progressbar" aria-label="Transcript progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} aria-valuetext={`${stageLabel(finalize?.stage)}${parts}`}>
             <span style={{ transform: `scaleX(${progress / 100})` }} />
           </div>
-          <p className="ip-stage" role="status">{stageLabel(finalize?.stage)}{parts}</p>
+          {/* The step list shows the stage; this only announces changes to screen readers. */}
+          <p className="sr-only" role="status">{stageLabel(finalize?.stage)}{parts}</p>
           <ol className="prep-steps">
             {STEPS.map((step, index) => {
               const state = index < current ? "done" : index === current ? "active" : "pending";
               return <li key={step.stage} className="prep-step" data-state={state} aria-current={state === "active" ? "step" : undefined}>
                 <span className="prep-step-mark" aria-hidden="true">{state === "done" ? <Check /> : state === "active" ? <span className="spinner" /> : null}</span>
-                <span>{step.label}</span>
+                <span>{step.label}{state === "active" ? parts : ""}</span>
                 <span className="sr-only">{state === "done" ? "done" : state === "active" ? "in progress" : "waiting"}</span>
               </li>;
             })}

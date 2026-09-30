@@ -10,6 +10,7 @@ import { shouldOfferSearch } from "@/lib/search";
 import { AddPeopleDialog } from "./add-people-dialog";
 import { AccessResultDialog, ConfirmMemberDialog, MemberRoleDialog } from "./member-dialogs";
 import { MemberRow, type MemberAction } from "./member-row";
+import { voiceSampleService } from "@/lib/voice-sample-service";
 import { memberPermissions, memberState, roleLabel, roleOptions, type InviteRole, type MemberRole } from "./member-access";
 
 export { roleLabel, type InviteRole } from "./member-access";
@@ -34,6 +35,20 @@ function useNow(): number {
   return now;
 }
 
+/** Owners and admins see who saved a voice sample (never the audio); re-read whenever the member list changes. */
+function useVoiceHolders(enabled: boolean, members: WorkspaceMember[]): Set<string> {
+  const [holders, setHolders] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    if (!enabled) return;
+    let current = true;
+    voiceSampleService.holders()
+      .then((items) => { if (current) setHolders(new Set(items.map((item) => item.user_id))); })
+      .catch(() => undefined);  // Optional detail: the list works without it.
+    return () => { current = false; };
+  }, [enabled, members]);
+  return holders;
+}
+
 /** People & access: a list of members with a row menu, and "Add people" in a dialog. */
 export function WorkspacePeople({ members, loading, loadError, account, canManage, workspaceName, onMembersChange, onNotice, onRetry }: {
   members: WorkspaceMember[];
@@ -55,6 +70,7 @@ export function WorkspacePeople({ members, loading, loadError, account, canManag
   const now = useNow();
   const ownerCount = members.filter((member) => member.role === "owner").length;
   const isOwner = account?.role === "owner";
+  const voiceHolders = useVoiceHolders(canManage, members);
 
   const refresh = () => meetingsService.listWorkspaceMembers().then(onMembersChange).catch(() => undefined);
   const open = (next: Dialog | null) => { setDialogError(null); setDialog(next); };
@@ -129,7 +145,7 @@ export function WorkspacePeople({ members, loading, loadError, account, canManag
       : visible.length ? <ScrollPanel label="Member list" className="member-scroll"><ul className="people-list">
         {visible.map((member) => <MemberRow key={member.user_id} member={member} state={memberState(member, now)}
           isSelf={account?.user_id === member.user_id} permissions={memberPermissions(member, account, ownerCount)}
-          busy={rowBusy === member.user_id} onAction={(action) => act(member, action)} />)}
+          busy={rowBusy === member.user_id} hasVoiceSample={voiceHolders.has(member.user_id)} onAction={(action) => act(member, action)} />)}
       </ul></ScrollPanel>
       : members.length ? <NoMatches query={query} noun="people" onClear={() => setQuery("")} /> : null}
     <AddPeopleDialog open={dialog?.kind === "add"} isOwner={isOwner} workspaceName={workspaceName} onClose={() => open(null)} onInvite={invite} />
@@ -140,7 +156,7 @@ export function WorkspacePeople({ members, loading, loadError, account, canManag
       confirmLabel="Reset access" busyLabel="Resetting…" busy={dialogBusy} error={dialogError}
       onConfirm={() => void resetAccess(dialog.member)} onClose={() => open(null)} /> : null}
     {dialog?.kind === "remove" ? <ConfirmMemberDialog title={`Remove ${dialog.member.display_name}?`}
-      description={dialog.member.status === "invited" ? "Their pending invitation stops working and they lose access to this workspace." : "They lose access to this workspace, its meetings and its shared knowledge. Their account and other workspaces are not affected."}
+      description={dialog.member.status === "invited" ? "Their pending invitation stops working and they lose access to this workspace." : "They lose access to this workspace, its meetings and its shared knowledge, and their voice sample here is deleted. Their account and other workspaces are not affected."}
       confirmLabel="Remove" busyLabel="Removing…" busy={dialogBusy} error={dialogError}
       onConfirm={() => void remove(dialog.member)} onClose={() => open(null)} /> : null}
     {dialog?.kind === "result" ? <AccessResultDialog title={dialog.title} sentTitle={dialog.sentTitle} result={dialog.result} onClose={() => open(null)} /> : null}

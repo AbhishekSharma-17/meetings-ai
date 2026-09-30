@@ -135,6 +135,18 @@
 .rx-people-pick { display:grid; gap:8px; margin:0; padding:0; border:0; }
 .rx-people-pick small { color:var(--text-tertiary); }
 
+/* ----- Save to Apollo ----- */
+.rx-apollo-locked { display:inline-flex; align-items:center; gap:8px; }
+.rx-apollo-locked small { color:var(--text-tertiary); font-size:12px; white-space:nowrap; }
+.rx-apollo-choices { display:grid; gap:8px; min-width:0; margin:0; padding:0; border:0; }
+.rx-apollo-choices .choice-card > span { min-width:0; overflow-wrap:anywhere; }
+.rx-apollo-choices .choice-icon { flex:none; width:16px; height:16px; margin-top:2px; }
+.rx-apollo-write { display:grid; gap:10px; min-width:0; padding-top:4px; }
+.rx-apollo-write h3 { margin:0; }
+.rx-apollo-fields { grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); padding:12px 14px; border:1px solid var(--border); border-radius:var(--radius); background:var(--muted); }
+.rx-apollo-picks { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px 16px; }
+.rx-apollo-left-out { display:grid; gap:4px; margin:0; padding-left:18px; color:var(--text-secondary); font-size:12.5px; line-height:1.5; }
+
 @media (max-width: 1100px) {
   .rx-layout, .rx-profile-grid { grid-template-columns:minmax(0,1fr); }
   .rx-saved, .rx-profile-side { position:static; }

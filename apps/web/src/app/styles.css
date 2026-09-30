@@ -23,6 +23,8 @@
 @import "../styles/features/apollo.css";
 @import "../styles/features/in-person.css";
 @import "../styles/features/research.css";
+@import "../styles/features/voice.css";
+@import "../styles/features/tab-bar.css";
 
 /* Meetings AI tokens. Cool slate neutrals, one deep-sea accent taken from the logo.
    Every token lives in three places: the light value here, the dark value in .dark,

@@ -4,6 +4,7 @@ import { OWNER_ID } from "../fixtures/people";
 import { json, noContent, notify, problem, str, strList, wait } from "../http";
 import type { DemoRouter } from "../router";
 import type { DemoStore } from "../store";
+import { registerResearchCrm } from "./research-crm";
 
 /*
  * Research (Apollo Explorer) in the demo: search, look up and save sample companies and people, see "our
@@ -209,4 +210,5 @@ export function registerResearch(router: DemoRouter): void {
       notify(`Demo: “${found.name}” would be added to ${base.name} and indexed.`);
       return json({ id: crypto.randomUUID(), filename: `${found.name} — Apollo research.md` }, 201);
     });
+  registerResearchCrm(router);
 }

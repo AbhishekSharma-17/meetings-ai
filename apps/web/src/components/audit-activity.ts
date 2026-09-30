@@ -1,5 +1,5 @@
 import {
-  Archive, BookOpen, CalendarCheck, CalendarClock, CalendarPlus, CalendarX, CircleCheck, Cpu, Database, FilePen, FileText,
+  Archive, BookOpen, CalendarCheck, CalendarClock, CalendarPlus, CalendarX, CircleCheck, CloudUpload, Cpu, Database, FilePen, FileText,
   FileUp, KeyRound, LogIn, type LucideIcon, MessageSquare, MessageSquareX, Mic, MicOff, PenLine, RefreshCw, Search, Send,
   Settings2, Share2, ShieldAlert, ShieldCheck, Trash2, UserCog, UserMinus, UserPen, UserPlus, Users, UsersRound, Video,
 } from "lucide-react";
@@ -154,6 +154,12 @@ function humanise(method: string | null, path: string, action: string): string {
 
 function special(event: AuditEvent, lookup: ActivityLookup, actor: string | null): Omit<ActivityEntry, "id" | "at" | "sentence"> | null {
   const targetId = event.resource_id ?? event.resource_path.match(UUID)?.[0] ?? null;
+  const apollo = event.action.match(/^research\.apollo\.(contact|account)_(created|linked|save_failed)$/);
+  if (apollo) {
+    const [, record, outcome] = apollo;
+    const text = outcome === "created" ? `created an Apollo ${record} from Research` : outcome === "linked" ? `linked a Research profile to an existing Apollo ${record}` : `tried to save an Apollo ${record} from Research`;
+    return { category: "integrations", icon: CloudUpload, failed: outcome === "save_failed", actor, text, target: null, suffix: null };
+  }
   switch (event.action) {
     case "auth.login.succeeded": return { category: "security", icon: LogIn, failed: false, actor, text: "signed in", target: null, suffix: null };
     case "auth.login.denied": return { category: "security", icon: ShieldAlert, failed: true, actor: null, text: "Sign-in failed — wrong email or password", target: null, suffix: null };

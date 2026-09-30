@@ -177,7 +177,8 @@ class ChunkAccepted(BaseModel):
 
 
 # ----- speaker naming -----------------------------------------------------------------------------
-EvidenceKind = Literal["addressed", "self_introduction", "expected_person", "invitee"]
+# voice_sample: the provider matched this speaker to a saved voice sample (never proposed by the text model).
+EvidenceKind = Literal["addressed", "self_introduction", "expected_person", "invitee", "voice_sample"]
 
 
 class SpeakerNameEvidence(BaseModel):

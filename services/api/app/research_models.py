@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from datetime import datetime
 from typing import Literal
+from urllib.parse import quote
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
@@ -16,6 +17,8 @@ from pydantic import BaseModel, Field, field_validator
 from .apollo_models import ApolloCompany, ApolloHiring, ApolloJob, ApolloNewsItem, ApolloPerson
 
 ProfileKind = Literal["company", "person"]
+RecordType = Literal["contact", "account"]  # what a person / company becomes in the team's Apollo CRM
+APOLLO_APP_URL = "https://app.apollo.io/#"
 PER_PAGE = 25
 MAX_PAGE = 40
 MAX_LIST = 10
@@ -219,6 +222,23 @@ class PersonRef(BaseModel):
     name: str
 
 
+def apollo_record_url(record_type: RecordType, record_id: str) -> str:
+    """The Apollo web app page for a contact or account."""
+    return f"{APOLLO_APP_URL}/{record_type}s/{quote(record_id, safe='')}"
+
+
+class ApolloCrmLink(BaseModel):
+    """Where a saved profile lives in the team's Apollo CRM, and who put it there ("Save to Apollo")."""
+
+    record_type: RecordType
+    record_id: str
+    record_name: str | None = None
+    action: Literal["created", "linked"]
+    url: str
+    by: PersonRef | None = None
+    at: datetime
+
+
 class ResearchProfilePublic(BaseModel):
     id: UUID
     kind: ProfileKind
@@ -239,6 +259,7 @@ class ResearchProfilePublic(BaseModel):
     fetched_at: datetime
     apollo_calls: int = 0
     can_delete: bool = False
+    apollo_crm: ApolloCrmLink | None = None
 
 
 class SaveProfileResponse(BaseModel):

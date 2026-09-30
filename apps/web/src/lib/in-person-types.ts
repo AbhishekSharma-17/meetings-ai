@@ -48,7 +48,7 @@ export type CreateInPersonInput = {
 
 export type ChunkReceipt = { seq: number; duplicate: boolean; last_seq: number; received_chunks: number; duration_ms: number; total_bytes: number };
 
-export type SpeakerNameEvidence = { quote: string; at_seconds: number; kind: "addressed" | "self_introduction" | "expected_person" | "invitee" };
+export type SpeakerNameEvidence = { quote: string; at_seconds: number; kind: "addressed" | "self_introduction" | "expected_person" | "invitee" | "voice_sample" };
 
 export type SpeakerNameRow = {
   /** Raw label, e.g. "Speaker A". */

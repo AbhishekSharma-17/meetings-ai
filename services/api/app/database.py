@@ -1132,6 +1132,22 @@ class ResearchMessageRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class VoiceSampleRow(Base):
+    """One person's opt-in voice sample in one workspace (v33); used only to suggest their name
+    when they are recorded in person there. Never shared across workspaces; deleted with the membership."""
+
+    __tablename__ = "voice_samples"
+
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), primary_key=True, index=True)
+    mime_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    bytes: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    duration_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class SchemaVersionRow(Base):
     __tablename__ = "schema_version"
 
@@ -1190,6 +1206,7 @@ SCHEMA_TABLES_BY_VERSION: dict[int, tuple[str, ...]] = {
     30: ("in_person_sessions", "in_person_chunks"),
     31: ("research_profiles", "research_conversations", "research_messages"),
     32: ("meeting_shares", "email_delivery_senders"),
+    33: ("voice_samples",),
 }
 
 SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
@@ -1267,6 +1284,7 @@ SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
     "research_messages": ("id", "conversation_id", "position", "role", "content", "citations", "provider", "model", "created_at"),
     "meeting_shares": ("id", "organization_id", "meeting_id", "user_id", "shared_by", "note", "created_at", "revoked_at", "revoked_by"),
     "email_delivery_senders": ("delivery_id", "organization_id", "meeting_id", "sent_by", "kind", "include_transcript", "created_at"),
+    "voice_samples": ("organization_id", "user_id", "mime_type", "bytes", "byte_size", "duration_ms", "created_at", "updated_at"),
 }
 
 
@@ -1349,7 +1367,7 @@ def _migrate_to_v22(connection) -> None:
 class Database:
     """Upgrades known schemas and rejects unknown or incomplete ones."""
 
-    SCHEMA_VERSION = 32
+    SCHEMA_VERSION = 33
 
     def __init__(self, url: str) -> None:
         engine_options: dict[str, object] = {"pool_pre_ping": True}

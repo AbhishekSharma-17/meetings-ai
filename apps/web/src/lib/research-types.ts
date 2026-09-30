@@ -42,7 +42,23 @@ export type ResearchProfile = {
   news: ApolloSnapshot["news"]; hiring: ApolloSnapshot["hiring"]; job_groups: JobGroup[];
   created_by: { id: string | null; name: string } | null; created_at: string; updated_at: string; fetched_at: string;
   apollo_calls: number; can_delete: boolean;
+  /** Set once an admin saved (or linked) this profile to the team's Apollo CRM. */
+  apollo_crm?: ApolloCrmLink | null;
 };
+
+/* "Save to Apollo": a person becomes an Apollo contact, a company an Apollo account. Owners and admins only. */
+export type ApolloRecordType = "contact" | "account";
+export type ApolloCrmLink = {
+  record_type: ApolloRecordType; record_id: string; record_name: string | null; action: "created" | "linked";
+  url: string; by: { id: string | null; name: string } | null; at: string;
+};
+export type ApolloCrmOption = { id: string; name: string };
+export type ApolloCrmMatch = { id: string; name: string; detail: string | null; url: string };
+export type ApolloSavePreview = {
+  record_type: ApolloRecordType; fields: { label: string; value: string }[]; not_sent: string[]; matches: ApolloCrmMatch[];
+  stages: ApolloCrmOption[]; stages_note: string | null; owners: ApolloCrmOption[]; owners_note: string | null; usage: ApolloUsage;
+};
+export type ApolloSaveInput = { action: "create" | "link"; record_id?: string | null; create_anyway?: boolean; stage_id?: string | null; owner_id?: string | null };
 export type JobGroup = { theme: string; count: number; jobs: NonNullable<ApolloSnapshot["hiring"]>["examples"] };
 export type SaveProfileResponse = { profile: ResearchProfile; created: boolean; usage: ApolloUsage };
 

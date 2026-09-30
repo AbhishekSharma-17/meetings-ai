@@ -17,6 +17,11 @@ Request shapes (verified 2026-09-29 against the provider docs):
   "B", …; 25 MB per file and 2,000 output tokens per request.
   https://developers.openai.com/api/docs/guides/speech-to-text.md ,
   https://developers.openai.com/api/docs/models/gpt-4o-transcribe-diarize.md
+  Known speakers: up to 4 ``known_speaker_names[]`` + ``known_speaker_references[]`` (2–10 s clips as
+  data URLs); matching segments then carry that name as ``speaker``. We send opaque keys ("person_1"),
+  never people's names. This is the only route that takes voice references: OpenRouter's
+  ``/audio/transcriptions`` has no such field for any model, including google/gemini-3.5-transcribe
+  (checked 2026-09-30: https://openrouter.ai/docs/api/api-reference/stt/create-transcription.md).
 - Other OpenAI / OpenAI-compatible routes — multipart with ``verbose_json`` (Whisper-style segments)
   or ``json`` (text only; timestamps are then estimated per sentence).
 
@@ -46,6 +51,7 @@ _FORMAT = {"audio/webm": "webm", "audio/mp4": "m4a", "audio/ogg": "ogg"}
 _EXTENSION = {"audio/webm": "webm", "audio/mp4": "m4a", "audio/ogg": "ogg"}
 _SENTENCE = re.compile(r"(?<=[.!?])\s+")
 _MAX_WORDS_PER_SEGMENT = 60
+MAX_KNOWN_SPEAKERS = 4  # gpt-4o-transcribe-diarize accepts at most four reference clips per request
 
 RouteKind = Literal["openrouter", "openai_diarize", "openai", "compatible"]
 
@@ -70,6 +76,23 @@ class SttRoute:
 
 
 @dataclass(frozen=True)
+class KnownSpeaker:
+    """A voice reference for one request: an opaque key (never a name) and the person's saved clip."""
+
+    key: str
+    mime_type: str
+    audio: bytes
+
+    def data_url(self) -> str:
+        return f"data:{self.mime_type};base64,{base64.b64encode(self.audio).decode('ascii')}"
+
+
+def supports_known_speakers(route: SttRoute) -> bool:
+    """Whether this route's model accepts known-speaker voice references (only OpenAI's diarize model)."""
+    return route.kind == "openai_diarize"
+
+
+@dataclass(frozen=True)
 class RawSegment:
     start: float
     end: float
@@ -87,6 +110,7 @@ class SttResult:
     response_format: str
     estimated_times: bool = False   # timestamps estimated from sentence lengths
     details: dict[str, Any] = field(default_factory=dict)
+    known_labels: dict[str, str] = field(default_factory=dict)  # part-local label → KnownSpeaker.key
 
 
 def _env_seconds(name: str, default: int) -> int:
@@ -141,13 +165,14 @@ class InPersonTranscriber:
 
     async def transcribe(self, profile: ProviderProfile, audio: bytes, mime_type: str, *, diarize: bool,
                          language: str | None, purpose: str, meeting_id: UUID, audio_ms: int,
-                         part: int | None = None) -> SttResult:
+                         part: int | None = None, known_speakers: tuple[KnownSpeaker, ...] = ()) -> SttResult:
         route = route_for(profile)
         started = time.monotonic()
         metadata = {"purpose": purpose, "meeting_id": str(meeting_id), "usage_kind": "transcription"}
+        known = known_speakers[:MAX_KNOWN_SPEAKERS] if diarize and supports_known_speakers(route) else ()
         try:
             result = await self._call(route, profile, audio, mime_type, diarize=diarize, language=language,
-                                      audio_ms=audio_ms)
+                                      audio_ms=audio_ms, known=known)
         except SttError as exc:
             self._record_failure(profile, metadata, exc, started)
             raise
@@ -157,15 +182,20 @@ class InPersonTranscriber:
 
     # ----- provider calls ------------------------------------------------------------------------
     async def _call(self, route: SttRoute, profile: ProviderProfile, audio: bytes, mime_type: str, *,
-                    diarize: bool, language: str | None, audio_ms: int) -> SttResult:
+                    diarize: bool, language: str | None, audio_ms: int,
+                    known: tuple[KnownSpeaker, ...] = ()) -> SttResult:
         if route.kind == "openrouter":
             attempts = ["diarize", "verbose", "json"] if diarize else ["json"]
             return await self._with_fallback(attempts, lambda mode: self._openrouter(
                 route, profile, audio, mime_type, mode=mode, language=language, audio_ms=audio_ms))
         if route.kind == "openai_diarize":
             mode = "diarized_json" if diarize else "json"
+            extra: dict[str, str | list[str]] = {"chunking_strategy": "auto"}
+            if known:
+                extra["known_speaker_names[]"] = [item.key for item in known]
+                extra["known_speaker_references[]"] = [item.data_url() for item in known]
             return await self._multipart(route, profile, audio, mime_type, response_format=mode, language=language,
-                                         extra={"chunking_strategy": "auto"}, audio_ms=audio_ms)
+                                         extra=extra, audio_ms=audio_ms, known=tuple(item.key for item in known))
         verbose = diarize and (route.kind == "compatible" or route.model.startswith("whisper"))
         attempts = ["verbose_json", "json"] if verbose else ["json"]
         return await self._with_fallback(attempts, lambda mode: self._multipart(
@@ -201,14 +231,18 @@ class InPersonTranscriber:
                                    details={"diarize_requested": mode == "diarize"})
 
     async def _multipart(self, route: SttRoute, profile: ProviderProfile, audio: bytes, mime_type: str, *,
-                         response_format: str, language: str | None, extra: dict[str, str], audio_ms: int) -> SttResult:
+                         response_format: str, language: str | None, extra: dict[str, str | list[str]], audio_ms: int,
+                         known: tuple[str, ...] = ()) -> SttResult:
         data = {"model": route.model, "response_format": response_format, **extra}
         if language:
             data["language"] = language
         files = {"file": (f"meeting.{_EXTENSION.get(mime_type, 'webm')}", audio, mime_type)}
         payload = await self._post(route, profile, data=data, files=files)
+        details: dict[str, Any] = {"diarize_requested": response_format == "diarized_json"}
+        if known:
+            details["voice_references"] = len(known)  # how many were sent; never which people
         return parse_transcription(payload, response_format=response_format, audio_ms=audio_ms,
-                                   details={"diarize_requested": response_format == "diarized_json"})
+                                   details=details, known=known)
 
     async def _post(self, route: SttRoute, profile: ProviderProfile, *, json_body: dict | None = None,
                     data: dict | None = None, files: dict | None = None) -> dict[str, Any]:
@@ -283,8 +317,12 @@ def _provider_error(response: httpx.Response) -> str:
 
 # ----- response parsing ------------------------------------------------------------------------------
 def parse_transcription(payload: dict[str, Any], *, response_format: str, audio_ms: int,
-                        details: dict[str, Any] | None = None) -> SttResult:
-    """Normalize OpenRouter verbose_json, OpenAI diarized_json / verbose_json / json into segments."""
+                        details: dict[str, Any] | None = None, known: tuple[str, ...] = ()) -> SttResult:
+    """Normalize OpenRouter verbose_json, OpenAI diarized_json / verbose_json / json into segments.
+
+    ``known`` are the known-speaker keys sent with the request; a provider label equal to one of them
+    is recorded in ``known_labels`` (part-local letter → key).
+    """
     text = str(payload.get("text") or "").strip()
     labels: dict[str, str] = {}
     segments = _segments(payload.get("segments"), labels)
@@ -304,6 +342,7 @@ def parse_transcription(payload: dict[str, Any], *, response_format: str, audio_
         audio_seconds=seconds, cost_usd=_number(usage.get("cost")),
         diarized=any(item.speaker is not None for item in segments), response_format=response_format,
         estimated_times=estimated, details=dict(details or {}),
+        known_labels={letter: raw for raw, letter in labels.items() if raw in known},
     )
 
 

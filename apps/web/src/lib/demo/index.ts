@@ -16,6 +16,7 @@ import { registerProviders } from "./handlers/providers";
 import { registerTeams } from "./handlers/teams";
 import { registerSpeakers } from "./handlers/speakers";
 import { registerSharing } from "./handlers/sharing";
+import { registerVoiceSamples } from "./handlers/voice";
 import { registerInPerson, seedInPerson } from "./handlers/in-person";
 import { registerUsage } from "./handlers/usage";
 import { registerWorkspace } from "./handlers/workspace";
@@ -36,7 +37,7 @@ let installed = false;
 function buildRouter(): DemoRouter {
   const router = new DemoRouter();
   // Teams first: its delivery-settings and send-configured routes understand internal_group_ids.
-  for (const register of [registerTeams, registerLeave, registerWorkspace, registerMeetings, registerMinutes, registerSpeakers, registerCalendar, registerPrep, registerKnowledge, registerProviders, registerApollo, registerBalances, registerUsage, registerActivity, registerPreferences, registerCoordination, registerInPerson, registerResearch, registerSharing]) register(router);
+  for (const register of [registerTeams, registerLeave, registerWorkspace, registerMeetings, registerMinutes, registerSpeakers, registerCalendar, registerPrep, registerKnowledge, registerProviders, registerApollo, registerBalances, registerUsage, registerActivity, registerPreferences, registerCoordination, registerInPerson, registerResearch, registerSharing, registerVoiceSamples]) register(router);
   return router;
 }
 

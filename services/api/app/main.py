@@ -55,6 +55,7 @@ from .calendar_cache import CalendarCacheService, CalendarSyncRequest, CalendarS
 from .calendar_relink import CalendarRelinker
 from .meeting_sharing import MeetingSharingService
 from .routes_sharing import register_sharing_routes, sharing_route_allowed
+from .routes_voice_samples import voice_sample_route_allowed
 from .calendar_watch import CalendarWatchService, WatchSettings
 from .calendar_watch_apply import CalendarChangeApplier
 from .routes_calendar_changes import register_calendar_change_routes
@@ -119,7 +120,7 @@ from .routes_integrations import register_integration_routes
 from .in_person_wiring import install_in_person
 from .routes_in_person import in_person_route_allowed
 from .research_wiring import install_research
-from .routes_research import research_route_allowed
+from .routes_research import research_route_allowed, research_self_audited
 from .stt_route import STTRouteError
 from .tenant import tenant_scope
 from .workspace_service import WorkspacePatch, WorkspacePublic, WorkspaceMemberPublic, WorkspaceService
@@ -453,6 +454,7 @@ def create_app(
                         or in_person_route_allowed(method, path, actor.role)
                         or research_route_allowed(method, path, actor.role)
                         or sharing_route_allowed(method, path)
+                        or voice_sample_route_allowed(method, path)
                     )
                     if not allowed:
                         return JSONResponse(status_code=403, content={"detail": "workspace role does not permit this action"})
@@ -481,7 +483,8 @@ def create_app(
             if request.method in {"POST", "PUT", "PATCH", "DELETE"} and path.startswith("/v1/") \
                     and path not in {"/v1/auth/login", "/v1/auth/logout", *PUBLIC_ACCOUNT_LINK_PATHS} and response.status_code < 400 \
                     and not path.startswith("/v1/notifications") and not path.endswith("/prep/whos-who") \
-                    and path != "/v1/me/preferences/detected":  # reading notifications / browser zone reports are not activity
+                    and path != "/v1/me/preferences/detected" and not research_self_audited(path):
+                # (reading notifications / browser zone reports are not activity; Save to Apollo audits itself)
                 route = request.scope.get("route")
                 template = getattr(route, "path", path)
                 match = re.search(r"/([0-9a-f]{8}-[0-9a-f-]{27,})", path)

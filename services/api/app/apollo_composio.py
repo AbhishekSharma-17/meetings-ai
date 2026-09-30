@@ -61,17 +61,21 @@ _PATTERNS: tuple[tuple[ApolloErrorKind, re.Pattern[str]], ...] = (
                                r"invalid access credentials", re.I)),
     ("rate_limited", re.compile(r"\b429\b|rate[_ ]limit|too many requests", re.I)),
     ("plan", re.compile(r"\b403\b|forbidden|upgrade|paid plan|not (?:available|accessible)|master key|"
-                        r"access denied", re.I)),
+                        r"access denied|not authori[sz]ed", re.I)),
 )
+_UPSTREAM_STATUS = re.compile(r"\b(4\d\d)\b")
 
 
 class ApolloError(RuntimeError):
     """A sanitized Apollo/Composio failure; the message is fixed per kind (never provider text)."""
 
-    def __init__(self, kind: ApolloErrorKind, status_code: int | None = None) -> None:
+    def __init__(self, kind: ApolloErrorKind, status_code: int | None = None, *,
+                 upstream_status: int | None = None) -> None:
         super().__init__(ERROR_MESSAGES[kind])
         self.kind: ApolloErrorKind = kind
         self.status_code = status_code
+        # Apollo's own HTTP status when a failed tool call reports one (403 plan, 422 rejected values…).
+        self.upstream_status = upstream_status
 
     @property
     def fatal(self) -> bool:
@@ -84,6 +88,12 @@ def classify_tool_error(message: str | None) -> ApolloErrorKind:
         if message and pattern.search(message):
             return kind
     return "error"
+
+
+def upstream_status(message: str | None) -> int | None:
+    """The first 4xx status code quoted in a tool's error text, if any."""
+    match = _UPSTREAM_STATUS.search(message or "")
+    return int(match.group(1)) if match else None
 
 
 def _http_kind(exc: ComposioHttpError) -> ApolloErrorKind:
@@ -202,7 +212,7 @@ class ApolloComposio:
         if not successful:
             kind = classify_tool_error(error)
             logger.info("Apollo tool %s failed (%s)", tool, kind)
-            raise ApolloError(kind)
+            raise ApolloError(kind, upstream_status=upstream_status(error))
         return data
 
     async def credit_stats(self, organization_id: UUID | str, connected_account_id: str) -> dict[str, Any]:

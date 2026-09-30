@@ -13,6 +13,8 @@ from .in_person_service import InPersonService
 from .in_person_store import InPersonStore
 from .in_person_stt import InPersonTranscriber
 from .routes_in_person import register_in_person_routes
+from .routes_voice_samples import register_voice_sample_routes
+from .voice_samples import VoiceSampleService
 
 
 def install_in_person(
@@ -26,8 +28,11 @@ def install_in_person(
         coordination=call_coordination, jobs=jobs,
     )
     finalizer = InPersonFinalizer(service, providers)
+    finalizer.voice_samples = VoiceSampleService(database)
     finalizer.register(jobs)
     register_in_person_routes(app, service=service, naming=SpeakerNamingService(service, finalizer))
+    # Opt-in voice samples (My profile) feed the final pass when the model accepts voice references.
+    register_voice_sample_routes(app, samples=finalizer.voice_samples, transcriber=service.transcriber)
     app.state.in_person = service
     app.state.in_person_finalizer = finalizer
     return finalizer

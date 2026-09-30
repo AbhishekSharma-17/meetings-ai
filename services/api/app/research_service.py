@@ -46,6 +46,7 @@ class ResearchService:
                                        on_failure=lambda org, error: integration.record_failure(org, error))
         self.history_finder = ResearchHistory(database, repository)
         self.actions, self.chat_engine, self.identities = actions, chat, identities
+        self.crm: Any = None  # ApolloCrm ("Save to Apollo"), attached by research_wiring
 
     # ----- availability ------------------------------------------------------------------------
     def status(self, actor: Actor) -> ResearchStatus:
@@ -55,6 +56,10 @@ class ResearchService:
         return ResearchStatus(connected=connected, status=row.status if row else None, can_manage=actor.is_admin,
                               can_use=can_use, usage=self.explorer.usage(actor) if can_use else None,
                               bulk_confirm_over=BULK_CONFIRM_OVER)
+
+    def connected_account(self, actor: Actor) -> str:
+        """The workspace's Composio connected-account id for Apollo, or a user-facing ResearchError."""
+        return self._account(actor)
 
     def _account(self, actor: Actor) -> str:
         require_member(actor)

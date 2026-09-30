@@ -13,6 +13,7 @@ from uuid import UUID
 from .in_person_models import SpeakerNameApprovals, SpeakerNameRow, SpeakerNamesView, SpeakerNameSuggestion
 from .in_person_naming import suggest_names
 from .in_person_store import InPersonError
+from .in_person_voice import is_voice_suggestion, merge
 from .rate_limit import SlidingWindowLimiter
 
 _SAMPLE_CHARS = 140
@@ -110,7 +111,10 @@ class SpeakerNamingService:
         kept = [item for item in snapshot.name_suggestions if item.get("state") == "approved"]
         approved = {item["speaker"] for item in kept}
         still_open = {segment.raw_speaker for segment in unnamed}
-        merged = kept + [item for item in fresh if item["speaker"] not in approved and item["speaker"] in still_open]
+        # Voice-sample matches came from the final pass (the audio is gone now); refreshing keeps open ones.
+        voice = [item for item in snapshot.name_suggestions if item.get("state") == "suggested" and is_voice_suggestion(item)]
+        merged = kept + [item for item in merge(fresh, voice)
+                         if item["speaker"] not in approved and item["speaker"] in still_open]
         self.service.store.update(actor.organization_id, meeting_id, touch=False, name_suggestions=merged)
         return self.view(actor, meeting_id)
 

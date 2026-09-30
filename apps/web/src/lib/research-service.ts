@@ -1,6 +1,6 @@
 import { api } from "./meetings-service";
 import type {
-  CompanySearchInput, CompanySearchResponse, LookupResponse, PeopleSearchInput, PeopleSearchResponse, PrepareResult, ProfileHistory, ProfileKind,
+  ApolloSaveInput, ApolloSavePreview, CompanySearchInput, CompanySearchResponse, LookupResponse, PeopleSearchInput, PeopleSearchResponse, PrepareResult, ProfileHistory, ProfileKind,
   ResearchChatResponse, ResearchConversation, ResearchConversationSummary, ResearchProfile, ResearchStatus, SaveProfileResponse,
 } from "./research-types";
 
@@ -29,4 +29,7 @@ export const researchService = {
   prepare: (id: string, calendarEventId: string, personProfileIds: string[]) =>
     api<PrepareResult>(`${profile(id)}/prepare`, post({ calendar_event_id: calendarEventId, person_profile_ids: personProfileIds })),
   saveToKnowledge: (id: string, knowledgeBaseId: string) => api<{ id: string; filename: string }>(`${profile(id)}/knowledge`, post({ knowledge_base_id: knowledgeBaseId })),
+  /** Checks Apollo for likely duplicates and lists stages/owners; spends Apollo calls (owners and admins only). */
+  apolloPreview: (id: string) => api<ApolloSavePreview>(`${profile(id)}/apollo`),
+  saveToApollo: (id: string, input: ApolloSaveInput) => api<SaveProfileResponse>(`${profile(id)}/apollo`, post(input)),
 };

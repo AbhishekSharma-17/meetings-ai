@@ -37,6 +37,7 @@ import { useTimePreferences, useTimePreferencesSync } from "@/lib/time-preferenc
 import { TimeZoneIndicator } from "./time-preferences-control";
 import { WorkspaceMenuList } from "./workspace-menu-list";
 import { InPersonRecorder, type InPersonRequest } from "./in-person-flow";
+import { PhoneTabBar } from "./phone-tab-bar";
 import { InPersonResumeBanner, usePendingRecording } from "./in-person-resume";
 import { ResearchScreen } from "./research-screen";
 import type { ProfileLinks } from "./research-profile";
@@ -302,15 +303,18 @@ export function AppShell() {
   </LoginLayout>;
 
   const liveCount = meetings.filter((meeting) => meeting.status === "live" || meeting.status === "joining" || meeting.status === "waiting_room").length;
+  // On phones the recorder page has its own bottom action bar, so the tab bar steps aside while it is in front.
+  const recorderInFront = inPersonRequest !== null && recorderBackground !== inPersonRequest;
+  const showTabBar = Boolean(account) && !recorderInFront;
   return (
-    <div className="app-frame">
+    <div className={showTabBar ? "app-frame has-tabbar" : "app-frame"}>
       <a className="skip-link" href="#main-content">Skip to content</a>
       <SidebarPanel view={view} onNavigate={setView} workspaces={workspaces} account={account} liveCount={liveCount} onSignOut={signOut} onSwitchWorkspace={switchWorkspace} className="desktop-sidebar" />
       <div className="workspace-main">
         {demoMode ? <DemoBanner /> : null}
         <header className="topbar">
           <button className="icon-button mobile-nav-trigger" aria-label="Open navigation" onClick={() => setMobileNavOpen(true)}><Menu /></button>
-          <nav className="topbar-context" aria-label="Breadcrumb"><span className="topbar-kicker">{workspace?.display_name ?? "Meetings AI"}</span><span className="topbar-sep" aria-hidden="true">/</span><span className="topbar-location" aria-current="page">{inPersonRequest !== null && recorderBackground !== inPersonRequest ? "In-person recording" : viewTitle[view]}</span></nav>
+          <nav className="topbar-context" aria-label="Breadcrumb"><span className="topbar-kicker">{workspace?.display_name ?? "Meetings AI"}</span><span className="topbar-sep" aria-hidden="true">/</span><span className="topbar-location" aria-current="page">{recorderInFront ? "In-person recording" : viewTitle[view]}</span></nav>
           <div className="topbar-actions">{demoMode ? <DemoPill /> : null}{liveCount && view !== "meetings" ? <button type="button" className="status live" onClick={() => setView("meetings")}>{liveCount} live</button> : null}{identity ? <NotificationCenter key={identity} identity={identity} onNavigate={openNotification} /> : null}</div>
         </header>
         <main id="main-content">
@@ -350,6 +354,8 @@ export function AppShell() {
           </Dialog.Popup>
         </Dialog.Portal>
       </Dialog.Root>
+      {showTabBar && account ? <PhoneTabBar role={account.role} view={view} liveCount={liveCount} moreOpen={mobileNavOpen}
+        onNavigate={setView} onRecord={() => recordInPerson(BLANK_SEED)} onMore={() => setMobileNavOpen(true)} /> : null}
       <NewMeetingDialog open={dialogOpen && (account?.role === "owner" || account?.role === "admin")} calendarSelection={calendarSelection} onClose={() => { setDialogOpen(false); setCalendarSelection(null); }} onMeetingJoined={(meeting) => {
         setDialogOpen(false);
         setCalendarSelection(null);

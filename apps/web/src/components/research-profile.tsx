@@ -13,6 +13,7 @@ import { CompanyMark, dataAge, employeesLabel, safeLink, seniorityLabel } from "
 import { ResearchHistory, type HistoryLinks } from "./research-history";
 import { ResearchChat } from "./research-chat";
 import { KnowledgeDialog, PrepareDialog } from "./research-actions";
+import { ApolloSaveAction, ApolloSavedNote, SaveToApolloDialog } from "./research-apollo-save";
 
 export type ProfileLinks = HistoryLinks & {
   onPrepared(result: PrepareResult): void;
@@ -32,7 +33,7 @@ export function ResearchProfileView({ profileId, userId, isAdmin, links, onBack,
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<"refresh" | "delete" | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [dialog, setDialog] = useState<"prepare" | "knowledge" | null>(null);
+  const [dialog, setDialog] = useState<"prepare" | "knowledge" | "apollo" | null>(null);
 
   // Keyed by profile id by the parent, so state starts fresh for each profile.
   useEffect(() => {
@@ -70,10 +71,12 @@ export function ResearchProfileView({ profileId, userId, isAdmin, links, onBack,
       actions={<>
         <button type="button" className="button secondary" onClick={() => setDialog("prepare")}><CalendarPlus aria-hidden="true" />Prepare a meeting</button>
         <button type="button" className="button secondary" onClick={() => setDialog("knowledge")}><BookmarkPlus aria-hidden="true" />Save to knowledge</button>
+        <ApolloSaveAction profile={profile} isAdmin={isAdmin} onOpen={() => { setNotice(null); setDialog("apollo"); }} />
       </>} />
     <div className="rx-age">
       <ProviderName brand="apollo" label={`From Apollo · fetched ${dataAge(profile.fetched_at)}`} />
       <span className="field-hint">Saved by {profile.created_by?.name ?? "a teammate"} on {formatDate(profile.created_at)}</span>
+      {profile.apollo_crm ? <ApolloSavedNote link={profile.apollo_crm} /> : null}
       <button type="button" className="button ghost sm" disabled={busy !== null} onClick={() => void refresh()}><RefreshCw aria-hidden="true" />{busy === "refresh" ? "Refreshing…" : "Refresh from Apollo"}</button>
       {profile.can_delete ? confirmDelete
         ? <span className="rx-confirm" role="group" aria-label="Confirm delete"><span>Delete for everyone?</span><button type="button" className="button danger sm" disabled={busy !== null} onClick={() => void remove()}>{busy === "delete" ? "Deleting…" : "Delete"}</button><button type="button" className="button ghost sm" onClick={() => setConfirmDelete(false)}>Keep</button></span>
@@ -99,6 +102,8 @@ export function ResearchProfileView({ profileId, userId, isAdmin, links, onBack,
       onPrepared={(result) => { setDialog(null); links.onPrepared(result); }} />
     <KnowledgeDialog open={dialog === "knowledge"} profile={profile} userId={userId} isAdmin={isAdmin} onClose={() => setDialog(null)}
       onSaved={(_, name) => { setDialog(null); setNotice(`Saved to ${name}. It becomes searchable in AI knowledge once indexed.`); }} />
+    {isAdmin && !profile.apollo_crm ? <SaveToApolloDialog open={dialog === "apollo"} profile={profile} onClose={() => setDialog(null)}
+      onSaved={(saved, usage, message) => { setDialog(null); setProfile(saved); onUsage(usage); setNotice(message); }} onUsage={onUsage} /> : null}
   </section>;
 }
 
