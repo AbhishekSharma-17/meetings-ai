@@ -57,7 +57,9 @@ for (const [theme, tokens] of Object.entries(themes)) {
     pair(`${status} text on card`, `${status}-text`, "card", 4.5);
     pair(`${status} text on subtle`, `${status}-text`, `${status}-subtle`, 4.5);
     pair(`${status} dot on card`, status, "card", 3);
+    pair(`${status} button label`, `${status}-foreground`, status, 4.5);
   }
+  pair("destructive button label on hover", "destructive-foreground", "destructive-hover", 4.5);
 }
 
 const [, , foregroundArg, backgroundArg] = process.argv;

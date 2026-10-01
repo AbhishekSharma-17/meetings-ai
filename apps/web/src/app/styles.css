@@ -62,7 +62,7 @@
   --success:oklch(74% .15 150); --success-foreground:oklch(19% .03 150); --success-text:oklch(79% .13 150); --success-subtle:oklch(25.5% .04 150); --success-border:oklch(39% .08 150);
   --warning:oklch(80% .15 80); --warning-foreground:oklch(20% .03 80); --warning-text:oklch(83% .13 80); --warning-subtle:oklch(26.5% .045 80); --warning-border:oklch(41% .08 80);
   --info:oklch(72% .12 250); --info-foreground:oklch(19% .03 250); --info-text:oklch(79% .10 250); --info-subtle:oklch(25.5% .04 250); --info-border:oklch(39% .08 250);
-  --destructive:oklch(64% .18 27); --destructive-foreground:oklch(100% 0 0); --destructive-hover:oklch(59% .18 27); --destructive-text:oklch(77% .12 25); --destructive-subtle:oklch(25.5% .045 25); --destructive-border:oklch(41% .10 25);
+  --destructive:oklch(58% .18 27); --destructive-foreground:oklch(100% 0 0); --destructive-hover:oklch(53% .18 27); --destructive-text:oklch(77% .12 25); --destructive-subtle:oklch(25.5% .045 25); --destructive-border:oklch(41% .10 25);
   --chart-1:oklch(86% .01 260); --chart-2:oklch(72% .12 250); --chart-3:oklch(80% .14 75); --chart-4:oklch(74% .09 190);
   --chart-5:oklch(70% .13 300); --chart-6:oklch(74% .12 145); --chart-7:oklch(76% .11 40); --chart-8:oklch(62% .02 260);
   --sidebar:oklch(14.5% .008 260); --sidebar-hover:oklch(21% .01 260); --sidebar-active:oklch(24.5% .011 260);
