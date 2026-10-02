@@ -6,6 +6,9 @@ export type Meeting = {
   botName?: string;
   startsAt: string;
   duration: string;
+  /** Actual capture timestamps are also available to overview/library duration clocks. */
+  joinedAt?: string | null;
+  stoppedAt?: string | null;
   participants: number;
   status: MeetingStatus;
   platform: "Google Meet" | "Zoom" | "Microsoft Teams" | "In person";

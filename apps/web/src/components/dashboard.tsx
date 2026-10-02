@@ -12,6 +12,7 @@ import { EmptyState } from "./ui/feedback";
 import { InPersonChip, isInPerson } from "./in-person-meeting-panels";
 import { useCoverageSummaries } from "./coordination-chips";
 import type { CoverageSummary } from "@/lib/coordination";
+import { useMeetingDuration } from "./use-meeting-duration";
 
 const RECENT_LIMIT = 6;
 
@@ -92,6 +93,7 @@ function Stat({ icon, label, value, hint }: { icon: ReactNode; label: string; va
 }
 
 function MeetingRow({ meeting, summary, onOpen }: { meeting: Meeting; summary?: CoverageSummary; onOpen(): void }) {
+  const duration = useMeetingDuration(meeting);
   const owner = summary?.owner;
   const scheduledBy = owner ? `${owner.display_name}${owner.is_you ? " (you)" : ""}` : "Not available";
   const assistant = summary?.handed_to_bot_name || summary?.bot_name || meeting.botName;
@@ -107,7 +109,7 @@ function MeetingRow({ meeting, summary, onOpen }: { meeting: Meeting; summary?: 
         </small> : null}
       </span>
       <MeetingBadge meeting={meeting} />
-      <span className="dashboard-meeting-duration">{meeting.duration === "—" ? "" : meeting.duration}</span>
+      <span className="dashboard-meeting-duration">{duration === "—" ? "" : duration}</span>
       <ArrowRight className="row-arrow" aria-hidden="true" />
     </button>
   </li>;

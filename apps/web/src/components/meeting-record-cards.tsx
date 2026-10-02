@@ -6,6 +6,7 @@ import { Trash2 } from "lucide-react";
 import type { CalendarEvent, MeetingDetail, TranscriptionRoute } from "@/lib/types";
 import { ProviderBrandIcon } from "./provider-brand-icons";
 import { providerBrand } from "./provider-brand";
+import { useMeetingDuration } from "./use-meeting-duration";
 
 const DELETE_CONFIRMATION = "DELETE";
 const calendarNames: Record<CalendarEvent["provider"], string> = { googlecalendar: "Google Calendar", outlook: "Outlook Calendar", calendly: "Calendly", zoom: "Zoom" };
@@ -37,6 +38,7 @@ function RouteMark({ route }: { route: TranscriptionRoute }) {
 
 /** `inPerson`: a meeting recorded from a phone or laptop, with no assistant in a call. */
 export function MeetingDetailsCard({ meeting, route, inPerson }: { meeting: MeetingDetail; route: TranscriptionRoute | null; inPerson?: { recordedOn: string } }) {
+  const duration = useMeetingDuration(meeting);
   return <section className="card" aria-labelledby="meeting-details-title">
     <div className="card-header"><div><h2 id="meeting-details-title">Meeting details</h2></div></div>
     <div className="card-body">
@@ -45,7 +47,7 @@ export function MeetingDetailsCard({ meeting, route, inPerson }: { meeting: Meet
         {inPerson ? <Metadata label="Recording" value={inPerson.recordedOn} /> : <Metadata label="Assistant" value={meeting.botName} />}
         <Metadata label={inPerson ? "Started" : "Joined"} value={formatTimestamp(meeting.joinedAt)} />
         <Metadata label="Stopped" value={formatTimestamp(meeting.stoppedAt)} />
-        <Metadata label="Duration" value={meeting.duration} />
+        <Metadata label="Duration" value={duration} />
         <Metadata label="Last update" value={formatTimestamp(meeting.updatedAt)} />
       </dl>
       {route ? <section className="record-runtime" aria-label="Transcription runtime route">

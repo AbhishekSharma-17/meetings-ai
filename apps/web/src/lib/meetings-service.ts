@@ -1,5 +1,6 @@
 import type { AccountLinkPreview, AssistantCapacity, AuditEvent, BriefDocument, CalendarConnection, CalendarDisconnectResult, ScheduledOnDisconnect, CalendarEvent, CalendarPeriod, CalendarSchedule, CalendarSnapshot, Capability, ConnectionState, CreateMeetingInput, CurrentAccount, EmailDelivery, InviteResult, KnowledgeBase, KnowledgeChatResponse, KnowledgeConversation, KnowledgeIndexStatus, KnowledgeMap, KnowledgeSearchResponse, KnowledgeTextProfile, KnowledgeWikiOverview, Meeting, MeetingDeliverySettings, MeetingDetail, MeetingMinutes, MeetingParticipants, MeetingStatus, MinutesDraft, MinutesStatus, MomGuidance, OrganizationBrief, PostMeetingJob, PrepReport, AiSettingsInput, AiSettingsView, CredentialTestResult, ModelCatalog, ModelCatalogQuery, ProfileKeyChoice, ProfileKind, ProviderProfile, ResendStatus, VaultCredential, VaultCredentialInput, VaultProviderType, RetentionPolicy, SpeakerIdentity, SpeakerSuggestion, Team, TeamInput, TextModelCatalog, TranscriptSegment, TranscriptionRoute, UsageSummary, Workspace, WorkspaceCalendarConnection, WorkspaceMember, WorkspaceOperations, WorkspaceOption } from "./types";
 import { formatDateTime } from "./time-store";
+import { meetingDuration } from "./meeting-duration";
 
 export interface MeetingsService {
   getSession(): Promise<boolean>;
@@ -338,12 +339,13 @@ function relativeTimestamp(value: string | null): string {
 function toMeetingDetail(meeting: BackendMeeting): MeetingDetail {
   const meetingUrl = meeting.meeting_url ?? meeting.url ?? "";
   const createdAt = meeting.created_at ?? null;
+  const status = meetingStatus(meeting.status);
   return {
     id: meeting.id,
     title: meeting.title || "Untitled meeting",
     meetingUrl,
     platform: platformFrom(meeting.platform, meetingUrl),
-    status: meetingStatus(meeting.status),
+    status,
     botName: meeting.bot_name || "Meetings AI",
     createdAt,
     updatedAt: meeting.updated_at ?? null,
@@ -359,7 +361,7 @@ function toMeetingDetail(meeting: BackendMeeting): MeetingDetail {
       note: meeting.schedule.note ?? null, changedAt: meeting.schedule.changed_at, rescheduledFrom: meeting.schedule.rescheduled_from ?? null,
     } : null,
     startsAt: relativeTimestamp(createdAt),
-    duration: meeting.duration || "—",
+    duration: meetingDuration({ joinedAt: meeting.joined_at, stoppedAt: meeting.stopped_at, status }) ?? (meeting.duration || "—"),
     participants: meeting.participant_count ?? meeting.participants ?? 0,
   };
 }

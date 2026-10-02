@@ -16,6 +16,7 @@ import type { CoverageSummary } from "@/lib/coordination";
 import { FilterInput, NoMatches } from "./scroll-panel";
 import { matchesQuery } from "@/lib/search";
 import { InPersonChip, isInPerson } from "./in-person-meeting-panels";
+import { useMeetingDuration } from "./use-meeting-duration";
 
 type Filter = "all" | "scheduled" | "live" | "review" | "reviewed" | "attention" | "completed" | "cancelled";
 
@@ -101,6 +102,7 @@ function meetingSearchFields(meeting: Meeting, schedule: CalendarSchedule | unde
 }
 
 function LibraryRow({ meeting, schedule, coverage, onOpen }: { meeting: Meeting; schedule: CalendarSchedule | undefined; coverage?: CoverageSummary; onOpen(): void }) {
+  const duration = useMeetingDuration(meeting);
   const scheduled = schedule?.status === "pending";
   const moved = scheduled && schedule?.rescheduled_from ? ` (was ${formatWhen(schedule.rescheduled_from)})` : "";
   const when = schedule ? `${sourceNames[schedule.provider ?? ""] ?? schedule.provider ?? "Calendar"} · ${formatWhen(schedule.starts_at)}${moved}` : meeting.startsAt;
@@ -108,7 +110,7 @@ function LibraryRow({ meeting, schedule, coverage, onOpen }: { meeting: Meeting;
     <button type="button" className="library-row" aria-label={`Open ${meeting.title}`} onClick={onOpen}>
       <span className="library-platform" aria-hidden="true">{platformMonogram(meeting.platform)}</span>
       <span className="library-row-copy"><b>{meeting.title}</b><small>{isInPerson(meeting) ? <InPersonChip className="inline" /> : meeting.platform} · {when}{meeting.participants ? ` · ${meeting.participants} participant${meeting.participants === 1 ? "" : "s"}` : ""}</small></span>
-      <span className="library-row-duration">{meeting.duration === "—" ? "" : meeting.duration}</span>
+      <span className="library-row-duration">{duration === "—" ? "" : duration}</span>
       <span className="library-row-status">
         <CoverageChip summary={coverage} />
         <MeetingBadge meeting={withSchedule(meeting, schedule)} />

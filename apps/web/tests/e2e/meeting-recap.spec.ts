@@ -49,7 +49,11 @@ test("recap hides internal IDs and keeps the newest transcript in a compact expa
   });
 
   await page.goto("/");
+  await expect(page.getByRole("button", { name: "Open Mobius recap" }).locator(".dashboard-meeting-duration")).toHaveText("28 min");
+  await page.getByRole("button", { name: "Meetings", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Open Mobius recap" }).locator(".library-row-duration")).toHaveText("28 min");
   await page.getByRole("button", { name: "Open Mobius recap" }).click();
+  await expect(page.locator(".meta-list div").filter({ has: page.locator("dt", { hasText: /^Duration$/ }) }).locator("dd")).toHaveText("28 min");
   await expect(page.getByRole("heading", { name: "MOM & follow-up" })).toBeVisible();
   await expect(page.getByLabel("Executive summary")).toHaveValue("The team agreed to follow up.");
   await expect(page.getByLabel("Action", { exact: true })).toHaveValue("Follow up");
