@@ -50,6 +50,7 @@
   --radius-sm:6px; --radius:8px; --radius-lg:12px; --radius-dialog:14px;
   --duration-fast:100ms; --duration-base:150ms; --duration-slow:220ms;
   --focus-shadow:0 0 0 1px var(--brand),0 0 0 4px var(--brand-subtle);
+  --elevation-calendar-today:inset 0 0 0 1px var(--brand-border);
   --topbar-height:56px; --shell-inset:8px;
 }
 .dark {
@@ -73,6 +74,7 @@
   --radius-sm:6px; --radius:8px; --radius-lg:12px; --radius-dialog:14px;
   --duration-fast:100ms; --duration-base:150ms; --duration-slow:220ms;
   --focus-shadow:0 0 0 1px var(--brand),0 0 0 4px var(--brand-subtle);
+  --elevation-calendar-today:inset 0 0 0 1px var(--brand-border);
   --topbar-height:56px; --shell-inset:8px;
 }
 @theme inline {
@@ -90,6 +92,7 @@
   --color-chart-5:var(--chart-5); --color-chart-6:var(--chart-6); --color-chart-7:var(--chart-7); --color-chart-8:var(--chart-8);
   --color-sidebar:var(--sidebar); --color-sidebar-hover:var(--sidebar-hover); --color-sidebar-active:var(--sidebar-active);
   --color-overlay:var(--overlay); --shadow-raised:var(--elevation-raised); --shadow-overlay:var(--elevation-overlay); --shadow-modal:var(--elevation-modal);
+  --shadow-calendar-today:var(--elevation-calendar-today);
   --radius-sm:var(--radius-sm); --radius-md:var(--radius); --radius-lg:var(--radius-lg); --radius-xl:var(--radius-dialog);
   --transition-duration-fast:var(--duration-fast); --transition-duration-base:var(--duration-base); --transition-duration-slow:var(--duration-slow);
 }
