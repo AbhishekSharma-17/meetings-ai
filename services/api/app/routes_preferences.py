@@ -18,6 +18,11 @@ from .user_preferences import (
 
 
 def register_preference_routes(app: FastAPI, *, preferences: UserPreferenceService) -> None:
+    @app.get("/v1/me/assistant-name")
+    def get_assistant_name(request: Request) -> dict[str, str | None]:
+        actor = request.state.actor
+        return preferences.assistant_name(actor.user_id, actor.organization_id)
+
     @app.get("/v1/me/preferences", response_model=PreferencesPublic)
     def get_preferences(request: Request) -> PreferencesPublic:
         return preferences.get(request.state.actor.user_id)

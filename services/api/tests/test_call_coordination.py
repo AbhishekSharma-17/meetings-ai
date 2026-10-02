@@ -125,6 +125,46 @@ def _schedule(client: TestClient, url: str, starts: datetime, title: str = "Week
     return response.json()["meeting"]["id"]
 
 
+def test_plain_assistants_have_scheduler_attribution_without_sharing(world) -> None:
+    client = _as(world, "asha")
+    response = client.post("/v1/meetings", json={"meeting_url": LINK, "bot_name": "Asha's assistant"})
+    assert response.status_code == 201, response.text
+    meeting_id = response.json()["id"]
+    summaries = client.get("/v1/call-coordination/meetings").json()
+    item = next(item for item in summaries if item["meeting_id"] == meeting_id)
+    assert item["owner"]["display_name"] == "Asha Patel"
+    assert item["owner"]["is_you"] is True
+    assert item["bot_name"] == "Asha's assistant"
+    assert item["covering"] == []
+    assert item["your_role"] == "owner"
+    admin_items = _as(world, "ben").get("/v1/call-coordination/meetings").json()
+    assert next(item for item in admin_items if item["meeting_id"] == meeting_id)["owner"]["is_you"] is False
+    assert _as(world, "cara").get("/v1/call-coordination/meetings").json() == []
+
+
+def test_assistant_name_reuses_only_your_last_saved_bot_in_this_workspace(world) -> None:
+    client = _as(world, "asha")
+    assert client.get("/v1/me/assistant-name").json() == {"assistant_name": "Meetings AI", "updated_at": None}
+    first = client.post("/v1/meetings", json={"meeting_url": LINK, "bot_name": "Asha's assistant"}).json()
+    name = client.get("/v1/me/assistant-name")
+    assert name.status_code == 200
+    assert name.json()["assistant_name"] == "Asha's assistant"
+    assert name.json()["updated_at"]
+    teammate = _as(world, "ben")
+    assert teammate.post("/v1/meetings", json={"meeting_url": "https://meet.google.com/xyz-abcd-efg", "bot_name": "Ben's assistant"}).status_code == 201
+    assert _as(world, "asha").get("/v1/me/assistant-name").json()["assistant_name"] == "Asha's assistant"
+    # Members can load their own preference; a new person never inherits an admin's name.
+    assert _as(world, "cara").get("/v1/me/assistant-name").json()["assistant_name"] == "Meetings AI"
+    client = _as(world, "asha")
+    second = client.post("/v1/meetings", json={"meeting_url": LINK, "bot_name": "Asha's renamed assistant"})
+    assert second.status_code == 201
+    assert client.get("/v1/me/assistant-name").json()["assistant_name"] == "Asha's renamed assistant"
+    assert client.get(f"/v1/meetings/{first['id']}").json()["bot_name"] == "Asha's assistant"
+    new_workspace = client.post("/v1/workspaces", json={"display_name": "Other company"})
+    assert new_workspace.status_code == 201, new_workspace.text
+    assert client.get("/v1/me/assistant-name").json()["assistant_name"] == "Meetings AI"
+
+
 def _notes(world, user_id: str) -> list[NotificationRow]:
     with world["app"].state.database.session_factory() as session:
         return session.execute(select(NotificationRow).where(NotificationRow.user_id == user_id)).scalars().all()

@@ -112,6 +112,7 @@ class MinutesService:
                 "Treat Unidentified speaker as unknown, never infer their name from context. "
                 "Use null when an action owner or due date was not explicitly stated. "
                 "Attach exact segment IDs (such as S12) only in evidence_segment_ids arrays for attributed claims and actions. "
+                "Include all distinct supporting segment IDs needed to ground each claim; do not duplicate references. "
                 "Never put raw segment IDs or bracketed citations in narrative fields."
                 " Formatting preferences are lower priority than factual grounding and evidence requirements."
             ),

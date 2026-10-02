@@ -96,6 +96,11 @@ test("the bell shows unread notifications, marks one read and opens its briefing
   await expect(panel.getByText("Recap sent")).toHaveCount(0);
 
   await panel.getByRole("button", { name: /^Briefing ready for “Globex planning”/ }).click();
+  await expect(panel).toBeVisible();
+  await expect(panel.getByText("Assistant could not join “Weekly sync”")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Meeting prep" })).toHaveCount(0);
+  await panel.getByRole("button", { name: "All", exact: true }).click();
+  await panel.getByRole("button", { name: "Open notification: Briefing ready for “Globex planning”", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Meeting prep" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Globex planning", level: 2 })).toBeVisible();
   expect(read).toEqual(["00000000-0000-4000-8000-000000000401"]);
@@ -153,6 +158,8 @@ test("the demo workspace has notifications and a demo briefing runs as a backgro
   const panel = page.getByRole("dialog", { name: "Notifications" });
   await expect(panel.getByText("Assistant is waiting in the lobby")).toBeVisible();
   await panel.getByRole("button", { name: /^Assistant joined “Acme Robotics — weekly delivery sync”/ }).click();
+  await expect(panel).toBeVisible();
+  await panel.getByRole("button", { name: "Open notification: Assistant joined “Acme Robotics — weekly delivery sync”", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Acme Robotics — weekly delivery sync" })).toBeVisible();
   await expect(bell(page)).toHaveAccessibleName("Notifications, 5 unread");
 

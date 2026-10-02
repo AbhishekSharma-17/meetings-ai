@@ -110,6 +110,41 @@ async function submitWithBaseName(page: Page) {
   await page.getByRole("button", { name: "Send assistant" }).click();
 }
 
+test("remembers a successfully scheduled assistant name across dialog closes and reloads", async ({ page }) => {
+  const mock = await mockApp(page);
+  await page.route("**/v1/me/assistant-name", (route) => route.fulfill({ json: { assistant_name: "Original assistant", updated_at: "2026-09-01T00:00:00Z" } }));
+  await page.goto("/");
+  await page.getByRole("button", { name: "New meeting" }).click();
+  await expect(page.getByLabel("Assistant name", { exact: true })).toHaveValue("Original assistant");
+  await page.getByLabel("Assistant name", { exact: true }).fill("My team's assistant");
+  await page.getByLabel("Meeting link").fill("https://meet.google.com/abc-defg-hij");
+  await page.getByLabel("At the meeting start time").check();
+  const tomorrow = new Date(Date.now() + 86_400_000);
+  await page.getByLabel(/Meeting start/).fill(new Date(tomorrow.getTime() - tomorrow.getTimezoneOffset() * 60_000).toISOString().slice(0, 16));
+  await page.getByRole("button", { name: "Schedule assistant" }).click();
+  await expect.poll(() => mock.scheduledBody).toMatchObject({ meeting: { bot_name: "My team's assistant" } });
+  await page.reload();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Overview", exact: true }).click();
+  await page.getByRole("button", { name: "New meeting" }).click();
+  await expect(page.getByLabel("Assistant name", { exact: true })).toHaveValue("My team's assistant");
+  await page.getByLabel("Assistant name", { exact: true }).fill("Cancelled rename");
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await page.getByRole("button", { name: "New meeting" }).click();
+  await expect(page.getByLabel("Assistant name", { exact: true })).toHaveValue("My team's assistant");
+});
+
+test("assistant defaults are isolated by person and workspace", async ({ page }) => {
+  await mockApp(page);
+  await page.route("**/v1/me/assistant-name", (route) => route.fulfill({ json: { assistant_name: "Meetings AI", updated_at: null } }));
+  await page.addInitScript(() => {
+    const saved = JSON.stringify({ name: "Other person's assistant", updatedAt: new Date().toISOString() });
+    localStorage.setItem("meetings-ai:assistant-name:other-org:other-user", saved);
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "New meeting" }).click();
+  await expect(page.getByLabel("Assistant name", { exact: true })).toHaveValue("Meetings AI");
+});
+
 test("reuses a visible knowledge base and renders structured API errors", async ({ page }) => {
   const mock = await mockApp(page, { failCreate: true });
   await submitWithBaseName(page);

@@ -63,6 +63,8 @@ export type CoverageSummary = {
   kept_own: boolean;
   handed_to_owner: CoordinationPerson | null;
   other_assistants: number;
+  bot_name?: string | null;
+  handed_to_bot_name?: string | null;
 };
 
 function asList<T>(value: unknown): T[] {

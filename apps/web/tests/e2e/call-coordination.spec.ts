@@ -164,6 +164,37 @@ test("library chips and the meeting's coordination panel", async ({ page }) => {
   await expect.poll(() => calls.shared).toEqual([ASHAS]);
 });
 
+test("dashboard identifies the scheduler and their named assistant", async ({ page }) => {
+  await mockApi(page);
+  await page.goto("/");
+  const mine = page.getByRole("button", { name: "Open Weekly sync", exact: true });
+  await expect(mine).toContainText("Scheduled by Workspace owner (you)");
+  await expect(mine).toContainText("Assistant: Meetings AI");
+  const shared = page.getByRole("button", { name: "Open Acme standup", exact: true });
+  await expect(shared).toContainText("Scheduled by Asha Patel");
+  await expect(shared).toContainText("Shared with you");
+});
+
+test("calendar sharing badge stays inside the agenda row at narrow widths", async ({ page }) => {
+  await mockApi(page, { role: "member", sharing: true });
+  await page.goto("/");
+  await nav(page, "Calendar");
+  const badge = page.locator(".calendar-agenda .coordination-mark").first();
+  await expect(badge).toContainText("Sharing Asha's assistant");
+  for (const width of [1440, 1050, 820, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await expect(badge).toBeVisible();
+    const boxes = await badge.evaluate((element) => {
+      const row = element.closest(".calendar-agenda-event")!;
+      const arrow = row.querySelector(".row-arrow")!;
+      return { badge: element.getBoundingClientRect().toJSON(), row: row.getBoundingClientRect().toJSON(), arrow: arrow.getBoundingClientRect().toJSON() };
+    });
+    expect(boxes.badge.right).toBeLessThanOrEqual(boxes.arrow.left);
+    expect(boxes.badge.bottom).toBeLessThanOrEqual(boxes.row.bottom);
+    expect(boxes.badge.left).toBeGreaterThanOrEqual(boxes.row.left);
+  }
+});
+
 test("a member shares a teammate's assistant from the calendar and reads its notes", async ({ page }) => {
   const calls = await mockApi(page, { role: "member" });
   await page.goto("/");

@@ -91,7 +91,7 @@ export function NotificationCenter({ identity, onNavigate }: { identity: string;
                 : <NotificationEmpty unreadOnly={filter === "unread"} cleared={cleared} />
                 : groups.map((group) => <section key={group.label} className="notification-group" aria-label={group.label}>
                   <h3 className="notification-group-label">{group.label}</h3>
-                  <ul>{group.items.map((item) => <NotificationRow key={item.id} item={item} query={query} onOpen={openItem} onDismiss={feed.dismiss} />)}</ul>
+                  <ul>{group.items.map((item) => <NotificationRow key={item.id} item={item} query={query} onRead={feed.markRead} onOpen={openItem} onDismiss={feed.dismiss} />)}</ul>
                 </section>)}
               {feed.hasMore && filter === "all" ? <button type="button" className="button ghost sm block notification-more" disabled={feed.loading} onClick={() => void feed.loadMore()}>{feed.loading ? "Loading…" : "Show older"}</button> : null}
             </div>
@@ -113,10 +113,10 @@ function NotificationEmpty({ unreadOnly, cleared }: { unreadOnly: boolean; clear
   </div>;
 }
 
-function NotificationRow({ item, query, onOpen, onDismiss }: { item: AppNotification; query: string; onOpen(item: AppNotification): void; onDismiss(item: AppNotification): void }) {
+function NotificationRow({ item, query, onRead, onOpen, onDismiss }: { item: AppNotification; query: string; onRead(item: AppNotification): void; onOpen(item: AppNotification): void; onDismiss(item: AppNotification): void }) {
   const unread = !item.read_at;
   return <li className="notification-row" data-unread={unread ? "true" : undefined}>
-    <button type="button" className="notification-item" onClick={() => onOpen(item)}>
+    <button type="button" className="notification-item" onClick={() => onRead(item)}>
       <NotificationIcon item={item} />
       <span className="notification-copy">
         <span className="notification-title"><Highlight text={item.title} query={query} /></span>
@@ -125,6 +125,7 @@ function NotificationRow({ item, query, onOpen, onDismiss }: { item: AppNotifica
       </span>
       {unread ? <span className="notification-dot"><span className="sr-only">Unread</span></span> : null}
     </button>
+    {notificationTarget(item) ? <button type="button" className="text-button notification-open" aria-label={`Open notification: ${item.title}`} onClick={() => onOpen(item)}>Open details</button> : null}
     <button type="button" className="icon-button sm notification-dismiss" aria-label={`Dismiss: ${item.title}`} onClick={() => onDismiss(item)}><X aria-hidden="true" /></button>
   </li>;
 }

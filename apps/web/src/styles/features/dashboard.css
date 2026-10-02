@@ -10,6 +10,9 @@
 .dashboard-meeting-copy b, .dashboard-meeting-copy small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .dashboard-meeting-copy b { font-weight:500; font-size:14px; }
 .dashboard-meeting-copy small { color:var(--text-secondary); margin-top:1px; }
+.dashboard-meeting-copy .dashboard-meeting-attribution { display:flex; flex-wrap:wrap; gap:2px 12px; margin-top:4px; white-space:normal; overflow:visible; font-size:11.5px; line-height:1.5; }
+.dashboard-meeting-attribution > span { min-width:0; max-width:100%; overflow-wrap:anywhere; }
+.dashboard-meeting-attribution strong { color:var(--text-secondary); font-weight:500; }
 .dashboard-meeting-duration { min-width:48px; text-align:right; color:var(--text-tertiary); font-size:12px; font-variant-numeric:tabular-nums; }
 .row-arrow, .shortcut-arrow { color:var(--text-tertiary); transition:transform var(--duration-base) ease, color var(--duration-base) ease; }
 .dashboard-meeting:hover .row-arrow, .dashboard-shortcut:hover .shortcut-arrow { color:var(--foreground); transform:translateX(2px); }

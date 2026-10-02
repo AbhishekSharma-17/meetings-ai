@@ -9,6 +9,7 @@ import type { CalendarSelection } from "./calendar-import-dialog";
 import { calendarProviderNames } from "./calendar-providers";
 import { DeliveryOptions, KnowledgeOptions, MinutesOptions, SourcePreview, type MomTemplate } from "./new-meeting-sections";
 import { readSetupDefaults, saveSetupDefaults } from "./new-meeting-defaults";
+import { loadAssistantName, rememberAssistantName } from "./assistant-name-defaults";
 import { chipProblem } from "./ui/chip-input";
 import { CallCoordinationPrompt, submitLabel, useCallCoordination } from "./call-coordination-prompt";
 import { Alert } from "./ui/feedback";
@@ -53,6 +54,8 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
   const [groupIds, setGroupIds] = useState<string[]>([]);
   const [identity, setIdentity] = useState<string | null>(null);
+  const [botName, setBotName] = useState("Meetings AI");
+  const [loadingName, setLoadingName] = useState(true);
   const [joinTiming, setJoinTiming] = useState<"now" | "scheduled">("now");
   const [scheduledStart, setScheduledStart] = useState("");
   const [linkValue, setLinkValue] = useState("");
@@ -74,13 +77,17 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
     // Teams and teammates power recipient suggestions; the dialog works without them.
     const loadedTeams = meetingsService.listTeams().catch(() => [] as Team[]);
     void meetingsService.listWorkspaceMembers().then((items) => { if (active) setMembers(items); }).catch(() => undefined);
-    void Promise.all([meetingsService.getCurrentAccount().catch(() => null), loadedTeams, loadedBases]).then(([account, teamList, baseList]) => {
+    void Promise.all([meetingsService.getCurrentAccount().catch(() => null), loadedTeams, loadedBases]).then(async ([account, teamList, baseList]) => {
       if (!active) return;
       setTeams(teamList);
-      if (!account) return;
+      if (!account) { setBotName("Meetings AI"); setLoadingName(false); return; }
       const key = `${account.organization_id}:${account.user_id}`;
       const remembered = readSetupDefaults(key);
       setIdentity(key);
+      const savedName = await loadAssistantName(key);
+      if (!active) return;
+      setBotName(savedName);
+      setLoadingName(false);
       // Last time's teams and knowledge base, if they still exist. Knowledge stays off until chosen.
       setGroupIds((current) => current.length ? current : remembered.teamIds.filter((id) => teamList.some((team) => team.id === id)));
       if (remembered.knowledgeBaseId && baseList.some((base) => base.id === remembered.knowledgeBaseId)) {
@@ -91,7 +98,8 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
   }, [open]);
   if (!open) return null;
 
-  function close() { setError(null); setJoining(false); setSelectedBaseId(""); setNewBaseName(""); setTags([]); setKnowledgeEnabled(false); setMomTemplate("standard"); setMomInstructions(""); setMomFocus([]); setGroupIds([]); setJoinTiming("now"); setScheduledStart(""); setLinkValue(""); setLinkError(null); coordination.reset(); onClose(); }
+  function close() { setError(null); setJoining(false); setLoadingName(true); setIdentity(null); setSelectedBaseId(""); setNewBaseName(""); setTags([]); setKnowledgeEnabled(false); setMomTemplate("standard"); setMomInstructions(""); setMomFocus([]); setGroupIds([]); setJoinTiming("now"); setScheduledStart(""); setLinkValue(""); setLinkError(null); coordination.reset(); onClose(); }
+  function complete(meeting: MeetingDetail) { close(); onMeetingJoined(meeting); }
 
   async function resolveKnowledgeBaseId(): Promise<string | null> {
     if (!knowledgeEnabled) return null;
@@ -120,6 +128,7 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (loadingName) return;
     const form = new FormData(event.currentTarget);
     setError(null);
     setJoining(true);
@@ -150,14 +159,14 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
       const callStart = calendarSelection ? calendarSelection.event.starts_at : scheduledStartIso;
       if (await coordination.evaluate(callLink, callStart, calendarSelection ? calendarSelection.event.ends_at : null) === "ask") return;
       if (coordination.sharingWith) {
-        onMeetingJoined(await coordination.share());
+        complete(await coordination.share());
         return;
       }
       const knowledgeBaseId = await resolveKnowledgeBaseId();
       const input = {
         meetingUrl: String(form.get("meeting-link") ?? ""),
         title: String(form.get("meeting-title") ?? "") || undefined,
-        botName: String(form.get("bot-name") ?? "") || undefined,
+        botName: String(form.get("bot-name") ?? "").trim() || "Meetings AI",
         tags: tagList,
         knowledgeEnabled,
         knowledgeBaseId,
@@ -169,37 +178,38 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
         if (!identity) return;
         const previous = readSetupDefaults(identity);
         saveSetupDefaults(identity, { teamIds: deliverySettings.internal_group_ids, knowledgeBaseId: knowledgeEnabled ? knowledgeBaseId ?? "" : previous.knowledgeBaseId });
+        rememberAssistantName(identity, input.botName);
       };
       const shouldSchedule = calendarSelection && new Date(calendarSelection.event.starts_at).getTime() > Date.now() + 60_000;
       if (shouldSchedule) {
         const scheduled = await meetingsService.scheduleCalendarEvent(calendarSelection.event, calendarSelection.period, calendarSelection.timezone, input, calendarSelection.eventDate);
         remember();
-        onMeetingJoined(scheduled);
+        complete(scheduled);
         return;
       }
       if (calendarSelection) {
         const joined = await meetingsService.joinCalendarEvent(calendarSelection.event, calendarSelection.period, calendarSelection.timezone, input, calendarSelection.eventDate);
         remember();
-        onMeetingJoined(joined);
+        complete(joined);
         return;
       }
       if (scheduledStartIso) {
         const scheduled = await meetingsService.scheduleMeeting(input, scheduledStartIso);
         remember();
-        onMeetingJoined(scheduled);
+        complete(scheduled);
         return;
       }
       const meeting = await meetingsService.createMeeting(input);
       remember();
       try {
         const joined = await meetingsService.joinMeeting(meeting.id, coordination.decision);
-        onMeetingJoined(joined);
+        complete(joined);
       } catch (joinError) {
         // The API persists adapter failures on the meeting record. Open that
         // durable record so the user can see the reason and retry from there.
         const failed = await meetingsService.getMeeting(meeting.id).catch(() => null);
         if (failed) {
-          onMeetingJoined(failed);
+          complete(failed);
           return;
         }
         throw joinError;
@@ -251,7 +261,8 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
             </div>
             <div className="field">
               <label htmlFor="bot-name">Assistant name</label>
-              <input id="bot-name" name="bot-name" defaultValue="Meetings AI" disabled={joining} />
+              <input id="bot-name" name="bot-name" value={botName} onChange={(event) => setBotName(event.target.value)} required maxLength={100} disabled={joining || loadingName} aria-describedby="bot-name-hint" />
+              <p id="bot-name-hint" className="field-hint">{loadingName ? "Loading your assistant name…" : "Used for your next meetings in this workspace until you change it."}</p>
             </div>
           </div>
           {source ? <SourcePreview event={source} /> : null}
@@ -291,7 +302,7 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
         <div className="dialog-footer nm-footer">
           {error ? <p className="form-error nm-footer-error" role="alert">{error}</p> : null}
           <button className="button secondary" type="button" onClick={close} disabled={joining}>Cancel</button>
-          <button className="button primary" type="submit" disabled={joining}>{joining ? "Saving…" : submitLabel(coordination, Boolean(willSchedule), willSchedule ? "Schedule assistant" : "Send assistant")}</button>
+          <button className="button primary" type="submit" disabled={joining || loadingName}>{joining ? "Saving…" : submitLabel(coordination, Boolean(willSchedule), willSchedule ? "Schedule assistant" : "Send assistant")}</button>
         </div>
       </form>
     </Dialog.Popup>

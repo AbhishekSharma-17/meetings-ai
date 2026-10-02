@@ -81,6 +81,11 @@
 .calendar-agenda-event:hover .row-arrow { color:var(--foreground); transform:translateX(2px); }
 .calendar-agenda-time { color:var(--text-secondary); font-size:12.5px; font-weight:500; }
 .calendar-agenda-copy { min-width:0; }
+.calendar-agenda-copy .calendar-event-meta { flex-wrap:wrap; white-space:normal; }
+.calendar-agenda-copy .calendar-event-origin { white-space:nowrap; }
+.calendar-agenda-coordination { display:block; min-width:0; max-width:100%; }
+.calendar-agenda-coordination:empty { display:none; }
+.calendar-agenda-coordination .coordination-mark { margin:5px 0 0; max-width:100%; height:auto; min-height:18px; padding:2px 6px; white-space:normal; overflow-wrap:anywhere; line-height:1.4; }
 .calendar-agenda-copy b { display:block; overflow:hidden; font-size:13.5px; font-weight:500; text-overflow:ellipsis; white-space:nowrap; }
 .calendar-event-meta { display:flex; align-items:center; gap:5px; min-width:0; margin-top:3px; color:var(--text-secondary); white-space:nowrap; }
 .calendar-event-origin { min-width:0; overflow:hidden; text-overflow:ellipsis; }

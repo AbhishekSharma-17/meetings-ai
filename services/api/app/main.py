@@ -425,6 +425,7 @@ def create_app(
                         or (method == "GET" and path == "/v1/ai/settings")
                         or path == "/v1/auth/me"
                         or (method in {"GET", "PUT"} and path == "/v1/me/preferences")
+                        or (method == "GET" and path == "/v1/me/assistant-name")
                         or (method == "GET" and path == "/v1/me/activity")
                         or (method == "POST" and path == "/v1/me/preferences/detected")
                         or (method in {"PUT", "DELETE"} and path == "/v1/auth/me/photo")
@@ -1148,9 +1149,12 @@ def create_app(
     @app.post(
         "/v1/meetings", response_model=MeetingPublic, status_code=status.HTTP_201_CREATED
     )
-    def create_meeting(payload: MeetingCreate) -> MeetingPublic:
+    def create_meeting(payload: MeetingCreate, request: Request) -> MeetingPublic:
         try:
-            return meeting_service.to_public(meeting_service.create(payload))
+            meeting = meeting_service.create(payload)
+            actor = request.state.actor
+            call_coordination.record_owner(actor.organization_id, meeting.id, actor.user_id)
+            return meeting_service.to_public(meeting)
         except (MeetingValidationError, KnowledgeBaseNotFoundError) as exc:
             raise api_error(exc) from exc
 

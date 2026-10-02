@@ -99,3 +99,5 @@ class CoverageSummary(BaseModel):
     kept_own: bool = False
     handed_to_owner: CoordinationPerson | None = None
     other_assistants: int = 0
+    bot_name: str | None = None
+    handed_to_bot_name: str | None = None

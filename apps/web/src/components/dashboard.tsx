@@ -1,3 +1,5 @@
+"use client";
+
 import type { ReactNode } from "react";
 import type { CurrentAccount, Meeting } from "@/lib/types";
 import { attentionStatuses, inProgressStatuses, needsReview, platformMonogram } from "@/lib/meeting-status";
@@ -8,6 +10,8 @@ import { ProvidersIcon } from "./ui-icons";
 import { PageHeader } from "./ui/page-header";
 import { EmptyState } from "./ui/feedback";
 import { InPersonChip, isInPerson } from "./in-person-meeting-panels";
+import { useCoverageSummaries } from "./coordination-chips";
+import type { CoverageSummary } from "@/lib/coordination";
 
 const RECENT_LIMIT = 6;
 
@@ -23,6 +27,7 @@ export function Dashboard({ meetings, account, onNewMeeting, onRecordInPerson, o
   onOpenMeetings(): void;
   onOpenMeeting(id: string): void;
 }) {
+  const coverage = useCoverageSummaries(meetings);
   const readyCount = meetings.filter(needsReview).length;
   const liveCount = meetings.filter((meeting) => inProgressStatuses.has(meeting.status)).length;
   const attentionCount = meetings.filter((meeting) => attentionStatuses.has(meeting.status)).length;
@@ -53,7 +58,7 @@ export function Dashboard({ meetings, account, onNewMeeting, onRecordInPerson, o
             {meetings.length > RECENT_LIMIT ? <button type="button" className="button ghost sm" onClick={onOpenMeetings}>See all <ArrowRight /></button> : <span className="section-count">{meetings.length} total</span>}
           </div>
           {recent.length ? <ul className="dashboard-meeting-list">
-            {recent.map((meeting) => <MeetingRow key={meeting.id} meeting={meeting} onOpen={() => onOpenMeeting(meeting.id)} />)}
+            {recent.map((meeting) => <MeetingRow key={meeting.id} meeting={meeting} summary={coverage.get(meeting.id)} onOpen={() => onOpenMeeting(meeting.id)} />)}
           </ul> : <div className="card-body"><EmptyState plain icon={<Mic />} title="No meetings yet" action={<button className="button primary" onClick={onNewMeeting}><Plus /> Create your first meeting</button>}>Send your assistant to a Google Meet, Zoom, Teams or Jitsi call. Captures appear here.</EmptyState></div>}
         </section>
 
@@ -86,11 +91,21 @@ function Stat({ icon, label, value, hint }: { icon: ReactNode; label: string; va
   return <article className="stat"><span className="stat-label">{icon}{label}</span><strong className="stat-value">{value}</strong><span className="stat-hint">{hint}</span></article>;
 }
 
-function MeetingRow({ meeting, onOpen }: { meeting: Meeting; onOpen(): void }) {
+function MeetingRow({ meeting, summary, onOpen }: { meeting: Meeting; summary?: CoverageSummary; onOpen(): void }) {
+  const owner = summary?.owner;
+  const scheduledBy = owner ? `${owner.display_name}${owner.is_you ? " (you)" : ""}` : "Not available";
+  const assistant = summary?.handed_to_bot_name || summary?.bot_name || meeting.botName;
   return <li>
     <button type="button" className="dashboard-meeting" aria-label={`Open ${meeting.title}`} onClick={onOpen}>
       <span className="platform-tile" aria-hidden="true">{platformMonogram(meeting.platform)}</span>
-      <span className="dashboard-meeting-copy"><b>{meeting.title}</b><small>{isInPerson(meeting) ? <InPersonChip className="inline" /> : meeting.platform} · {meeting.startsAt}{meeting.participants ? ` · ${meeting.participants} participant${meeting.participants === 1 ? "" : "s"}` : ""}</small></span>
+      <span className="dashboard-meeting-copy"><b>{meeting.title}</b><small>{isInPerson(meeting) ? <InPersonChip className="inline" /> : meeting.platform} · {meeting.startsAt}{meeting.participants ? ` · ${meeting.participants} participant${meeting.participants === 1 ? "" : "s"}` : ""}</small>
+        {!isInPerson(meeting) ? <small className="dashboard-meeting-attribution">
+          <span>Scheduled by <strong>{scheduledBy}</strong></span>
+          {assistant ? <span>Assistant: <strong>{assistant}</strong></span> : null}
+          {summary?.handed_to_owner ? <span>Handled by <strong>{summary.handed_to_owner.display_name}</strong></span> : null}
+          {summary?.your_role === "sharing" ? <span>Shared with you</span> : null}
+        </small> : null}
+      </span>
       <MeetingBadge meeting={meeting} />
       <span className="dashboard-meeting-duration">{meeting.duration === "—" ? "" : meeting.duration}</span>
       <ArrowRight className="row-arrow" aria-hidden="true" />

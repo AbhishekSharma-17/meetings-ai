@@ -203,9 +203,11 @@ class CoordinationViews:
                 kept_own=record.decision == "own" and others > 0,
                 handed_to_owner=self._person(target.owner_id, known, actor) if target else None,
                 other_assistants=others,
+                bot_name=record.bot_name,
+                handed_to_bot_name=target.bot_name if target else None,
             )
-            if summary.covering or summary.handed_to_owner or others or summary.your_role == "sharing":
-                results.append(summary)
+            # Ordinary owned assistants need attribution too, not only shared calls.
+            results.append(summary)
         return results
 
     # ----- access -----------------------------------------------------------------------------

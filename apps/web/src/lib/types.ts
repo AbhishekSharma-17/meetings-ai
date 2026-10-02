@@ -3,6 +3,7 @@ export type MeetingStatus = "created" | "joining" | "waiting_room" | "live" | "n
 export type Meeting = {
   id: string;
   title: string;
+  botName?: string;
   startsAt: string;
   duration: string;
   participants: number;

@@ -135,7 +135,12 @@ export function useNotificationFeed(identity: string, open: boolean, onArrived: 
     setItems((current) => current.map((candidate) => candidate.id === item.id ? { ...candidate, read_at: readAt } : candidate));
     setUnread((count) => Math.max(0, count - 1));
     lastUnread.current = Math.max(0, (lastUnread.current ?? 1) - 1);
-    void notificationService.markRead(item.id).catch(() => undefined);
+    setError(null);
+    void notificationService.markRead(item.id).catch(() => {
+      setItems((current) => current.map((candidate) => candidate.id === item.id && candidate.read_at === readAt ? { ...candidate, read_at: null } : candidate));
+      setError("Could not mark this notification as read. Please try again.");
+      void notificationService.unreadCount().then((count) => { setUnread(count); lastUnread.current = count; }).catch(() => undefined);
+    });
   }, []);
 
   const markAllRead = useCallback(async () => {

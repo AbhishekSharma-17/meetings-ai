@@ -115,8 +115,8 @@ export function DayAgenda({ selectedDay, dayEntries, rangeEntries, selectedEvent
                 <PlatformMark event={entry.event} decorative />
                 <span>{platform ? platformLabel(platform) : "No video link"}</span>
                 {entry.event.rescheduled_from ? <><span className="calendar-meta-sep" aria-hidden="true">·</span><span className="calendar-event-moved">Rescheduled</span></> : null}
-                {markFor?.(entry)}
               </small>
+              {markFor ? <span className="calendar-agenda-coordination">{markFor(entry)}</span> : null}
             </span>
             <ChevronRight className="row-arrow" aria-hidden="true" />
           </button>

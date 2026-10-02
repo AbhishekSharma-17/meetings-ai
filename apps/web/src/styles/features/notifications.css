@@ -36,6 +36,7 @@
 .notification-empty p { max-width:34ch; color:var(--text-secondary); font-size:13px; line-height:1.5; }
 
 .notification-row { position:relative; }
+.notification-open { margin:0 12px 10px 52px; font-size:12px; }
 .notification-item {
   display:grid; grid-template-columns:32px minmax(0, 1fr) 8px; align-items:start; gap:12px; width:100%;
   padding:10px 34px 10px 10px; border:0; border-radius:var(--radius); background:transparent; color:var(--foreground); text-align:left;

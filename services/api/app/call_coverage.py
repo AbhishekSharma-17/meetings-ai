@@ -53,6 +53,7 @@ class AssistantRecord:
     handed_to: str | None
     sharers: tuple[str, ...] = field(default_factory=tuple)
     recap_sharers: tuple[str, ...] = field(default_factory=tuple)
+    bot_name: str | None = None
 
     @property
     def state(self) -> str:
@@ -131,6 +132,7 @@ def _record(meeting: MeetingRow, schedule: CalendarScheduleRow | None, source: M
         decision=owner.decision if owner else None, handed_to=owner.handed_to_meeting_id if owner else None,
         sharers=tuple(row.user_id for row in sharing),
         recap_sharers=tuple(row.user_id for row in sharing if row.receive_recap),
+        bot_name=meeting.bot_name,
     )
 
 

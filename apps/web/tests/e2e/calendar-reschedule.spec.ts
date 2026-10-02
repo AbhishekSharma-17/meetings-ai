@@ -129,6 +129,8 @@ test("the calendar event panel marks the move and the notification opens the mee
   const panel = page.getByRole("dialog", { name: "Notifications" });
   await expect(panel.getByText("“Acme pilot review” moved to Tue, Sep 30, 5:00 PM IST")).toBeVisible();
   await panel.getByRole("button", { name: /^“Acme pilot review” moved to/ }).click();
+  await expect(panel).toBeVisible();
+  await panel.getByRole("button", { name: /^Open notification: “Acme pilot review” moved to/ }).click();
   await expect(page.getByRole("heading", { name: "Acme pilot review", level: 1 })).toBeVisible();
 });
 

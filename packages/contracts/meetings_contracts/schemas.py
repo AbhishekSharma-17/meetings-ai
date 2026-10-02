@@ -458,7 +458,7 @@ class ActionItem(BaseModel):
     description: Annotated[str, Field(min_length=1, max_length=1000)]
     owner: Annotated[str | None, Field(default=None, max_length=200)]
     due_date: Annotated[str | None, Field(default=None, max_length=100)]
-    evidence_segment_ids: list[str] = Field(default_factory=list, max_length=20)
+    evidence_segment_ids: list[str] = Field(default_factory=list)
 
 
 class SpeakerContribution(BaseModel):
@@ -466,7 +466,7 @@ class SpeakerContribution(BaseModel):
 
     speaker: Annotated[str, Field(min_length=1, max_length=200)]
     summary: Annotated[str, Field(min_length=1, max_length=2000)]
-    evidence_segment_ids: Annotated[list[str], Field(min_length=1, max_length=20)]
+    evidence_segment_ids: Annotated[list[str], Field(min_length=1)]
 
 
 class AttributedQuestion(BaseModel):
@@ -474,7 +474,7 @@ class AttributedQuestion(BaseModel):
 
     speaker: Annotated[str | None, Field(default=None, max_length=200)]
     question: Annotated[str, Field(min_length=1, max_length=2000)]
-    evidence_segment_ids: Annotated[list[str], Field(min_length=1, max_length=20)]
+    evidence_segment_ids: Annotated[list[str], Field(min_length=1)]
 
 
 class MeetingMinutesDraft(BaseModel):

@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from .database import Database, UserPreferenceRow
+from .database import Database, MeetingCoverageRow, MeetingRow, UserPreferenceRow
 from .time_display import DEFAULT_TIMEZONE, TIME_FORMATS, TimeFormat, TimePreferences
 
 # Legacy names some browsers still report; stored under the current IANA name.
@@ -96,6 +96,23 @@ class UserPreferenceService:
     def get(self, user_id: UUID | str) -> PreferencesPublic:
         with self.database.session_factory() as session:
             return _public(session.get(UserPreferenceRow, str(user_id)))
+
+    def assistant_name(self, user_id: UUID | str, organization_id: UUID | str) -> dict[str, str | None]:
+        """Reuse this person's last saved assistant, never another teammate's shared bot.
+
+        Names already persist on meeting records; this read needs no schema change.
+        The browser also remembers the preference if that meeting is later deleted.
+        """
+        with self.database.session_factory() as session:
+            saved = session.execute(select(MeetingRow.bot_name, MeetingRow.created_at).join(
+                MeetingCoverageRow, MeetingCoverageRow.meeting_id == MeetingRow.id,
+            ).where(
+                MeetingCoverageRow.organization_id == str(organization_id),
+                MeetingCoverageRow.user_id == str(user_id),
+                MeetingCoverageRow.role == "owner", MeetingRow.platform != "in_person",
+            ).order_by(MeetingRow.created_at.desc(), MeetingRow.id.desc()).limit(1)).first()
+            return {"assistant_name": saved.bot_name if saved else "Meetings AI",
+                    "updated_at": (saved.created_at.replace(tzinfo=UTC) if saved.created_at.tzinfo is None else saved.created_at).isoformat() if saved else None}
 
     def time_preferences(self, user_id: UUID | str) -> TimePreferences:
         with self.database.session_factory() as session:
