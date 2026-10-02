@@ -96,7 +96,7 @@ export function ProviderSettings({ identity, profiles, onProfilesChange }: { ide
     <PageHeader
       titleId="providers-title"
       title="AI providers"
-      description="Each step of the meeting pipeline uses a named model configuration. Defaults apply to the next bot join or draft; work already running keeps its route."
+      description="Choose a named AI configuration for each task. New defaults apply to the next assistant join or draft; work already running keeps its current settings."
       actions={<span className="provider-privacy"><ShieldCheck aria-hidden="true" /> Keys are write-only and encrypted at rest</span>}
     />
     <div className="provider-overview">
@@ -111,7 +111,7 @@ export function ProviderSettings({ identity, profiles, onProfilesChange }: { ide
       </div>
       {selected
         ? <ProviderEditor key={selected.id} identity={identity} profile={selected} credentials={credentials} canSaveKeys={isOwner} onSave={save} onDelete={remove} onChange={(profile) => onProfilesChange(profiles.map((candidate) => candidate.id === selected.id ? profile : candidate))} onNotice={setNotice} />
-        : <div className="provider-editor-empty"><EmptyState icon={<SlidersHorizontal />} title="Add your first configuration">Use an Add button to set up speech to text, an LLM or embeddings.</EmptyState></div>}
+        : <div className="provider-editor-empty"><EmptyState icon={<SlidersHorizontal />} title="Add your first configuration">Use an Add button to configure transcription, an AI model or embeddings for search.</EmptyState></div>}
     </div>
     <SettingsToast notice={notice} onDismiss={() => setNotice(null)} />
   </section>;

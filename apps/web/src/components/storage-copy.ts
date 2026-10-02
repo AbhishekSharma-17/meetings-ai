@@ -6,28 +6,28 @@ export type StorageCopy = { noun: string; nouns: string; removes: string[]; note
 export const storageCopy: Record<StorageCategoryKey, StorageCopy> = {
   meetings: {
     noun: "meeting", nouns: "meetings",
-    removes: ["Meeting records, transcripts, speaker reviews and minutes", "Delivery logs and the meeting's search index", "Saved AI chats that cite these meetings"],
-    notes: ["Recordings and transcripts are also erased from the capture service (Vexa).", "Sent recap emails and downloaded files can't be recalled.", "Meetings that are still live are skipped."],
+    removes: ["Meeting records, transcripts, speaker reviews and minutes", "Delivery logs and the meeting's AI search data", "Saved AI chats that cite these meetings"],
+    notes: ["Recordings and transcripts are also erased from the meeting recording service.", "Sent recap emails and downloaded files can't be recalled.", "Meetings that are still live are skipped."],
   },
   meeting_preps: {
     noun: "prep", nouns: "meeting preps",
-    removes: ["Generated briefings and organizer inputs", "Documents uploaded for the prep and their search index"],
+    removes: ["Generated briefings and organizer inputs", "Documents uploaded for the prep and their AI search data"],
     notes: ["Calendar events stay; you can prepare again later."],
   },
   documents: {
     noun: "document", nouns: "documents",
-    removes: ["Uploaded files' extracted text and summaries", "Their search index"],
+    removes: ["Uploaded files' extracted text and summaries", "Their AI search data"],
     notes: ["Downloaded copies can't be recalled.", "Past AI answers keep the text they quoted."],
   },
   search_index: {
-    noun: "index", nouns: "search indexes",
-    removes: ["Search chunks and embedding vectors"],
-    notes: ["Meetings and documents are kept, so the index can be rebuilt.", "AI knowledge answers are less complete until it is rebuilt."],
+    noun: "search data set", nouns: "AI search data sets",
+    removes: ["Data prepared for AI search"],
+    notes: ["Meetings and documents are kept, so AI search data can be prepared again.", "AI knowledge answers may be less complete until search data is prepared again."],
     rebuild: true,
   },
   knowledge_bases: {
     noun: "knowledge base", nouns: "knowledge bases",
-    removes: ["The knowledge base, its sharing settings and index", "Its documents and saved AI chats"],
+    removes: ["The knowledge base, its sharing settings and AI search data", "Its documents and saved AI chats"],
     notes: ["Meetings are kept but leave the knowledge base."],
   },
   ai_chats: {
@@ -36,8 +36,8 @@ export const storageCopy: Record<StorageCategoryKey, StorageCopy> = {
     notes: ["Copied or exported answers can't be recalled."],
   },
   calendar_cache: {
-    noun: "calendar account", nouns: "cached calendar events",
-    removes: ["Cached calendar event snapshots"],
+    noun: "calendar account", nouns: "saved calendar events",
+    removes: ["Previously synced calendar events"],
     notes: ["Events are fetched again on the next sync.", "Events with a meeting prep are kept."],
   },
   logs: {

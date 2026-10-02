@@ -72,9 +72,9 @@ export function Dashboard({ meetings, account, onNewMeeting, onRecordInPerson, o
               <li><span className="flow-icon"><ArrowRight aria-hidden="true" /></span><span><b>Share</b><small>Approve before any recap email is sent.</small></span></li>
             </ol>
           </section>
-          <button type="button" className="card dashboard-shortcut" onClick={onOpenKnowledge}>
+          <button type="button" className="card dashboard-shortcut" aria-label="Ask your meetings" onClick={onOpenKnowledge}>
             <span className="flow-icon brand"><BrainCircuit aria-hidden="true" /></span>
-            <span><b>Ask your meetings</b><small>Chat with opted-in meetings and follow every answer to its source.</small></span>
+            <span><b>Ask your meetings</b><small>Chat with meetings added to AI knowledge and follow every answer to its source.</small></span>
             <ArrowRight className="shortcut-arrow" aria-hidden="true" />
           </button>
           <button type="button" className="card dashboard-shortcut" onClick={onOpenProviders}>

@@ -286,7 +286,7 @@ export function MeetingDetailScreen({ meetingId, focusSegmentId, backLabel = "Al
         onCancelAutoJoin={cancelSchedule} onJoinAnyway={canJoin ? () => void runAction("join") : undefined}
         onDelete={didNotRun && deletableStatuses.has(meeting.status) ? () => document.getElementById("meeting-delete-title")?.scrollIntoView({ behavior: "smooth", block: "center" }) : undefined} /> : null}
       {inPerson ? null : failing ? <Alert tone="danger" title={lifecycleDetail[meeting.status]}>{meeting.errorMessage ?? undefined}</Alert>
-        : meeting.errorMessage ? <Alert tone="warning" title="Adapter message">{meeting.errorMessage}</Alert> : null}
+        : meeting.errorMessage ? <Alert tone="warning" title="Assistant error details">{meeting.errorMessage}</Alert> : null}
       {!inPerson && (meeting.status === "processing" || (meeting.status === "created" && !schedule)) ? <Alert tone="info">{lifecycleDetail[meeting.status]}</Alert> : null}
     </div>
 
@@ -298,7 +298,7 @@ export function MeetingDetailScreen({ meetingId, focusSegmentId, backLabel = "Al
           <div className="record-call-copy">
             <p className="eyebrow">Assistant in call</p>
             <h2>{meeting.botName}</h2>
-            <p>{meeting.status === "waiting_room" ? `Ask the host to admit “${meeting.botName}” from the waiting room.` : meeting.status === "live" ? `${finalizedCount} finalized transcript turn${finalizedCount === 1 ? "" : "s"} · ${namedSpeakers.length} named speaker${namedSpeakers.length === 1 ? "" : "s"}` : lifecycleDetail[meeting.status]}</p>
+            <p>{meeting.status === "waiting_room" ? `Ask the host to admit “${meeting.botName}” from the waiting room.` : meeting.status === "live" ? `${finalizedCount} transcript passage${finalizedCount === 1 ? "" : "s"} · ${namedSpeakers.length} named speaker${namedSpeakers.length === 1 ? "" : "s"}` : lifecycleDetail[meeting.status]}</p>
             <MeetingLeaveLine leave={leave} />
             <p className="field-hint">Tell the host: “Meetings AI has joined and will record and transcribe this conversation.”</p>
           </div>

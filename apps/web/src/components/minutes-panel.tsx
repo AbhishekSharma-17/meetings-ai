@@ -178,7 +178,7 @@ export function MinutesPanel({ meeting, transcriptCount, segments, onDelivered }
       await meetingsService.deleteMinutes(meeting.id);
       setMinutes(null); setDraft(null); setMomDeleted(true); setConfirmDelete(false);
       setPostMeetingJob(await meetingsService.getPostMeetingJob(meeting.id));
-      setNotice("MOM deleted. Its indexed facts and saved AI answers citing this meeting were cleared; the transcript remains.");
+      setNotice("MOM deleted. Its facts in AI knowledge and saved AI answers referring to this meeting were cleared; the transcript remains.");
     } catch (cause) { setError(messageFor(cause)); }
     finally { setBusy(null); }
   }
@@ -299,7 +299,7 @@ export function MinutesPanel({ meeting, transcriptCount, segments, onDelivered }
             : <MinutesEditor draft={draft} segments={segments} onChange={setDraft} />}
         {minutes && locked ? <p className="field-hint">Generated with {minutes.provider ?? "configured provider"} · {minutes.model ?? "selected model"}</p> : null}
         {editable ? <div className="mom-delete">{confirmDelete ? <div className="mom-delete-confirm" role="group" aria-label="Confirm MOM deletion">
-          <p><b>Delete this MOM?</b> The transcript stays. The draft, approval, indexed facts and saved AI answers citing this meeting are removed.</p>
+          <p><b>Delete this MOM?</b> The transcript stays. The draft, approval, related facts in AI knowledge and saved AI answers referring to this meeting are removed.</p>
           <div className="button-group end">
             <button className="button ghost sm" disabled={busy !== null} onClick={() => setConfirmDelete(false)}>Cancel</button>
             <button className="button danger sm" disabled={busy !== null} onClick={() => void deleteDraft()}>{busy === "delete" ? "Deleting…" : "Confirm delete MOM"}</button>
@@ -335,9 +335,9 @@ function emptyMessage({ momDeleted, postMeetingJob, canGenerate, transcriptCount
   if (momDeleted) return "The MOM was deleted. Generate a new draft manually if needed.";
   if (postMeetingJob?.last_error) return `Automatic drafting ${postMeetingJob.exhausted ? "stopped after repeated failures" : "will retry"}: ${postMeetingJob.last_error}. You can try Generate MOM manually.`;
   if (postMeetingJob?.enabled === false) return "This meeting predates automatic drafting. Generate its MOM manually.";
-  if (canGenerate) return `Automatic drafting is in progress. ${transcriptCount} transcript segment${transcriptCount === 1 ? " is" : "s are"} available; you can also generate manually.`;
-  if (capturing) return "The MOM will be drafted after capture completes.";
-  return "A finalized transcript is required.";
+  if (canGenerate) return `Automatic drafting is in progress. ${transcriptCount} transcript passage${transcriptCount === 1 ? " is" : "s are"} available; you can also generate manually.`;
+  if (capturing) return "The MOM will be drafted after recording ends.";
+  return "Transcript text is required before minutes can be generated.";
 }
 
 function messageFor(error: unknown): string {

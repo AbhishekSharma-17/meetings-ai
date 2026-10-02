@@ -119,7 +119,7 @@ function ManageBody({ category, onPurged, result }: { category: ManagedCategory;
         </div>
         <p id="storage-age-hint" className="field-hint text-tertiary">Removes {copy.nouns} {ageMeaning[category.key]} more than {validDays ? dayCount : "N"} days ago.</p>
       </section>
-      {copy.rebuild ? <SwitchField id="storage-rebuild" label="Rebuild after clearing" description="Queue re-indexing of the affected knowledge bases and documents." checked={reindex} onChange={setReindex} /> : null}
+      {copy.rebuild ? <SwitchField id="storage-rebuild" label="Rebuild after clearing" description="Prepare the affected meetings and documents for AI search again." checked={reindex} onChange={setReindex} /> : null}
       <div className="storage-danger-zone">
         <div><b>Delete everything</b><small>Removes all {copy.nouns} in this workspace ({formatBytes(category.bytes)}).</small></div>
         <button type="button" className="text-button destructive" onClick={() => setPlan({ mode: "all", bytes: category.bytes })}>Delete everything in this category</button>

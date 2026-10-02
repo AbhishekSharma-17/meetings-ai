@@ -46,7 +46,7 @@ export function KnowledgeEvidenceScreen({ meetingId, focusSegmentId, onBack }: {
       eyebrow="Shared knowledge source"
       titleId="evidence-title"
       title={meeting?.title ?? (error ? "Source unavailable" : <span className="skeleton record-title-skeleton" aria-hidden="true" />)}
-      description={meeting ? `${meeting.joinedAt ? formatFullDateTime(meeting.joinedAt) : "Meeting time unavailable"} · Finalized transcript only` : undefined}
+      description={meeting ? `${meeting.joinedAt ? formatFullDateTime(meeting.joinedAt) : "Meeting time unavailable"} · Transcript only` : undefined}
     />
     {error ? <p className="form-error" role="alert">{error}</p> : null}
     {meeting ? <section className="card transcript-card" aria-labelledby="evidence-transcript-title">
@@ -60,7 +60,7 @@ export function KnowledgeEvidenceScreen({ meetingId, focusSegmentId, onBack }: {
         : segments.length ? <ol className="transcript-list">
           {shown.map((turn) => <TranscriptTurn key={turn.id} id={`evidence-${encodeURIComponent(turn.segmentId)}`} segment={turn} focused={focusSegmentId === turn.segmentId} assistantName={meeting.botName}
             time={elapsedLabel(turn.startedAt)} timeTitle="Elapsed time into the meeting" highlight={query} />)}
-        </ol> : <EmptyState plain icon={<MessageSquareText />} title="No finalized turns">This meeting has no finalized transcript to show.</EmptyState>}
+        </ol> : <EmptyState plain icon={<MessageSquareText />} title="No transcript yet">This meeting has no completed transcript to show.</EmptyState>}
       </div>
     </section> : !error ? <LoadingRow>Loading cited transcript…</LoadingRow> : null}
   </section>;

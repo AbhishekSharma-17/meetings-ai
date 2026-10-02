@@ -82,7 +82,7 @@ export function MeetingDangerZone({ deleting, onDelete }: { deleting: boolean; o
   const confirmed = text === DELETE_CONFIRMATION;
   return <section className="card record-danger" aria-labelledby="meeting-delete-title">
     <div className="card-header plain">
-      <div><h2 id="meeting-delete-title">Delete meeting</h2><p>Removes capture artifacts, the transcript, MOM, indexed knowledge and saved AI chats citing it.</p></div>
+      <div><h2 id="meeting-delete-title">Delete meeting</h2><p>Removes recordings, the transcript, MOM, related AI knowledge and saved AI chats that refer to this meeting.</p></div>
     </div>
     <div className="card-body">
       {confirming ? <div className="record-danger-confirm" role="group" aria-label="Confirm meeting deletion">

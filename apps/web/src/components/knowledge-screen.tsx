@@ -119,13 +119,13 @@ export function KnowledgeScreen({ identity, onOpenSource, onOpenProviders, accou
     onFinish: (job) => {
       const baseId = storedBaseId === ALL_MEETINGS ? "" : storedBaseId;
       if (baseId) void meetingsService.getKnowledgeIndex(baseId).then(setIndexStatus).catch(() => undefined);
-      if (job.status === "failed") setError(job.error || "Reindexing failed.");
+      if (job.status === "failed") setError(job.error || "Could not update AI search.");
     },
   });
   // Bumped whenever the visible base or thread changes, so a late streamed answer is not shown in the wrong chat.
   const threadGeneration = useRef(0);
 
-  // "" means "not chosen yet"; the sentinel records an explicit "All opted-in meetings" choice.
+  // "" means "not chosen yet"; the sentinel records an explicit "All included meetings" choice.
   const selectedBaseId = storedBaseId === ALL_MEETINGS ? "" : storedBaseId;
   const selectedBase = bases.find((item) => item.id === selectedBaseId);
   const canManageBase = Boolean(selectedBase && (isAdmin || selectedBase.created_by === account?.user_id));
@@ -264,9 +264,9 @@ export function KnowledgeScreen({ identity, onOpenSource, onOpenProviders, accou
       if (status === 404 || status === 405) {
         // An API without job endpoints: fall back to the synchronous reindex.
         try { setIndexStatus(await meetingsService.reindexKnowledge(selectedBaseId)); }
-        catch (inner) { setError(inner instanceof Error ? inner.message : "Could not update the knowledge index."); }
+        catch (inner) { setError(inner instanceof Error ? inner.message : "Could not update AI search."); }
       } else {
-        setError(cause instanceof Error ? cause.message : "Could not update the knowledge index.");
+        setError(cause instanceof Error ? cause.message : "Could not update AI search.");
       }
     } finally { setIndexing(false); }
   }
@@ -310,7 +310,7 @@ export function KnowledgeScreen({ identity, onOpenSource, onOpenProviders, accou
       const remaining = bases.filter((base) => base.id !== deletedId);
       setBases(remaining);
       chooseBase(remaining[0]?.id ?? "");
-      setNotice("Knowledge base deleted. Meeting records remain, but their AI knowledge opt-in was turned off.");
+      setNotice("Knowledge base deleted. Meeting records remain, but they are no longer included in AI knowledge.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not delete this knowledge base.");
     } finally { setBusy(false); }
@@ -353,11 +353,11 @@ export function KnowledgeScreen({ identity, onOpenSource, onOpenProviders, accou
     void ask(query.trim());
   }
 
-  const baseTitle = selectedBase?.name ?? (selectedBaseId ? "Knowledge base" : "All opted-in meetings");
+  const baseTitle = selectedBase?.name ?? (selectedBaseId ? "Knowledge base" : "All included meetings");
   const indexed = indexStatus?.indexed_sources ?? 0;
   const emptyBase = Boolean(selectedBase) && selectedBase?.meeting_count === 0;
   // Hybrid = meaning (vector) + keyword search; a base searches by keyword until its index has sources.
-  const retrievalHint = emptyBase ? "No meetings in this base yet" : indexed ? "Hybrid search" : "Keyword search (not indexed yet)";
+  const searchHint = emptyBase ? "No meetings in this base yet" : "Answers link to your meetings";
   const defaultProfile = selectedBase?.text_profile_id ?? "";
   const picker = <ChatModelInfo
     settings={aiSettings}
@@ -365,7 +365,7 @@ export function KnowledgeScreen({ identity, onOpenSource, onOpenProviders, accou
     baseDefault={isAdmin && canManageBase && selectedBase ? {
       baseName: selectedBase.name,
       value: defaultProfile,
-      options: [{ value: "", label: "Workspace text-generation default" }, ...providerProfiles.filter((profile) => profile.capabilities.includes("text_generation") && !profile.id.startsWith("new-")).map((profile) => ({ value: profile.id, label: `${profile.label} · ${profile.model}` }))],
+      options: [{ value: "", label: "Workspace default AI model" }, ...providerProfiles.filter((profile) => profile.capabilities.includes("text_generation") && !profile.id.startsWith("new-")).map((profile) => ({ value: profile.id, label: `${profile.label} · ${profile.model}` }))],
       onChange: (value) => { if (value !== defaultProfile) void setBaseDefaultProfile(value); },
     } : null}
   />;
@@ -389,7 +389,7 @@ export function KnowledgeScreen({ identity, onOpenSource, onOpenProviders, accou
           </form> : null}
           {baseSearch.offered ? <div className="kl-search"><FilterInput id="knowledge-base-search" label="Search knowledge bases" value={baseSearch.query} onChange={baseSearch.setQuery} placeholder="Search knowledge bases" /></div> : null}
           <div className="kl-list">
-            {isAdmin && !baseSearch.query.trim() ? <button type="button" className={storedBaseId === ALL_MEETINGS ? "knowledge-base-option selected" : "knowledge-base-option"} onClick={() => chooseBase("")}><span className="kl-icon"><BookOpenText aria-hidden="true" /></span><span className="kl-copy"><b>All opted-in meetings</b><small>Search only</small></span></button> : null}
+            {isAdmin && !baseSearch.query.trim() ? <button type="button" className={storedBaseId === ALL_MEETINGS ? "knowledge-base-option selected" : "knowledge-base-option"} onClick={() => chooseBase("")}><span className="kl-icon"><BookOpenText aria-hidden="true" /></span><span className="kl-copy"><b>All included meetings</b><small>Search only</small></span></button> : null}
             {baseSearch.noMatches ? <NoMatches query={baseSearch.query} noun="knowledge bases" onClear={baseSearch.clear} /> : null}
             {baseSearch.visible.map((base) => <button type="button" key={base.id} className={selectedBaseId === base.id ? "knowledge-base-option selected" : "knowledge-base-option"} onClick={() => chooseBase(base.id)}>
               <span className="kl-icon"><Library aria-hidden="true" /></span>
@@ -408,10 +408,10 @@ export function KnowledgeScreen({ identity, onOpenSource, onOpenProviders, accou
               : <p className="field-hint kl-empty">Saved chats for {selectedBase.name} appear here.</p>}
           </div>
         </div> : null}
-        {selectedBase ? <div className="kl-index" role="group" aria-label="Semantic index">
-          <div className="kl-index-head"><Database aria-hidden="true" /><b>Semantic index</b>{canManageBase ? <button type="button" className="text-button" disabled={indexing || reindexJob.running} onClick={() => void reindexBase()}>{indexing || reindexJob.running ? "Indexing…" : "Reindex now"}</button> : null}</div>
-          <small>{indexed ? `${plural(indexed, "source")} indexed · ${indexStatus?.model ?? "embedding model"}` : "No sources indexed yet"}</small>
-          {indexStatus?.job_status && indexStatus.job_status !== "succeeded" ? <small role="status">Background index: {indexStatus.job_status}{indexStatus.next_retry_at ? ` · retry ${formatDateTime(indexStatus.next_retry_at)}` : ""}</small> : null}
+        {selectedBase ? <div className="kl-index" role="group" aria-label="AI search">
+          <div className="kl-index-head"><Database aria-hidden="true" /><b>AI search</b>{canManageBase ? <button type="button" className="text-button" disabled={indexing || reindexJob.running} onClick={() => void reindexBase()}>{indexing || reindexJob.running ? "Updating…" : "Update search"}</button> : null}</div>
+          <small>{indexed ? `${plural(indexed, "source")} prepared for search` : "No sources prepared yet"}</small>
+          {indexStatus?.job_status && indexStatus.job_status !== "succeeded" ? <small role="status">Search update: {indexStatus.job_status}{indexStatus.next_retry_at ? ` · retry ${formatDateTime(indexStatus.next_retry_at)}` : ""}</small> : null}
           {indexStatus?.last_error ? <small className="inline-error" role="alert">{indexStatus.last_error}</small> : null}
         </div> : null}
       </aside>
@@ -442,7 +442,7 @@ export function KnowledgeScreen({ identity, onOpenSource, onOpenProviders, accou
         </header>
 
         {confirmDelete === "chat" ? <Alert tone="danger" role="alert" className="knowledge-banner" title="Delete this saved chat?" actions={<><button type="button" className="button secondary sm" onClick={() => setConfirmDelete(null)}>Cancel</button><button type="button" className="button danger sm" disabled={busy} onClick={() => void deleteConversation()}>Confirm delete</button></>}>Stored answers and citations are removed. Exported copies are not affected.</Alert> : null}
-        {confirmDelete === "base" ? <Alert tone="danger" role="alert" className="knowledge-banner" title={`Delete ${selectedBase?.name ?? "this knowledge base"}?`} actions={<><button type="button" className="button secondary sm" onClick={() => setConfirmDelete(null)}>Cancel</button><button type="button" className="button danger sm" disabled={busy} onClick={() => void deleteBase()}>Confirm delete base</button></>}>Meeting records stay, but their AI knowledge opt-in is turned off and saved chats are removed.</Alert> : null}
+        {confirmDelete === "base" ? <Alert tone="danger" role="alert" className="knowledge-banner" title={`Delete ${selectedBase?.name ?? "this knowledge base"}?`} actions={<><button type="button" className="button secondary sm" onClick={() => setConfirmDelete(null)}>Cancel</button><button type="button" className="button danger sm" disabled={busy} onClick={() => void deleteBase()}>Confirm delete base</button></>}>Meeting records stay, but they are removed from AI knowledge and saved chats are deleted.</Alert> : null}
         {error && !sharingOpen ? <Alert tone="danger" className="knowledge-banner">{error}</Alert> : null}
         {notice ? <Alert tone="success" className="knowledge-banner">{notice}</Alert> : null}
 
@@ -456,7 +456,7 @@ export function KnowledgeScreen({ identity, onOpenSource, onOpenProviders, accou
             </div>
           </div>
           <div className="chat-dock"><div className="chat-column">
-            <Composer value={query} onChange={setQuery} onSubmit={submit} busy={busy} disabled={!selectedBase} tags={tagFilter} onTags={setTagFilter} picker={picker} basePicker={<BasePicker bases={bases.map((base) => ({ id: base.id, name: base.name, meetings: base.meeting_count }))} selectedId={selectedBaseId} onSelect={chooseBase} />} hint={selectedBase ? `${retrievalHint} · memory saved in this chat` : ""} />
+            <Composer value={query} onChange={setQuery} onSubmit={submit} busy={busy} disabled={!selectedBase} tags={tagFilter} onTags={setTagFilter} picker={picker} basePicker={<BasePicker bases={bases.map((base) => ({ id: base.id, name: base.name, meetings: base.meeting_count }))} selectedId={selectedBaseId} onSelect={chooseBase} />} hint={selectedBase ? `${searchHint} · Chat history saved` : ""} />
           </div></div>
         </> : null}
 
@@ -468,9 +468,9 @@ export function KnowledgeScreen({ identity, onOpenSource, onOpenProviders, accou
             <button className="button primary" disabled={busy}>{busy ? "Searching…" : "Search"}</button>
           </form>
           {search ? <section className="source-results" aria-labelledby="source-results-title">
-            <div className="section-heading"><div><h2 id="source-results-title">Matching sources</h2><p>{plural(search.count, "result")} · {search.retrieval_mode === "hybrid" ? "hybrid keyword + semantic" : "keyword"} retrieval{search.truncated_meeting_scope ? " · newest 200 meetings searched" : ""}</p></div></div>
+            <div className="section-heading"><div><h2 id="source-results-title">Matching sources</h2><p>{plural(search.count, "result")}{search.truncated_meeting_scope ? " · newest 200 meetings searched" : ""}</p></div></div>
             {search.sources.length ? <div className="source-list">{search.sources.map((source) => <SourceCard key={source.source_id} source={source} onOpenSource={onOpenSource} />)}</div>
-              : <EmptyState icon={<Search />} title="No matching sources">Try a different phrase or tag. Only opted-in, completed meetings are searchable.</EmptyState>}
+              : <EmptyState icon={<Search />} title="No matching sources">Try a different phrase or tag. Only completed meetings added to AI knowledge are searchable.</EmptyState>}
           </section> : <EmptyState plain icon={<Search />} title={`Search ${baseTitle}`}>Find the exact transcript turns and approved minutes behind any topic, with timestamps and speakers.</EmptyState>}
         </div> : null}
 

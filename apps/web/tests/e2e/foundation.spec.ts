@@ -550,13 +550,13 @@ test("AI knowledge links tagged evidence to the exact transcript turn", async ({
   await expect(page.locator("#transcript-segment-1")).toHaveClass(/focused-source/);
   await page.getByRole("button", { name: "AI knowledge" }).first().click();
   await page.getByRole("button", { name: /Acme client/ }).click();
-  await expect(page.getByText("No sources indexed yet")).toBeVisible();
+  await expect(page.getByText("No sources prepared yet")).toBeVisible();
   await page.getByRole("button", { name: "Wiki", exact: true }).click();
   await expect(page.getByRole("heading", { name: "People & topics" })).toBeVisible();
   await page.getByText("Unverified label · 1 meeting").click();
   await expect(page.locator("details").filter({ hasText: "Unverified label" }).getByText(source.text)).toBeVisible();
-  await page.getByRole("button", { name: "Reindex now" }).click();
-  await expect(page.getByText("1 source indexed · test-embedding")).toBeVisible();
+  await page.getByRole("button", { name: "Update search" }).click();
+  await expect(page.getByText("1 source prepared for search")).toBeVisible();
   await page.getByRole("button", { name: "Ask AI", exact: true }).click();
   await page.getByLabel("Message your knowledge base").fill("Who owns the roadmap?");
   await page.getByRole("button", { name: "Send", exact: true }).click();
@@ -575,7 +575,7 @@ test("AI knowledge links tagged evidence to the exact transcript turn", async ({
   await page.getByRole("button", { name: "More options" }).click();
   await page.getByRole("button", { name: "Delete knowledge base" }).click();
   await page.getByRole("button", { name: "Confirm delete base" }).click();
-  await expect(page.getByText("Knowledge base deleted. Meeting records remain, but their AI knowledge opt-in was turned off.")).toBeVisible();
+  await expect(page.getByText("Knowledge base deleted. Meeting records remain, but they are no longer included in AI knowledge.")).toBeVisible();
   expect(baseDeleted).toBe(true);
 });
 

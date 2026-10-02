@@ -101,7 +101,7 @@ export function ResearchProfileView({ profileId, userId, isAdmin, links, onBack,
     <PrepareDialog open={dialog === "prepare"} profile={profile} people={people} onClose={() => setDialog(null)} onOpenCalendar={links.onOpenCalendar}
       onPrepared={(result) => { setDialog(null); links.onPrepared(result); }} />
     <KnowledgeDialog open={dialog === "knowledge"} profile={profile} userId={userId} isAdmin={isAdmin} onClose={() => setDialog(null)}
-      onSaved={(_, name) => { setDialog(null); setNotice(`Saved to ${name}. It becomes searchable in AI knowledge once indexed.`); }} />
+      onSaved={(_, name) => { setDialog(null); setNotice(`Saved to ${name}. It becomes searchable in AI knowledge after processing.`); }} />
     {isAdmin && !profile.apollo_crm ? <SaveToApolloDialog open={dialog === "apollo"} profile={profile} onClose={() => setDialog(null)}
       onSaved={(saved, usage, message) => { setDialog(null); setProfile(saved); onUsage(usage); setNotice(message); }} onUsage={onUsage} /> : null}
   </section>;

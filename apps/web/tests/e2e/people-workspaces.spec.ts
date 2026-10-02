@@ -142,5 +142,5 @@ test("workspace settings link to Observability instead of repeating its numbers"
   await expect(page.getByRole("region", { name: "Your workspaces" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Operations" })).toHaveCount(0);
   await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: /Usage, spend & job health/ }).click();
-  await expect(page.getByRole("heading", { name: "Pipeline status" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Processing status" })).toBeVisible();
 });

@@ -47,7 +47,7 @@ export function SourceCard({ source, onOpenSource, index, highlighted = false }:
     <p className="knowledge-source-text">{source.text}</p>
     <footer className="knowledge-source-foot">
       {meetingWide ? <span className="knowledge-source-speaker">{source.kind === "decision" ? "Decision" : "Meeting summary"}</span>
-        : <span className="knowledge-source-speaker"><Avatar name={speaker} size="sm" kind={isAssistantName(speaker, DEFAULT_ASSISTANT_NAME) ? "assistant" : "person"} /><span>{source.kind === "transcript" ? "Speaker" : "Evidence speaker"}: {speaker}</span></span>}
+        : <span className="knowledge-source-speaker"><Avatar name={speaker} size="sm" kind={isAssistantName(speaker, DEFAULT_ASSISTANT_NAME) ? "assistant" : "person"} /><span>{source.kind === "transcript" ? "Speaker" : "Speaker in source"}: {speaker}</span></span>}
       {anchored ? <span className="knowledge-source-time">{formatOffset(source.start_seconds)} into transcript</span> : null}
       {source.tags.length ? <span className="tag-list">{source.tags.map((tag) => <span className="tag" key={tag}>#{tag}</span>)}</span> : null}
       <button className="text-button knowledge-source-open" type="button" onClick={() => onOpenSource(source.meeting_id, source.segment_id)}>Open cited transcript <ArrowUpRight /></button>

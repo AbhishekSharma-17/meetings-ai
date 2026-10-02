@@ -125,12 +125,12 @@ function HealthCard({ operations }: { operations: WorkspaceOperations | null }) 
     { name: "Active captures", value: operations?.active_captures, kind: "active" },
     { name: "Capture failures", value: operations?.failed_captures, kind: "failure" },
     { name: "Minutes drafting failures", value: operations?.failed_mom_jobs, kind: "failure" },
-    { name: "Index jobs pending", value: operations?.pending_index_jobs, kind: "active" },
-    { name: "Index job failures", value: operations?.failed_index_jobs, kind: "failure" },
+    { name: "Knowledge updates pending", value: operations?.pending_index_jobs, kind: "active" },
+    { name: "Knowledge update failures", value: operations?.failed_index_jobs, kind: "failure" },
     { name: "Email delivery failures", value: operations?.failed_email_deliveries, kind: "failure" },
   ];
   return <section className="card obs-section" aria-labelledby="obs-health-title">
-    <div className="card-header"><div><h2 id="obs-health-title">Pipeline status</h2><p>Current jobs and delivery failures across the workspace.</p></div></div>
+    <div className="card-header"><div><h2 id="obs-health-title">Processing status</h2><p>Current jobs and delivery failures across the workspace.</p></div></div>
     <ul className="obs-health">{items.map((item) => {
       const [tone, text] = healthState(item.value, item.kind);
       return <li key={item.name}><span className="obs-health-name">{item.name}</span><strong className="obs-health-value">{item.value ?? "—"}</strong><Badge tone={tone} dot>{text}</Badge></li>;

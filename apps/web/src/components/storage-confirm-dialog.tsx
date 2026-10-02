@@ -67,7 +67,7 @@ export function StorageConfirmDialog({ category, plan, reindex, onCancel, onDone
             <div className="alert" data-tone="warning" role="note">
               <TriangleAlert aria-hidden="true" />
               <ul className="storage-confirm-list">{copy.notes.map((line) => <li key={line}>{line}</li>)}
-                {copy.rebuild ? <li>{reindex ? "The index will be rebuilt automatically." : "The index will not be rebuilt until you re-index."}</li> : null}</ul>
+                {copy.rebuild ? <li>{reindex ? "AI search data will be prepared again automatically." : "AI search data will not be prepared again until you choose Update search."}</li> : null}</ul>
             </div>
             <div className="field">
               <label htmlFor="storage-confirm-input">Type {CONFIRMATION} to confirm</label>

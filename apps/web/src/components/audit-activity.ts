@@ -66,7 +66,7 @@ const rules: Rule[] = [
   { path: "/v1/calendar/events/{id}/prep", category: "meetings", icon: FileText, verb: "prepared a meeting brief" },
   { method: "POST", path: "/v1/knowledge-bases", category: "knowledge", icon: Database, verb: "created a knowledge base" },
   { path: "/v1/knowledge-bases/{id}/sharing", category: "knowledge", icon: Users, verb: "changed who can access", target: "knowledge", fallback: "a knowledge base" },
-  { path: "/v1/knowledge-bases/{id}/reindex", category: "knowledge", icon: RefreshCw, verb: "re-indexed", target: "knowledge", fallback: "a knowledge base" },
+  { path: "/v1/knowledge-bases/{id}/reindex", category: "knowledge", icon: RefreshCw, verb: "updated search for", target: "knowledge", fallback: "a knowledge base" },
   { path: "/v1/knowledge-bases/{id}/conversations/{id}", category: "knowledge", icon: MessageSquareX, verb: "deleted a saved AI chat in", target: "knowledge", fallback: "a knowledge base" },
   { method: "DELETE", path: "/v1/knowledge-bases/{id}", category: "knowledge", icon: Trash2, verb: "deleted the knowledge base", target: "knowledge", unresolved: "deleted a knowledge base" },
   { path: "/v1/knowledge-bases/{id}", category: "knowledge", icon: Database, verb: "updated the knowledge base", target: "knowledge", unresolved: "updated a knowledge base" },

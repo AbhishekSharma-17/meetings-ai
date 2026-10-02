@@ -101,7 +101,7 @@ export function ChatWelcome({ baseName, disabled, onPrompt }: { baseName: string
   return <div className="chat-welcome">
     <span className="chat-welcome-mark" aria-hidden="true"><MessagesSquare /></span>
     <h2>{baseName ? `Ask ${baseName}` : "Choose a knowledge base"}</h2>
-    <p>{baseName ? "Answers are grounded in opted-in meetings and cite the exact transcript turn." : "Select a named knowledge base to start a saved chat."}</p>
+    <p>{baseName ? "Ask about your meetings. Each answer links to what was said, by whom and when." : "Select a knowledge base to start a saved chat."}</p>
     {baseName ? <div className="prompt-grid">{SUGGESTED_PROMPTS.map((prompt) => <button key={prompt} type="button" className="prompt-card" disabled={disabled} onClick={() => onPrompt(prompt)}>{prompt}</button>)}</div> : null}
   </div>;
 }

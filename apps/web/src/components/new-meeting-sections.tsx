@@ -55,7 +55,7 @@ export function KnowledgeOptions({ disabled, bases, basesError, enabled, onEnabl
   const trimmedName = newBaseName.trim().toLocaleLowerCase();
   const reusesBase = Boolean(trimmedName) && bases.some((base) => base.name.trim().toLocaleLowerCase() === trimmedName);
   return <section className={enabled ? "nm-section nm-knowledge enabled" : "nm-section nm-knowledge"} aria-label="AI knowledge">
-    <SwitchField id="knowledge-enabled" label="Add this meeting to AI knowledge" description="Index its transcript and approved minutes for AI search after the meeting." checked={enabled} onChange={onEnabledChange} disabled={disabled} />
+    <SwitchField id="knowledge-enabled" label="Add this meeting to AI knowledge" description="Find and ask questions about its transcript and approved minutes after the meeting." checked={enabled} onChange={onEnabledChange} disabled={disabled} />
     <div className="nm-knowledge-fields">
       <div className="field-row">
         <UiSelect id="knowledge-base" label="Knowledge base" value={selectedBaseId} onChange={onSelectBase} disabled={disabled}

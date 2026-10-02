@@ -32,11 +32,11 @@ export const profileInfo: Record<ProfileKind, ProfileKindInfo> = {
   },
   embedding: {
     title: "Embeddings", noun: "embeddings", capabilities: ["embeddings"], icon: Database, catalog: "embeddings",
-    description: "Indexes meetings and documents so AI search can find them.",
+    description: "Prepares meetings and documents so AI search can find them.",
     defaultLabel: "Make this the default embedding model",
     // Verified in the API: uploaded documents re-embed in the background (IndexingWorker backfill);
     // meeting knowledge bases keep their old index until they are re-indexed.
-    defaultHint: "Used to index meetings and documents for AI search. Documents re-index in the background; re-index a meeting knowledge base to switch it over.",
+    defaultHint: "Prepares meetings and documents for AI search. Documents update automatically; choose Update search in a knowledge base to apply the new model to its meetings.",
   },
 };
 

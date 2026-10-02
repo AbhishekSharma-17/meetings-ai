@@ -57,7 +57,7 @@ export function MeetingKnowledgeSettings({ meeting, onSaved }: {
       <Badge className="record-card-badge" tone={meeting.knowledgeEnabled ? "brand" : "neutral"} dot>{meeting.knowledgeEnabled ? "Included after completion" : "Not included"}</Badge>
     </div>
     <form className="card-body form-stack" onSubmit={(event) => void submit(event)}>
-      <SwitchField id="meeting-knowledge-included" label="Include in AI knowledge" description="Finalized transcript and approved facts become searchable." checked={included} onChange={setIncluded} disabled={saving} />
+      <SwitchField id="meeting-knowledge-included" label="Include in AI knowledge" description="Search and ask questions about the transcript and approved minutes." checked={included} onChange={setIncluded} disabled={saving} />
       <UiSelect id="meeting-detail-base" label="Knowledge base" value={baseId || NO_BASE} options={baseOptions} onChange={(value) => setBaseId(value === NO_BASE ? "" : value)} disabled={saving} />
       <ChipInput id="meeting-detail-tags" kind="tag" label="Tags" value={tags} onChange={changeTags} placeholder="Add tags, press Enter"
         maxItems={MAX_TAGS} maxItemLength={MAX_TAG_LENGTH} disabled={saving} />

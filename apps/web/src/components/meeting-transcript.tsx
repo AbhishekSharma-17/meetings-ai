@@ -151,12 +151,12 @@ export function MeetingTranscript({ meetingTitle, assistantName, segments, focus
     <div className="card-body transcript-body">
       {segments.length ? <>
         <div className="transcript-summary">
-          <p><b>Speakers heard:</b> {namedSpeakers.length ? namedSpeakers.join(", ") : "none identified"}{unattributedCount ? ` · ${unattributedCount} unidentified turn${unattributedCount === 1 ? "" : "s"}` : ""} · {namedCoverage}% of finalized turns named · {reviewedCount} reviewed</p>
-          <p className="field-hint">Coverage is not identity accuracy, and speakers are not an attendance roster.</p>
+          <p><b>Speakers heard:</b> {namedSpeakers.length ? namedSpeakers.join(", ") : "none identified"}{unattributedCount ? ` · ${unattributedCount} unidentified turn${unattributedCount === 1 ? "" : "s"}` : ""} · {namedCoverage}% of transcript passages have speaker names · {reviewedCount} reviewed</p>
+          <p className="field-hint">Speaker names may need review. This is not a complete attendee list.</p>
         </div>
         {matchCount ? <p className="field-hint" role="status">{matchCount}</p> : null}
         {expanded ? null : shown.length ? <ol className="transcript-list transcript-list-compact" aria-label="Recent transcript turns, newest first">{shown.map(renderSegment)}</ol> : noMatches}
-      </> : <EmptyState plain icon={<MessageSquareText />} title="No transcript yet">{isLive ? "The assistant is live. The first finalized turn appears here shortly." : "Turns appear here once the assistant captures them."}</EmptyState>}
+      </> : <EmptyState plain icon={<MessageSquareText />} title="No transcript yet">{isLive ? "The assistant is live. The first transcript passages will appear here shortly." : "The transcript appears here as the assistant records the conversation."}</EmptyState>}
     </div>
     <Dialog.Root open={expanded} onOpenChange={setExpanded}>
       <Dialog.Portal>

@@ -107,11 +107,11 @@ function SharedMeetingScreen({ meetingId, coverage, share, backLabel, onBack }: 
         </div>
       </section>
       <section className="card transcript-card" aria-labelledby="shared-transcript-title">
-        <div className="card-header"><div><h2 id="shared-transcript-title">Transcript</h2><p>Finalized turns. Speaker labels are reviewed by the meeting owner.</p></div><span className="section-count">{segments.length} turn{segments.length === 1 ? "" : "s"}</span></div>
+        <div className="card-header"><div><h2 id="shared-transcript-title">Transcript</h2><p>Recorded conversation. Speaker names are reviewed by the meeting owner.</p></div><span className="section-count">{segments.length} turn{segments.length === 1 ? "" : "s"}</span></div>
         <div className="card-body transcript-body">
           {segments.length ? <ol className="transcript-list">{segments.map((turn) => <TranscriptTurn key={turn.id} id={`shared-${encodeURIComponent(turn.segmentId)}`} segment={turn} focused={false}
             assistantName={meeting.botName} time={elapsed(turn.startedAt)} timeTitle="Elapsed time into the meeting" highlight="" />)}</ol>
-            : <EmptyState plain icon={<MessageSquareText />} title="No transcript yet">{meeting.status === "created" ? "The transcript appears once the assistant joins." : "Finalized turns appear here as the call is recorded."}</EmptyState>}
+            : <EmptyState plain icon={<MessageSquareText />} title="No transcript yet">{meeting.status === "created" ? "The transcript appears once the assistant joins." : "The transcript appears here as the call is recorded."}</EmptyState>}
         </div>
       </section>
     </> : !error ? <LoadingRow>Loading meeting…</LoadingRow> : null}

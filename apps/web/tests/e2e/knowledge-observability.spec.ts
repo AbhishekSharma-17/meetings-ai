@@ -51,11 +51,38 @@ test("observability shows full-ledger process and provider totals with cost limi
   await expect(page.getByRole("heading", { name: "Cost by process" })).toBeVisible();
   await expect(page.getByRole("cell", { name: /Minutes drafting/ })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Cost by provider" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Processing status" })).toBeVisible();
+  await expect(page.getByText("Knowledge updates pending")).toBeVisible();
   await expect(page.getByText("not included", { exact: false })).toBeVisible();
   await expect(page.getByText("3", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Connected meeting accounts" })).toBeVisible();
   await expect(page.getByText("Acme review")).toBeVisible();
 });
+
+for (const mode of ["hybrid", "lexical"]) {
+  test(`knowledge uses plain language without exposing ${mode} search internals`, async ({ page }) => {
+    await page.route(`**/v1/knowledge-bases/${baseId}/index`, (route) => route.fulfill({ json: {
+      knowledge_base_id: baseId, indexed_sources: 12, model: "internal-embedding-model", profile_id: null,
+      last_indexed_at: "2026-10-02T10:00:00Z", job_status: "succeeded", last_error: null,
+    } }));
+    await page.route("**/v1/knowledge/search", (route) => route.fulfill({ json: {
+      sources: [], count: 0, retrieval_mode: mode, truncated_meeting_scope: true,
+    } }));
+    await page.goto("/");
+    await page.getByRole("button", { name: "AI knowledge", exact: true }).click();
+    await page.getByRole("button", { name: /Acme research/ }).click();
+    await expect(page.getByRole("group", { name: "AI search", exact: true })).toBeVisible();
+    await expect(page.getByText("12 sources prepared for search")).toBeVisible();
+    await expect(page.getByText("Answers link to your meetings · Chat history saved")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Update search" })).toBeVisible();
+    await page.getByRole("button", { name: "Sources", exact: true }).click();
+    await page.getByLabel("Search meetings").fill("roadmap");
+    await page.getByRole("button", { name: "Search", exact: true }).click();
+    await expect(page.getByText("0 results · newest 200 meetings searched")).toBeVisible();
+    await expect(page.getByText("Only completed meetings added to AI knowledge are searchable.", { exact: false })).toBeVisible();
+    await expect(page.locator(".knowledge-page")).not.toContainText(/hybrid|semantic|retrieval|embedding|reindex|opted-in/i);
+  });
+}
 
 test("connected calendar card uses a compact add-account action", async ({ page }) => {
   await page.goto("/");

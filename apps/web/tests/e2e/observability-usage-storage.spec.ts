@@ -111,7 +111,7 @@ test("storage purge needs a typed confirmation and reports deleted, skipped and 
   await page.getByRole("checkbox", { name: /Live standup/ }).check();
   await page.getByRole("button", { name: /Delete selected \(2\)/ }).click();
   const confirm = page.getByRole("alertdialog");
-  await expect(confirm.getByText("erased from the capture service", { exact: false })).toBeVisible();
+  await expect(confirm.getByText("erased from the meeting recording service", { exact: false })).toBeVisible();
   await expect(confirm.getByText("can't be recalled", { exact: false })).toBeVisible();
   const submit = confirm.getByRole("button", { name: "Delete permanently" });
   await expect(submit).toBeDisabled();
