@@ -23,6 +23,8 @@ jobs:
           cache: pip
           cache-dependency-path: services/api/requirements.txt
       - run: pip install -r services/api/requirements.txt
+      - name: Install async test support
+        run: pip install 'pytest-asyncio>=0.24,<2'
       - name: API and migration tests (no live integrations)
         env:
           PYTHONPATH: packages/contracts:services/api
