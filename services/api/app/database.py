@@ -1148,6 +1148,81 @@ class VoiceSampleRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class ChatGPTConnectionRow(Base):
+    __tablename__ = "chatgpt_connections"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), index=True, nullable=False)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    scope: Mapped[str] = mapped_column(String(20), nullable=False)
+    label: Mapped[str] = mapped_column(String(100), nullable=False)
+    subject: Mapped[str] = mapped_column(Text, nullable=False)
+    email: Mapped[str | None] = mapped_column(String(320))
+    client_id: Mapped[str] = mapped_column(Text, nullable=False)
+    credential_ciphertext: Mapped[str | None] = mapped_column(Text)
+    scopes: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    purposes: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    model: Mapped[str | None] = mapped_column(String(200))
+    status: Mapped[str] = mapped_column(String(40), nullable=False)
+    last_error_code: Mapped[str | None] = mapped_column(String(100))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ChatGPTOAuthAttemptRow(Base):
+    __tablename__ = "chatgpt_oauth_attempts"
+
+    state_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    connection_id: Mapped[str | None] = mapped_column(String(36))
+    scope: Mapped[str] = mapped_column(String(20), nullable=False)
+    label: Mapped[str] = mapped_column(String(100), nullable=False)
+    client_id: Mapped[str] = mapped_column(Text, nullable=False)
+    verifier_ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
+    nonce: Mapped[str] = mapped_column(String(100), nullable=False)
+    redirect_uri: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class MinutesVersionRow(Base):
+    """A person's interpretation of one immutable-source meeting transcript.
+
+    Contents are private even from workspace administrators unless explicitly shared.
+    They are never the canonical MOM and are never automatically knowledge-indexed.
+    """
+    __tablename__ = "minutes_versions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    meeting_id: Mapped[str] = mapped_column(String(36), ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False, index=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+    creator_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(100), nullable=False)
+    perspective: Mapped[str] = mapped_column(String(20), nullable=False, default="standard")
+    guidance: Mapped[dict] = mapped_column(JSON, nullable=False)
+    content: Mapped[dict | None] = mapped_column(JSON)
+    source_revision: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    visibility: Mapped[str] = mapped_column(String(20), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    generation_token: Mapped[str | None] = mapped_column(String(36))
+    generation_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    provider: Mapped[str | None] = mapped_column(String(80))
+    model: Mapped[str | None] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class MinutesVersionAccessRow(Base):
+    __tablename__ = "minutes_version_access"
+
+    version_id: Mapped[str] = mapped_column(String(36), ForeignKey("minutes_versions.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), primary_key=True)
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class SchemaVersionRow(Base):
     __tablename__ = "schema_version"
 
@@ -1207,9 +1282,16 @@ SCHEMA_TABLES_BY_VERSION: dict[int, tuple[str, ...]] = {
     31: ("research_profiles", "research_conversations", "research_messages"),
     32: ("meeting_shares", "email_delivery_senders"),
     33: ("voice_samples",),
+    # Version 34 is already reserved by local subscription-connection schemas.
+    34: ("chatgpt_connections", "chatgpt_oauth_attempts"),
+    35: ("minutes_versions", "minutes_version_access"),
 }
 
 SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
+    "chatgpt_connections": ("id", "organization_id", "user_id", "scope", "label", "subject", "email", "client_id", "credential_ciphertext", "scopes", "purposes", "model", "status", "last_error_code", "expires_at", "created_at", "updated_at"),
+    "chatgpt_oauth_attempts": ("state_hash", "organization_id", "user_id", "connection_id", "scope", "label", "client_id", "verifier_ciphertext", "nonce", "redirect_uri", "expires_at"),
+    "minutes_versions": ("id", "meeting_id", "organization_id", "creator_id", "label", "perspective", "guidance", "content", "source_revision", "status", "visibility", "revision", "generation_token", "generation_started_at", "provider", "model", "created_at", "updated_at", "approved_at"),
+    "minutes_version_access": ("version_id", "user_id", "granted_at"),
     "provider_profiles": ("id", "name", "provider_type", "execution_location", "base_url", "capabilities", "credential_ciphertext", "created_at", "updated_at"),
     "provider_defaults": ("capability", "policy", "local_profile_id", "cloud_profile_id"),
     "provider_tenants": ("provider_id", "organization_id"),
@@ -1367,7 +1449,7 @@ def _migrate_to_v22(connection) -> None:
 class Database:
     """Upgrades known schemas and rejects unknown or incomplete ones."""
 
-    SCHEMA_VERSION = 33
+    SCHEMA_VERSION = 35
 
     def __init__(self, url: str) -> None:
         engine_options: dict[str, object] = {"pool_pre_ping": True}

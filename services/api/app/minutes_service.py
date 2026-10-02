@@ -80,8 +80,12 @@ class MinutesService:
                 "sent MOM is locked; a versioned correction workflow is required"
             )
 
-    async def generate(self, meeting_id: UUID) -> MeetingMinutes:
-        self.require_not_sent(meeting_id)
+    async def generate_draft(self, meeting_id: UUID, *, guidance=None, metadata=None):
+        """Generate grounded content without overwriting the organizer's MOM.
+
+        Personal versions use this same transcript/evidence pipeline with their own guidance.
+        The caller owns persistence and privacy; generation never changes the capture.
+        """
         meeting = self.repository.get_meeting(meeting_id)
         if meeting.status in _CAPTURE_IN_PROGRESS:
             raise MinutesConflictError("stop the meeting capture before generating its MOM")
@@ -91,7 +95,7 @@ class MinutesService:
             raise MinutesConflictError("a finalized transcript is required before generating MOM")
 
         source_revision = self.repository.get_transcript_revision(meeting_id)
-        guidance = self.repository.get_mom_guidance(meeting_id)
+        guidance = guidance or self.repository.get_mom_guidance(meeting_id)
         first_start = min(segment.start_seconds for segment in finalized)
         # Long transcript IDs are easy for a model to mis-copy; it cites short ones (S1, S2, …) that we
         # map back to the real IDs after generation.
@@ -136,7 +140,7 @@ class MinutesService:
             # cap can truncate a valid draft for a multi-speaker meeting.
             max_output_tokens=12000,
             response_schema=_minutes_response_schema(),
-            metadata={"meeting_id": str(meeting_id), "capability": "text_generation"},
+            metadata={"meeting_id": str(meeting_id), "capability": "text_generation", **(metadata or {})},
         )
         try:
             profile, result = await self.providers.generate_text(request)
@@ -163,9 +167,14 @@ class MinutesService:
         except (ProviderExecutionError, ProviderSelectionError, ValidationError, ValueError) as exc:
             raise MinutesGenerationError(f"MOM generation failed: {exc}") from exc
 
-        now = datetime.now(UTC)
         if self.repository.get_transcript_revision(meeting_id) != source_revision:
             raise MinutesConflictError("transcript changed while MOM was generating; try again")
+        return draft, profile, result, source_revision
+
+    async def generate(self, meeting_id: UUID) -> MeetingMinutes:
+        self.require_not_sent(meeting_id)
+        draft, profile, result, source_revision = await self.generate_draft(meeting_id)
+        now = datetime.now(UTC)
         self.require_not_sent(meeting_id)
         try:
             previous = self.repository.get_minutes(meeting_id)

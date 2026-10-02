@@ -38,6 +38,8 @@ from .database import (
     EmailDeliverySenderRow,
     MeetingCoverageRow,
     MeetingShareRow,
+    MinutesVersionRow,
+    MinutesVersionAccessRow,
     Database,
     EmailDeliveryRow,
     MeetingRow,
@@ -429,6 +431,9 @@ class SQLAlchemyRepository:
                 raise MeetingNotFoundError(meeting_id)
             self._queue_knowledge_index(session, meeting_id)
             self._delete_cited_conversations(session, meeting_id)
+            version_ids = select(MinutesVersionRow.id).where(MinutesVersionRow.meeting_id == key)
+            session.execute(delete(MinutesVersionAccessRow).where(MinutesVersionAccessRow.version_id.in_(version_ids)))
+            session.execute(delete(MinutesVersionRow).where(MinutesVersionRow.meeting_id == key))
             for model in (
                 CalendarScheduleRow, MeetingSourceRow, KnowledgeEmbeddingRow, KnowledgeChunkRow, MeetingKnowledgeBaseRow, MeetingKnowledgeSettingsRow, MeetingMomGuidanceRow,
                 MeetingDeliverySettingsRow, PostMeetingJobRow, TranscriptSegmentRow,

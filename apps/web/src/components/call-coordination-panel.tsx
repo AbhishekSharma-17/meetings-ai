@@ -79,6 +79,10 @@ export function CallCoordinationPanel({ meetingId, reloadKey, onOpenMeeting, onC
         <p><b>Assistant from {owner ? (owner.is_you ? "you" : owner.display_name) : "this workspace"}</b>{covering ? <small> · also covering: {covering}</small> : null}</p>
         <Badge tone={view.state === "in_call" ? "brand" : view.state === "idle" ? "neutral" : "info"} dot>{stateLabel[view.state]}</Badge>
       </div>
+      {view.covering.length ? <div className="coordination-others" aria-label="People sharing this assistant">
+        <h3>Sharing this assistant · {view.covering.length}</h3>
+        <ul>{view.covering.map((person) => <li key={person.user_id}><Avatar name={person.display_name} size="sm" /><span className="coordination-other-copy"><b>{person.display_name}{person.is_you ? " · You" : ""}</b><small>Same transcript · can create a separate MOM</small></span></li>)}</ul>
+      </div> : null}
       {view.your_role === "sharing" ? <p className="coordination-note">You&apos;re sharing {possessive(firstName(owner))} assistant: you can read its transcript and approved minutes{view.receive_recap ? " and you'll get the recap email" : ""}. {owner?.display_name ?? "The owner"} and admins manage the meeting and its delivery.</p> : null}
       {view.handed_to ? <Alert tone="info" title={`Handed over to ${possessive(firstName(view.handed_to.owner))} assistant`}
         actions={view.handed_to.can_open && onOpenMeeting ? <button type="button" className="button secondary sm" onClick={() => onOpenMeeting(view.handed_to!.meeting_id)}>Open</button> : undefined}>

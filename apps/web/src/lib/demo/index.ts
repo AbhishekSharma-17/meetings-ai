@@ -11,6 +11,7 @@ import { registerLeave } from "./handlers/leave";
 import { registerPreferences } from "./handlers/preferences";
 import { registerMeetings } from "./handlers/meetings";
 import { registerMinutes } from "./handlers/minutes";
+import { registerMinutesVersions } from "./handlers/minutes-versions";
 import { registerPrep } from "./handlers/prep";
 import { registerProviders } from "./handlers/providers";
 import { registerTeams } from "./handlers/teams";
@@ -38,6 +39,7 @@ function buildRouter(): DemoRouter {
   const router = new DemoRouter();
   // Teams first: its delivery-settings and send-configured routes understand internal_group_ids.
   for (const register of [registerTeams, registerLeave, registerWorkspace, registerMeetings, registerMinutes, registerSpeakers, registerCalendar, registerPrep, registerKnowledge, registerProviders, registerApollo, registerBalances, registerUsage, registerActivity, registerPreferences, registerCoordination, registerInPerson, registerResearch, registerSharing, registerVoiceSamples]) register(router);
+  registerMinutesVersions(router);
   return router;
 }
 

@@ -1,0 +1,30 @@
+/* Personal MOMs: private documents on a shared transcript, using the product's layout tokens. */
+.minutes-versions-card .card-body { display:grid; gap:14px; }
+.minutes-versions-list { display:grid; gap:0; padding:0; margin:0; list-style:none; }
+.minutes-versions-list > li { display:flex; align-items:flex-start; gap:12px; padding:14px 0; min-width:0; border-top:1px solid var(--border); }
+.minutes-version-copy { display:grid; gap:5px; flex:1; min-width:0; overflow-wrap:anywhere; font-size:14px; }
+.minutes-version-copy small { color:var(--text-secondary); font-size:12px; }
+.minutes-version-badges, .minutes-version-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.minutes-version-private { display:flex; align-items:center; gap:5px; font-size:12px; color:var(--text-secondary); }
+.minutes-version-private .lucide { width:14px; height:14px; flex:none; }
+.minutes-version-dialog { width:min(900px, calc(100vw - 32px)); max-height:calc(100dvh - 32px); display:flex; flex-direction:column; overflow:hidden; }
+.minutes-version-dialog-body { overflow:auto; min-height:0; display:grid; gap:20px; padding-bottom:16px; }
+.minutes-version-dialog .dialog-footer { flex:none; }
+.minutes-version-form { display:grid; gap:14px; border:0; margin:0; padding:0; min-width:0; }
+.minutes-version-content { display:grid; gap:16px; padding:16px; border:1px solid var(--border); border-radius:var(--radius); background:var(--muted); min-width:0; overflow-wrap:anywhere; }
+.minutes-version-content h4 { font-size:13px; font-weight:500; margin-bottom:6px; color:var(--text-secondary); }
+.minutes-version-content p, .minutes-version-content li { white-space:pre-wrap; line-height:1.65; font-size:14px; }
+.minutes-version-content ul, .minutes-version-content ol { padding-left:20px; }
+.minutes-version-sharing { display:grid; gap:12px; border-top:1px solid var(--border); padding-top:18px; }
+.minutes-version-sharing > .button { justify-self:start; }
+.minutes-version-members { display:grid; gap:10px; overflow:auto; max-height:200px; padding:8px 0; }
+.minutes-version-members .check-label { flex-wrap:wrap; }
+.minutes-version-members small { color:var(--text-secondary); font-size:12px; overflow-wrap:anywhere; }
+.minutes-version-danger { border-top:1px solid var(--border); padding-top:12px; }
+@media (max-width:640px) {
+  .minutes-versions-card .card-header { flex-wrap:wrap; }
+  .minutes-versions-list > li { flex-wrap:wrap; }
+  .minutes-versions-list > li > .button, .minutes-version-private { margin-left:44px; }
+  .minutes-version-dialog { width:calc(100vw - 16px); max-height:calc(100dvh - 16px); }
+  .minutes-version-form .field-row { grid-template-columns:1fr; }
+}

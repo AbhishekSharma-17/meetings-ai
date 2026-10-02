@@ -223,7 +223,7 @@ export function AppShell() {
       if (target.id) rememberSelection(`meetings-ai:knowledge-base:${identity}`, target.id);
       setFocusNonce((value) => value + 1); setView("knowledge"); return;
     }
-    if (isView(target.view) && (admin || ["calendar", "profile"].includes(target.view))) setView(target.view);
+    if (isView(target.view) && (admin || ["calendar", "profile", "shared"].includes(target.view))) setView(target.view);
   }, [identity, account, openMeeting]);
   const researchLinks: ProfileLinks = {
     onOpenMeeting: openMeeting,
@@ -341,7 +341,7 @@ export function AppShell() {
           {view === "meeting" && activeMeetingId ? account?.role === "owner" || account?.role === "admin"
             ? <MeetingDetailScreen meetingId={activeMeetingId} focusSegmentId={focusSegmentId} backLabel={backLabel[meetingReturnView] ?? "Back"} onBack={() => setView(meetingReturnView)} onMeetingChange={updateMeeting} onDeleted={(id) => { setMeetings((current) => current.filter((meeting) => meeting.id !== id)); setActiveMeetingId(null); setView("dashboard"); }} />
             : <MemberMeetingScreen meetingId={activeMeetingId} focusSegmentId={focusSegmentId} backLabel={backLabel[meetingReturnView] ?? "AI knowledge"} onBack={() => setView(meetingReturnView === "calendar" || meetingReturnView === "research" || meetingReturnView === "shared" ? meetingReturnView : "knowledge")} onBackToKnowledge={() => setView("knowledge")} /> : null}
-          {view === "shared" && account && account.role !== "owner" && account.role !== "admin" ? <SharedWithMeScreen onOpenMeeting={(id) => openMeeting(id)} /> : null}
+          {view === "shared" && account ? <SharedWithMeScreen key={identity} onOpenMeeting={(id) => openMeeting(id)} /> : null}
         </main>
       </div>
       <Dialog.Root open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
@@ -437,7 +437,7 @@ function SidebarPanel({ view, onNavigate, workspaces, account, liveCount, onSign
         {canManageMeetings ? item("dashboard", "Overview", <House />) : null}
         {canManageMeetings ? item("meetings", "Meetings", <Video />, view === "meetings" || view === "meeting", liveCount ? <span className="nav-live" aria-hidden="true" /> : null) : null}
         {canUseCalendar ? item("calendar", "Calendar", <CalendarDays />) : null}
-        {canManageMeetings ? null : item("shared", "Shared with me", <Share2 />)}
+        {item("shared", "Shared with me", <Share2 />)}
       </div>
       <div className="sidebar-group">
         <p className="sidebar-label">Intelligence</p>

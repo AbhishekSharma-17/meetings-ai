@@ -15,6 +15,7 @@ import { EmptyState, LoadingRow } from "./ui/feedback";
 import { inPersonService } from "@/lib/in-person-service";
 import { sharingService, type SharedMeetingView } from "@/lib/sharing-service";
 import { InPersonMemberMeeting } from "./in-person-member-meeting";
+import { MinutesVersionsPanel } from "./minutes-versions-panel";
 
 const POLL_MS = 15_000;
 const LIVE = new Set<MeetingDetail["status"]>(["joining", "waiting_room", "live", "needs_attention", "stopping", "processing"]);
@@ -94,6 +95,7 @@ function SharedMeetingScreen({ meetingId, coverage, share, backLabel, onBack }: 
     {coverage ? <CallCoordinationPanel meetingId={meetingId} onChanged={() => void coordinationService.forMeeting(meetingId).catch(() => onBack())} /> : null}
     {share?.note ? <p className="shared-note"><b>Note from {share.shared_by?.display_name ?? "the sender"}:</b> {share.note}</p> : null}
     {meeting ? <>
+      <MinutesVersionsPanel key={meetingId} meetingId={meetingId} segments={segments} />
       <section className="card" aria-labelledby="shared-minutes-title">
         <div className="card-header"><div><h2 id="shared-minutes-title">Minutes</h2><p>Shown once {owner?.display_name ?? "the owner"} approves them.</p></div></div>
         <div className="card-body">

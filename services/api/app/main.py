@@ -81,6 +81,8 @@ from .routes_leave import register_leave_routes
 from .call_coordination import CallCoordinationService
 from .coordination_notices import CoordinationNotices
 from .routes_call_coordination import member_route_allowed, register_call_coordination_routes
+from .routes_minutes_versions import register_minutes_versions_routes, versions_route_allowed
+from .minutes_versions import MinutesVersionsService
 from .profile_photos import ProfilePhotoService
 from .database import Database, SchemaVersionRow, LEGACY_ADMIN_USER_ID, LEGACY_ORGANIZATION_ID
 from .accounts import AccountError, AccountPublic, AccountService, Actor, ChangePasswordRequest, MemberRolePatch, OrganizationCreateRequest, OrganizationOption, ProfilePatch
@@ -366,6 +368,9 @@ def create_app(
     meeting_sharing = MeetingSharingService(database, minutes_service, app.state.notifications)
     app.state.meeting_sharing = meeting_sharing
     register_sharing_routes(app, meeting_sharing, minutes_service)
+    minutes_versions = MinutesVersionsService(database, minutes_service, call_coordination, meeting_sharing)
+    app.state.minutes_versions = minutes_versions
+    register_minutes_versions_routes(app, minutes_versions)
     balances = ProviderBalanceService(database, vault, app.state.notifications)
     app.state.provider_balances = balances
     service.credit_alerts = balances  # out-of-credit model calls raise an alert (see ProfileService)
@@ -413,6 +418,7 @@ def create_app(
                     method = request.method
                     allowed = (
                         path == "/v1/auth/change-password"
+                        or versions_route_allowed(method, path)
                         or (method == "GET" and path in {"/v1/workspace", "/v1/workspace/members", "/v1/workspaces"})
                         or (method == "GET" and re.fullmatch(r"/v1/workspace/teams(?:/[0-9a-f-]{36})?", path))
                         or (method == "POST" and (path == "/v1/workspaces" or re.fullmatch(r"/v1/workspaces/[0-9a-f-]+/switch", path)))

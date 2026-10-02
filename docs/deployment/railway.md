@@ -91,6 +91,24 @@ chat, uploads) before scaling out. Do not attach a public domain to
 the Vexa or API services merely to test them; the web proxy and authenticated
 `/v1/integrations/vexa/health` endpoint cover the normal integration check.
 
+### Personal MOM schema upgrade and rollback
+
+The personal-MOM release raises the product schema from 33/34 to **35**. Version 34 remains
+reserved for the already defined subscription-connection tables; this release creates those
+empty tables for schema compatibility but does not enable the unfinished subscription routes.
+Version 35 adds only `minutes_versions` and `minutes_version_access`; it does not rewrite
+existing transcripts, canonical minutes, credentials or Vexa data. Upgrades from both 33 and
+34, including repeated startup, are covered by migration tests.
+
+Before release, take a restricted-access `pg_dump` of **meetings_ai only**, verify the archive
+with `pg_restore --list`, check active captures/jobs and imminent scheduled joins, and deploy
+the API before the web. Do not redeploy Vexa for this UI/API-only release.
+
+Do not use a pre-35 API image as a blind rollback after migration: it rejects future schemas.
+Prepare a rollback revision based on the previous application with the schema-35 database
+definitions retained. Prefer that forward-compatible rollback to dropping tables or restoring
+over newer user data. Database restore requires a separate maintenance decision.
+
 ### Apollo (research source via Composio)
 
 Apollo is optional. Owners/admins paste the workspace's Apollo API key under AI providers →

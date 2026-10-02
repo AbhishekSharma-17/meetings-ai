@@ -356,12 +356,12 @@ test("foundation UI walkthrough", async ({ page }) => {
   await page.getByLabel("Participant email addresses").fill("guest@example.test");
   await capture(page, "03-ready-to-submit.png");
   await page.getByRole("button", { name: "Send assistant" }).click();
-  expect(createdDeliverySettings).toMatchObject({
+  await expect.poll(() => createdDeliverySettings).toMatchObject({
     internal_recipients: ["team@example.test"],
     participant_recipients: ["guest@example.test"],
     send_to_participants: false,
   });
-  expect(createdKnowledgeSettings).toEqual({ tags: ["roadmap", "customer research"], knowledge_enabled: true });
+  await expect.poll(() => createdKnowledgeSettings).toEqual({ tags: ["roadmap", "customer research"], knowledge_enabled: true });
   await expect(page.getByRole("heading", { name: "Foundation UI witness" })).toBeVisible();
   await expect(page.getByText("Joining", { exact: true })).toBeVisible();
   await expect(page.getByText("Let us validate this with the internal team first.")).toBeVisible();

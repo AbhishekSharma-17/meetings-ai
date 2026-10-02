@@ -165,7 +165,9 @@ class UsageLedger:
             price_source=source, duration_ms=duration_ms,
             meeting_id=metadata.get("meeting_id"), knowledge_base_id=metadata.get("knowledge_base_id"),
             prep_event_id=metadata.get("prep_event_id"), actor_user_id=metadata.get("actor_user_id"),
-            details={**_profile_details(profile), "request_type": "text_generation", **(details or {})},
+            details={**_profile_details(profile), "request_type": "text_generation",
+                     **({"minutes_version_id": str(metadata["version_id"])} if metadata.get("version_id") else {}),
+                     **(details or {})},
         )
 
     def record_embedding(

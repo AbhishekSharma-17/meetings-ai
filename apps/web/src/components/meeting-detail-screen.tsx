@@ -9,6 +9,7 @@ import { ScheduleStatusPanel, toMeetingSchedule } from "./meeting-schedule-panel
 import { scheduleState } from "@/lib/meeting-status";
 import type { CalendarEvent, CalendarSchedule, MeetingDetail, MeetingParticipants, SpeakerIdentity, TranscriptSegment, TranscriptionRoute } from "@/lib/types";
 import { MinutesPanel } from "./minutes-panel";
+import { MinutesVersionsPanel } from "./minutes-versions-panel";
 import { MeetingSharingCard } from "./meeting-sharing-card";
 import { MeetingTranscript, namedSpeakersOf, relativeTime, transcriptSeconds } from "./meeting-transcript";
 import { MeetingPeopleCard } from "./meeting-people-card";
@@ -304,6 +305,7 @@ export function MeetingDetailScreen({ meetingId, focusSegmentId, backLabel = "Al
         </section> : null}
         {didNotRun ? null : <>
           <MinutesPanel key={`${meeting.id}:${speakerRevision}`} meeting={meeting} transcriptCount={finalizedCount} segments={segments} onDelivered={() => setDeliveryRevision((value) => value + 1)} />
+          <MinutesVersionsPanel key={`versions:${meeting.id}`} meetingId={meeting.id} segments={segments} />
           <MeetingSharingCard meetingId={meeting.id} revision={deliveryRevision} />
         </>}
         {didNotRun ? <>{changeHistory}{sourceCard}</> : null}

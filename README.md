@@ -21,6 +21,7 @@ Connect meeting sources, schedule an assistant, review a timestamped transcript,
 | Meeting capture | Manual meeting links, Vexa dispatch, lifecycle controls, scheduled calendar joins, durable records |
 | Transcript review | Timestamped turns, speaker corrections, explicit speaker-to-email confirmation, export |
 | Minutes and follow-up | Automatic post-capture drafts, selectable formats and focus fields, review, approval, delivery retries |
+| Personal MOMs | One shared capture, independently owned technical/commercial/detailed/custom versions, private by default, explicit workspace or selected-person sharing |
 | Email | Branded Resend recaps, internal recipients, explicit participant opt-in, optional Markdown transcript attachment |
 | Meeting sources | Multiple Google Calendar, Outlook, Calendly and Zoom connections, account aliases/disconnect, saved calendar snapshots |
 | Team workspaces | Email/password accounts, memberships and roles, invitations, first-login password change, workspace switching |
@@ -43,6 +44,25 @@ This repository contains a working application and deployment configuration, not
 - Current workers require a single API replica. Review the deployment release gates before scaling.
 
 See [acceptance checks](docs/validation/mvp-acceptance.md) and the [deployment checklist](docs/deployment/self-hosting.md#release-checklist). Some historical status documents describe older snapshots; inspect current code when they disagree.
+
+### Shared assistants and personal notes
+
+The meeting page shows the assistant's organizer and the people sharing it. The organizer's
+existing MOM remains the canonical recap; **Create my MOM** creates a separate document from
+the same finalized transcript, using personal instructions and the workspace's MOM model.
+Generation runs in a background job and its usage is attributed to the requesting person.
+
+Versions are private by default. Workspace owners/admins with meeting access can see version
+metadata (creator, category, status and count), but private content and instructions are not
+returned to them. This is application-level access control, not encryption against database
+operators. Only the creator can edit, approve, delete or share a version. Sharing allows all
+workspace members or selected active people to read **approved, current** notes without granting
+transcript access. Editing/regenerating withdraws the approval; transcript corrections require
+regeneration/review. Personal versions appear in **Shared with me → My & shared MOMs**.
+
+Personal MOMs can be downloaded as Markdown. They are not automatically emailed or indexed
+into AI knowledge: existing recap email and knowledge workflows still use the canonical MOM.
+Deleting a whole meeting also deletes its personal versions under the existing retention rules.
 
 ## Architecture
 

@@ -116,6 +116,26 @@ def test_incomplete_recorded_schema_refuses_startup(tmp_path) -> None:
     database.engine.dispose()
 
 
+@pytest.mark.parametrize("previous_version", [33, 34])
+def test_personal_mom_upgrade_preserves_existing_schema_and_data(tmp_path, previous_version) -> None:
+    database = _database(tmp_path)
+    database.migrate()
+    with database.engine.begin() as connection:
+        connection.execute(text("INSERT INTO provider_defaults (capability, policy) VALUES ('transcription', 'cloud_only')"))
+        for version in range(Database.SCHEMA_VERSION, previous_version, -1):
+            for name in reversed(SCHEMA_TABLES_BY_VERSION[version]):
+                connection.execute(text(f"DROP TABLE {name}"))
+        connection.execute(text("DELETE FROM schema_version WHERE version > :previous"), {"previous": previous_version})
+    database.migrate()
+    database.migrate()
+    with database.engine.connect() as connection:
+        assert connection.execute(text("SELECT policy FROM provider_defaults WHERE capability='transcription'")).scalar_one() == "cloud_only"
+        assert connection.execute(text("SELECT COUNT(*) FROM minutes_versions")).scalar_one() == 0
+        assert connection.execute(text("SELECT COUNT(*) FROM minutes_version_access")).scalar_one() == 0
+        assert connection.execute(text("SELECT MAX(version) FROM schema_version")).scalar_one() == 35
+    database.engine.dispose()
+
+
 def test_unknown_future_version_refuses_startup(tmp_path) -> None:
     database = _database(tmp_path)
     database.migrate()

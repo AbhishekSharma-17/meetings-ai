@@ -4,6 +4,7 @@ import { formatDate as formatZonedDate, formatDateTime } from "@/lib/time-prefer
 
 const purposeNames: Record<string, string> = {
   mom_generation: "Minutes drafting",
+  personal_mom: "Personal MOM drafting",
   knowledge_answer: "AI knowledge answers",
   knowledge_chat: "AI knowledge answers",
   knowledge_query_plan: "AI knowledge question planning",
