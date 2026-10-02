@@ -181,6 +181,7 @@ def _check_password(password: str, encoded: str) -> bool:
 class AccountService:
     def __init__(self, database: Database) -> None:
         self.database = database
+        self.notifications = None
 
     def bootstrap_owner(self, email: str, password: str) -> None:
         if not password:
@@ -315,6 +316,13 @@ class AccountService:
             link = issue_link(session, purpose="invite", user_id=user_id, organization_id=organization_id,
                               created_by=str(requester.user_id), now=now) if needs_link else None
             workspace = session.get(OrganizationRow, organization_id)
+            if self.notifications is not None:
+                self.notifications.access_notice(
+                    session, organization_id, user_ids=[user_id], kind="member.access_added",
+                    title=f"Welcome to {workspace.display_name if workspace else 'your workspace'}",
+                    body=f"{requester.display_name} invited you as {data.role}.",
+                    send_email=False,  # The invitation endpoint sends the secure acceptance email.
+                )
             result = InviteResult(account=AccountPublic(
                 user_id=UUID(user_id), organization_id=requester.organization_id,
                 email=data.email, display_name=display_name, role=data.role, must_change_password=False,
@@ -393,11 +401,18 @@ class AccountService:
                 raise AccountError("only an owner can assign an admin or owner role")
             if membership.role == "owner" and data.role != "owner":
                 self._require_another_owner(session, requester.organization_id)
+            previous_role = membership.role
             membership.role = data.role
             user = session.get(UserRow, str(user_id))
             credential = session.get(UserCredentialRow, str(user_id))
             if user is None or credential is None:
                 raise AccountError("member account is unavailable")
+            if self.notifications is not None and previous_role != data.role:
+                self.notifications.access_notice(
+                    session, str(requester.organization_id), user_ids=[str(user_id)],
+                    kind="member.role_changed", title="Your workspace role changed",
+                    body=f"{requester.display_name} changed your role from {previous_role} to {data.role}.",
+                )
             return self.public(self._actor(session, user, credential, requester.organization_id))
 
     def remove_member(self, requester: Actor, user_id: UUID) -> None:

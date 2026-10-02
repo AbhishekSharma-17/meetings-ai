@@ -125,6 +125,25 @@ def _schedule(client: TestClient, url: str, starts: datetime, title: str = "Week
     return response.json()["meeting"]["id"]
 
 
+def test_member_can_schedule_only_manage_own_and_viewer_cannot_schedule(world):
+    starts = datetime.now(UTC) + timedelta(hours=1)
+    meeting_id = _schedule(_as(world, "cara"), LINK, starts)
+    assert _as(world, "cara").get("/v1/calendar/schedules").json()[0]["meeting_id"] == meeting_id
+    other = _as(world, "dan")
+    assert other.get("/v1/calendar/schedules").json() == []
+    assert other.post(f"/v1/calendar/schedules/{meeting_id}/cancel").status_code == 403
+    assert other.post(f"/v1/meetings/{meeting_id}/join").status_code == 403
+    assert _as(world, "cara").post(f"/v1/calendar/schedules/{meeting_id}/cancel").status_code == 200
+    owner = _as(world, "asha")
+    assert owner.patch(f"/v1/workspace/members/{world['dan']}/role", json={"role": "viewer"}).status_code == 200
+    viewer = _as(world, "dan")
+    assert viewer.post("/v1/meetings", json={"meeting_url": LINK}).status_code == 403
+    assert viewer.post("/v1/meetings/schedules", json={
+        "starts_at": starts.isoformat(), "ends_at": (starts + timedelta(hours=1)).isoformat(),
+        "meeting": {"meeting_url": LINK},
+    }).status_code == 403
+
+
 def test_plain_assistants_have_scheduler_attribution_without_sharing(world) -> None:
     client = _as(world, "asha")
     response = client.post("/v1/meetings", json={"meeting_url": LINK, "bot_name": "Asha's assistant"})
@@ -204,8 +223,8 @@ def test_check_finds_a_teammates_assistant_for_the_same_call_only(world) -> None
                                                                 "starts_at": START.isoformat()}).json()
     assert other_call["assistants"] == []
     assert ben.post("/v1/call-coordination/check", json={"meeting_url": "https://example.com/x"}).json()["supported"] is False
-    # Members cannot schedule, so they cannot run the pre-scheduling check either.
-    assert _as(world, "cara").post("/v1/call-coordination/check", json={"meeting_url": LINK}).status_code == 403
+    # Members may now schedule their own assistant and check for a teammate's assistant first.
+    assert _as(world, "cara").post("/v1/call-coordination/check", json={"meeting_url": LINK}).status_code == 200
 
 
 def test_second_schedule_asks_both_to_decide_and_is_deduped(world) -> None:

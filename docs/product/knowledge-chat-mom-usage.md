@@ -6,6 +6,16 @@ Choose a named knowledge base, then use **Ask AI** for a saved conversation, **W
 
 The chat model picker lists workspace-scoped text providers without exposing credentials. OpenAI and OpenRouter profiles fetch a live model catalog server-side, cached for ten minutes. A selected model is checked against that catalog before a call; custom compatible endpoints use their configured model. For OpenAI chat, `gpt-6-luna` is suggested when listed; an existing saved MOM default is **not** silently changed. Chat model choice applies to that browser session, while each saved assistant message records the model actually used.
 
+## Workspace sharing and notifications
+
+Knowledge bases can be private, shared with selected teammates, or shared with everyone in the current workspace. Members can select a base shared with them when scheduling their own assistant; the meeting's transcript and approved minutes then contribute to that base. Viewers can read and ask questions, but cannot schedule assistants. Access to a shared base does not grant control of another person's assistant or expose private chat conversations.
+
+The notification center has All updates, Personal, and Workspace feeds. Knowledge-base sharing changes, revocations and deletion, meeting sharing changes, MOM-version sharing and approval, and workspace role changes create recipient-specific updates. Workspace-wide sharing sends a separate notification and branded email to each member of that workspace, not to the user's other workspaces. Reading or clearing a notification never clears it for another person; feed-scoped actions leave the other feed intact.
+
+Access-change emails are saved in the PostgreSQL outbox alongside the sharing change. The background leader sends them through the existing Resend configuration, using individual recipients and an embedded Meetings AI logo. Failed sends retry without undoing access changes. Membership is checked again before sending; obsolete pending grants are cancelled after newer sharing changes. No historical sharing backfill or bulk announcement occurs on deployment. Links preserve the target workspace through login. API acceptance is not proof of inbox delivery.
+
+This feature adds schema version 36 (`notification_emails`). Upgrade the API before the web client. A rollback API must also understand schema 36, because older builds refuse a newer database version; do not downgrade a production database to roll back this feature.
+
 ## MOM formats
 
 At meeting creation or in its MOM panel, choose balanced minutes, decisions/actions, client recap, discovery notes, or custom focus. Organizer instructions and up to eight named focus fields guide the next draft. Supported focus fields become labelled discussion points; the transcript remains the evidence source, and unsupported content should be omitted. Changing the format after a draft is generated requires regeneration. Sent MOMs remain locked.

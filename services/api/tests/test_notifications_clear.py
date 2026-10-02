@@ -140,7 +140,7 @@ def test_members_and_viewers_clear_only_their_own(tmp_path, monkeypatch) -> None
             accept_invite(client, invited, "a-very-long-new-password")
             cleared = client.delete("/v1/notifications")
             assert cleared.status_code == 200, role
-            assert cleared.json() == {"cleared": 1, "unread_count": 0}
+            assert cleared.json() == {"cleared": 2, "unread_count": 0}  # invitation + explicit notification
             assert client.delete("/v1/notifications", params={"read_only": True}).status_code == 200
             client.post("/v1/auth/logout")
 

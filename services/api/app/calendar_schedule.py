@@ -91,9 +91,10 @@ class CalendarScheduleService:
 
     def list(self, actor: Actor) -> list[CalendarSchedulePublic]:
         with self.database.session_factory() as session:
-            rows = session.execute(select(CalendarScheduleRow).where(
-                CalendarScheduleRow.organization_id == str(actor.organization_id),
-            ).order_by(CalendarScheduleRow.starts_at.desc())).scalars().all()
+            query = select(CalendarScheduleRow).where(CalendarScheduleRow.organization_id == str(actor.organization_id))
+            if not actor.is_admin:
+                query = query.where(CalendarScheduleRow.user_id == str(actor.user_id))
+            rows = session.execute(query.order_by(CalendarScheduleRow.starts_at.desc())).scalars().all()
             moved = first_moves(session, str(actor.organization_id), meeting_ids=[row.meeting_id for row in rows])
             return [_public(row, moved, self._checked(row.meeting_id)) for row in rows]
 
@@ -169,7 +170,7 @@ class CalendarScheduleService:
         self._assert_not_imported(actor, event, payload.coordination)
         meeting = self.meetings.create(payload.meeting.model_copy(update={
             "meeting_url": event.meeting_url, "title": payload.meeting.title or event.title,
-        }))
+        }), actor)
         self._save_source(actor, meeting.id, event)
         self.coordination.record_owner(actor.organization_id, meeting.id, actor.user_id)
         try:
@@ -203,7 +204,7 @@ class CalendarScheduleService:
             "meeting_url": event.meeting_url,
             "title": payload.meeting.title or event.title,
         })
-        meeting = self.meetings.create(meeting_payload)
+        meeting = self.meetings.create(meeting_payload, actor)
         self._save_source(actor, meeting.id, event)
         with self.database.session_factory.begin() as session:
             row = CalendarScheduleRow(
@@ -231,7 +232,7 @@ class CalendarScheduleService:
             raise CalendarScheduleError("schedule at least one minute ahead, or send the assistant now")
         if ends_at <= starts_at or ends_at > starts_at + timedelta(hours=12):
             raise CalendarScheduleError("scheduled end must be after the start and within 12 hours")
-        meeting = self.meetings.create(payload.meeting)
+        meeting = self.meetings.create(payload.meeting, actor)
         with self.database.session_factory.begin() as session:
             row = CalendarScheduleRow(
                 meeting_id=str(meeting.id), organization_id=str(actor.organization_id),

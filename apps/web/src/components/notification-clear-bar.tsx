@@ -11,7 +11,7 @@ const confirmCopy: Record<ClearScope, { question: string; action: string; busy: 
 };
 
 /** Footer of the notification panel: clear read or all notifications, each behind an inline confirmation. */
-export function NotificationClearBar({ hasRead, onClear }: { hasRead: boolean; onClear(readOnly: boolean): Promise<boolean> }) {
+export function NotificationClearBar({ hasRead, onClear, audience = "all" }: { hasRead: boolean; onClear(readOnly: boolean): Promise<boolean>; audience?: "all" | "personal" | "workspace" }) {
   const [confirming, setConfirming] = useState<ClearScope | null>(null);
   const [busy, setBusy] = useState(false);
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -37,7 +37,7 @@ export function NotificationClearBar({ hasRead, onClear }: { hasRead: boolean; o
   if (confirming) {
     const copy = confirmCopy[confirming];
     return <footer className="notification-panel-foot confirming" role="group" aria-label="Confirm clearing notifications">
-      <p className="notification-clear-question">{copy.question}</p>
+      <p className="notification-clear-question">{copy.question}{audience !== "all" ? ` Only your ${audience} updates in this workspace will be cleared.` : ""}</p>
       <div className="button-group">
         <button ref={cancelRef} type="button" className="button secondary sm" disabled={busy} onClick={cancel}>Cancel</button>
         <button type="button" className="button danger sm" disabled={busy} onClick={() => void confirm(confirming)}>{busy ? copy.busy : copy.action}</button>

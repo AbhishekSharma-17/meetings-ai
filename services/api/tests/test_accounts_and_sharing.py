@@ -48,6 +48,10 @@ def test_invite_link_and_sharing_limits_member_access(tmp_path, monkeypatch) -> 
         accept_invite(client, invited.json(), "a-very-long-new-password")
         assert client.get("/v1/auth/me").json()["must_change_password"] is False
         assert client.get("/v1/knowledge-bases").json() == []
+        assert client.post("/v1/meetings", json={
+            "meeting_url": "https://meet.google.com/xyz-abcd-efg", "knowledge_enabled": True,
+            "knowledge_base_id": private_base["id"],
+        }).status_code == 404
         assert client.get(f"/v1/knowledge-bases/{private_base['id']}/map").status_code == 404
         assert client.get(f"/v1/meetings/{meeting_id}").status_code == 404
         assert client.get("/v1/provider-profiles").status_code == 403
@@ -93,6 +97,16 @@ def test_invite_link_and_sharing_limits_member_access(tmp_path, monkeypatch) -> 
         assert result.json()["sources"][0]["segment_id"] == "s1"
         assert client.get(f"/v1/meetings/{meeting_id}/transcript").status_code == 200
         assert client.get(f"/v1/meetings/{meeting_id}").status_code == 200
+        contributed = client.post("/v1/meetings", json={
+            "meeting_url": "https://meet.google.com/xyz-abcd-efg", "title": "Team contribution",
+            "knowledge_enabled": True, "knowledge_base_id": private_base["id"],
+        })
+        assert contributed.status_code == 201
+        assert contributed.json()["knowledge_base_id"] == private_base["id"]
+        assert client.post(f"/v1/meetings/{meeting_id}/stop").status_code == 403
+        assert client.patch(f"/v1/meetings/{contributed.json()['id']}/knowledge", json={
+            "knowledge_enabled": True, "knowledge_base_id": private_base["id"],
+        }).status_code == 200
         client.post("/v1/auth/logout")
         client.post("/v1/auth/login", json={
             "email": "developer@genaiprotos.com", "password": "owner-password-for-test",

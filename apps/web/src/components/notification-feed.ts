@@ -50,7 +50,7 @@ export function relativeTime(value: string, now = Date.now()): string {
  * focus (paused while the tab is hidden); loads the list when the panel opens; reports newly
  * arrived success/danger notifications once each so the shell can show a toast.
  */
-export function useNotificationFeed(identity: string, open: boolean, onArrived: (item: AppNotification) => void) {
+export function useNotificationFeed(identity: string, open: boolean, onArrived: (item: AppNotification) => void, scope?: "personal" | "workspace") {
   const [unread, setUnread] = useState(0);
   const [items, setItems] = useState<AppNotification[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -59,12 +59,16 @@ export function useNotificationFeed(identity: string, open: boolean, onArrived: 
   const seen = useRef<Set<string> | null>(null);
   const lastUnread = useRef<number | null>(null);
   const arrived = useRef(onArrived);
+  const selection = `${identity}:${scope ?? "all"}`;
+  const currentSelection = useRef(selection);
+  useEffect(() => { currentSelection.current = selection; }, [selection]);
   useEffect(() => { arrived.current = onArrived; });
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const page = await notificationService.list({ limit: PAGE_SIZE });
+      const page = await notificationService.list({ limit: PAGE_SIZE, scope });
+      if (currentSelection.current !== selection) return null;
       setItems(page.items); setCursor(page.next_cursor); setUnread(page.unread_count); setError(null);
       lastUnread.current = page.unread_count;
       return page.items;
@@ -72,7 +76,7 @@ export function useNotificationFeed(identity: string, open: boolean, onArrived: 
       setError("Notifications could not be loaded.");
       return null;
     } finally { setLoading(false); }
-  }, []);
+  }, [scope, selection]);
 
   const announceNew = useCallback(async () => {
     const latest = await notificationService.list({ limit: 10 }).catch(() => null);
@@ -122,12 +126,13 @@ export function useNotificationFeed(identity: string, open: boolean, onArrived: 
     if (!cursor) return;
     setLoading(true);
     try {
-      const page = await notificationService.list({ limit: PAGE_SIZE, cursor });
+      const page = await notificationService.list({ limit: PAGE_SIZE, cursor, scope });
+      if (currentSelection.current !== selection) return;
       setItems((current) => [...current, ...page.items.filter((item) => !current.some((known) => known.id === item.id))]);
       setCursor(page.next_cursor);
     } catch { setError("More notifications could not be loaded."); }
     finally { setLoading(false); }
-  }, [cursor]);
+  }, [cursor, scope, selection]);
 
   const markRead = useCallback((item: AppNotification) => {
     if (item.read_at) return;
@@ -147,8 +152,11 @@ export function useNotificationFeed(identity: string, open: boolean, onArrived: 
     const readAt = new Date().toISOString();
     setItems((current) => current.map((item) => item.read_at ? item : { ...item, read_at: readAt }));
     setUnread(0); lastUnread.current = 0;
-    try { await notificationService.markAllRead(); } catch { setError("Could not mark notifications as read."); }
-  }, []);
+    try {
+      const remaining = await notificationService.markAllRead(scope);
+      setUnread(remaining); lastUnread.current = remaining;
+    } catch { setError("Could not mark notifications as read."); void load(); }
+  }, [scope, load]);
 
   const dismiss = useCallback((item: AppNotification) => {
     setItems((current) => current.filter((candidate) => candidate.id !== item.id));
@@ -159,7 +167,7 @@ export function useNotificationFeed(identity: string, open: boolean, onArrived: 
   /** Clears everything (or only read items) on the server, then shows what is left. Resolves false on failure. */
   const clear = useCallback(async (readOnly: boolean): Promise<boolean> => {
     try {
-      const result = await notificationService.clear({ readOnly });
+      const result = await notificationService.clear({ readOnly, scope });
       setUnread(result.unread_count); lastUnread.current = result.unread_count; setError(null);
       if (!readOnly) { setItems([]); setCursor(null); return true; }
       setItems((current) => current.filter((item) => !item.read_at));
@@ -169,7 +177,7 @@ export function useNotificationFeed(identity: string, open: boolean, onArrived: 
       setError(readOnly ? "Read notifications could not be cleared. Try again." : "Notifications could not be cleared. Try again.");
       return false;
     }
-  }, [load]);
+  }, [load, scope]);
 
   return { unread, items, hasMore: Boolean(cursor), loading, error, loadMore, markRead, markAllRead, dismiss, clear, reload: load };
 }

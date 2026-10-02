@@ -28,6 +28,7 @@ from .database import (
     Database,
     MeetingCoverageRow,
     NotificationRow,
+    NotificationEmailRow,
     OrganizationMembershipRow,
 )
 from .time_display import TimePreferences
@@ -50,6 +51,7 @@ PersonalText: TypeAlias = str | Callable[[TimePreferences], str]
 class NotificationPublic(BaseModel):
     id: UUID
     kind: str
+    scope: Literal["personal", "workspace"] = "personal"
     severity: Severity
     title: str
     body: str | None = None
@@ -100,6 +102,7 @@ def _decode_cursor(cursor: str) -> tuple[datetime, str] | None:
 def _public(row: NotificationRow) -> NotificationPublic:
     return NotificationPublic(
         id=UUID(row.id), kind=row.kind, severity=row.severity if row.severity in SEVERITIES else "info",
+        scope="workspace" if row.kind.startswith("workspace.") else "personal",
         title=row.title, body=row.body, link_view=row.link_view, link_id=row.link_id,
         meeting_id=UUID(row.meeting_id) if row.meeting_id else None,
         created_at=_utc(row.created_at), read_at=_utc(row.read_at) if row.read_at else None,
@@ -109,6 +112,36 @@ def _public(row: NotificationRow) -> NotificationPublic:
 class NotificationService:
     def __init__(self, database: Database) -> None:
         self.database = database
+
+    def access_notice(self, session, organization_id: str, *, user_ids: Iterable[str],
+                      kind: str, title: str, body: str, scope: Literal["personal", "workspace"] = "personal",
+                      link_view: str | None = None, link_id: str | None = None, send_email: bool = True) -> int:
+        """Atomically save access alerts and email jobs in the caller's access-change transaction.
+
+        Workspace announcements are separate copies: read/dismiss is personal, never global.
+        Membership is checked again before sending, including after a server restart.
+        """
+        recipients = session.execute(select(OrganizationMembershipRow.user_id).where(
+            OrganizationMembershipRow.organization_id == organization_id,
+            OrganizationMembershipRow.user_id.in_(set(user_ids)),
+        )).scalars().all()
+        now = datetime.now(UTC)
+        for user_id in set(recipients):
+            notice_id = str(uuid4())
+            session.add(NotificationRow(
+                id=notice_id, organization_id=organization_id, user_id=user_id,
+                kind=f"workspace.{kind}" if scope == "workspace" else kind,
+                severity="info", title=title[:TITLE_LIMIT], body=body[:BODY_LIMIT],
+                link_view=link_view, link_id=link_id, meeting_id=None,
+                dedupe_key=f"access:{organization_id}:{notice_id}", created_at=now, read_at=None,
+            ))
+            if send_email:
+                session.add(NotificationEmailRow(
+                    id=notice_id, organization_id=organization_id, user_id=user_id,
+                    title=title[:TITLE_LIMIT], body=body[:BODY_LIMIT], link_view=link_view, link_id=link_id,
+                    status="pending", attempts=0, next_retry_at=now, last_error=None, created_at=now, sent_at=None,
+                ))
+        return len(set(recipients))
 
     # ----- emitting ------------------------------------------------------------------------
     def notify(
@@ -163,6 +196,14 @@ class NotificationService:
                 # dedupe key first only skips that recipient.
                 with self.database.session_factory.begin() as session:
                     session.add(row)
+                    if kind == "meeting.shared":
+                        session.add(NotificationEmailRow(
+                            id=row.id, organization_id=organization_id, user_id=user_id,
+                            title=row.title, body=row.body or "A teammate shared a meeting with you.",
+                            link_view=row.link_view, link_id=row.link_id,
+                            status="pending", attempts=0, next_retry_at=now, last_error=None,
+                            created_at=now, sent_at=None,
+                        ))
                 created += 1
             except IntegrityError:
                 continue
@@ -227,10 +268,18 @@ class NotificationService:
         return (NotificationRow.organization_id == str(actor.organization_id),
                 NotificationRow.user_id == str(actor.user_id))
 
+    @staticmethod
+    def _scope(scope):
+        if scope == "workspace":
+            return (NotificationRow.kind.startswith("workspace."),)
+        if scope == "personal":
+            return (~NotificationRow.kind.startswith("workspace."),)
+        return ()
+
     def list(self, actor: Actor, *, unread_only: bool = False, limit: int = 30,
-             cursor: str | None = None) -> NotificationPage:
+             cursor: str | None = None, scope: Literal["personal", "workspace"] | None = None) -> NotificationPage:
         limit = max(1, min(limit, MAX_PAGE))
-        conditions = list(self._mine(actor))
+        conditions = list(self._mine(actor) + self._scope(scope))
         if unread_only:
             conditions.append(NotificationRow.read_at.is_(None))
         position = _decode_cursor(cursor) if cursor else None
@@ -261,10 +310,10 @@ class NotificationService:
                 row.read_at = datetime.now(UTC)
             return _public(row)
 
-    def mark_all_read(self, actor: Actor) -> int:
+    def mark_all_read(self, actor: Actor, *, scope=None) -> int:
         with self.database.session_factory.begin() as session:
             result = session.execute(update(NotificationRow).where(
-                *self._mine(actor), NotificationRow.read_at.is_(None),
+                *self._mine(actor), *self._scope(scope), NotificationRow.read_at.is_(None),
             ).values(read_at=datetime.now(UTC)))
             return int(result.rowcount or 0)
 
@@ -275,9 +324,9 @@ class NotificationService:
                 raise NotificationNotFoundError("notification not found")
             session.delete(row)
 
-    def clear(self, actor: Actor, *, read_only: bool = False) -> int:
+    def clear(self, actor: Actor, *, read_only: bool = False, scope=None) -> int:
         """Delete this person's notifications in the actor's workspace; ``read_only`` keeps unread ones."""
-        conditions = list(self._mine(actor))
+        conditions = list(self._mine(actor) + self._scope(scope))
         if read_only:
             conditions.append(NotificationRow.read_at.is_not(None))
         with self.database.session_factory.begin() as session:

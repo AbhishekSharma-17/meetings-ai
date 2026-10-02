@@ -1265,8 +1265,8 @@ export const calendarChangeService = {
 };
 
 export const notificationService = {
-  list(options: { unread?: boolean; limit?: number; cursor?: string | null } = {}): Promise<NotificationPageT> {
-    return api<NotificationPageT>(`/v1/notifications${usageQuery({}, { unread: options.unread ? "true" : null, limit: options.limit ?? 30, cursor: options.cursor ?? null })}`);
+  list(options: { unread?: boolean; limit?: number; cursor?: string | null; scope?: "personal" | "workspace" } = {}): Promise<NotificationPageT> {
+    return api<NotificationPageT>(`/v1/notifications${usageQuery({}, { unread: options.unread ? "true" : null, limit: options.limit ?? 30, cursor: options.cursor ?? null, scope: options.scope ?? null })}`);
   },
   async unreadCount(): Promise<number> {
     return (await api<{ unread_count: number }>("/v1/notifications/unread-count")).unread_count;
@@ -1274,15 +1274,15 @@ export const notificationService = {
   markRead(id: string): Promise<AppNotificationT> {
     return api<AppNotificationT>(`/v1/notifications/${id}/read`, { method: "POST" });
   },
-  async markAllRead(): Promise<number> {
-    return (await api<{ unread_count: number }>("/v1/notifications/read-all", { method: "POST" })).unread_count;
+  async markAllRead(scope?: "personal" | "workspace"): Promise<number> {
+    return (await api<{ unread_count: number }>(`/v1/notifications/read-all${scope ? `?scope=${scope}` : ""}`, { method: "POST" })).unread_count;
   },
   remove(id: string): Promise<void> {
     return api<void>(`/v1/notifications/${id}`, { method: "DELETE" });
   },
   /** Clears the signed-in person's notifications in this workspace; `readOnly` keeps unread ones. */
-  clear(options: { readOnly?: boolean } = {}): Promise<{ cleared: number; unread_count: number }> {
-    return api<{ cleared: number; unread_count: number }>(`/v1/notifications${options.readOnly ? "?read_only=true" : ""}`, { method: "DELETE" });
+  clear(options: { readOnly?: boolean; scope?: "personal" | "workspace" } = {}): Promise<{ cleared: number; unread_count: number }> {
+    return api<{ cleared: number; unread_count: number }>(`/v1/notifications${usageQuery({}, { read_only: options.readOnly ? "true" : null, scope: options.scope ?? null })}`, { method: "DELETE" });
   },
 };
 

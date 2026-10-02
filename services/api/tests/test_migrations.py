@@ -31,6 +31,25 @@ def test_fresh_database_records_each_version_and_is_idempotent(tmp_path) -> None
     database.engine.dispose()
 
 
+def test_v35_upgrade_adds_email_outbox_without_changing_existing_notifications(tmp_path):
+    database = _database(tmp_path, "email-outbox-upgrade.db")
+    database.migrate()
+    with database.engine.begin() as connection:
+        connection.execute(text("INSERT INTO notifications (id, organization_id, user_id, kind, severity, title, created_at) VALUES (:id, :org, :user, 'test', 'info', 'Existing alert', :now)"), {
+            "id": "00000000-0000-4000-8000-000000000099",
+            "org": "00000000-0000-4000-8000-000000000001",
+            "user": "00000000-0000-4000-8000-000000000002", "now": datetime.now(UTC),
+        })
+        connection.execute(text("DROP TABLE notification_emails"))
+        connection.execute(text("DELETE FROM schema_version WHERE version=36"))
+    database.migrate()
+    database.migrate()
+    with database.engine.connect() as connection:
+        assert connection.execute(text("SELECT title FROM notifications")).scalar_one() == "Existing alert"
+        assert connection.execute(text("SELECT COUNT(*) FROM notification_emails")).scalar_one() == 0
+    database.engine.dispose()
+
+
 def test_version_three_upgrade_preserves_existing_rows(tmp_path) -> None:
     database = _database(tmp_path)
     with database.engine.begin() as connection:
@@ -132,7 +151,7 @@ def test_personal_mom_upgrade_preserves_existing_schema_and_data(tmp_path, previ
         assert connection.execute(text("SELECT policy FROM provider_defaults WHERE capability='transcription'")).scalar_one() == "cloud_only"
         assert connection.execute(text("SELECT COUNT(*) FROM minutes_versions")).scalar_one() == 0
         assert connection.execute(text("SELECT COUNT(*) FROM minutes_version_access")).scalar_one() == 0
-        assert connection.execute(text("SELECT MAX(version) FROM schema_version")).scalar_one() == 35
+        assert connection.execute(text("SELECT MAX(version) FROM schema_version")).scalar_one() == Database.SCHEMA_VERSION
     database.engine.dispose()
 
 

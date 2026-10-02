@@ -67,7 +67,7 @@ class MeetingService:
         self.stt_signing_key = stt_signing_key
         self.knowledge_bases = knowledge_bases
 
-    def create(self, payload: MeetingCreate) -> Meeting:
+    def create(self, payload: MeetingCreate, actor=None) -> Meeting:
         meeting_url = str(payload.meeting_url)
         parsed = parse_meeting_url(meeting_url)
         if parsed is None:
@@ -79,7 +79,7 @@ class MeetingService:
             )
         platform, native_id = parsed
         if payload.knowledge_base_id and self.knowledge_bases:
-            self.knowledge_bases.get(payload.knowledge_base_id)
+            self.knowledge_bases.get(payload.knowledge_base_id, actor)
         require_groups = getattr(self.repository, "require_recipient_groups", None)
         if payload.delivery_settings.internal_group_ids and require_groups:
             try:

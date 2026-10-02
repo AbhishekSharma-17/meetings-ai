@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import select, update
 from meetings_contracts import MeetingMinutesDraft, MeetingTranscriptSegment
 
-from app.database import (MeetingCoverageRow, MeetingRow, MinutesVersionRow, MinutesVersionAccessRow)
+from app.database import (MeetingCoverageRow, MeetingRow, MinutesVersionRow, MinutesVersionAccessRow, NotificationEmailRow, NotificationRow)
 from app.tenant import tenant_scope
 from app.minutes_service import MinutesGenerationError
 from test_call_coordination import world, _as, LINK
@@ -98,6 +98,11 @@ def test_selected_sharing_requires_approval_and_grants_no_transcript(world, sour
 
 def test_workspace_sharing_and_edit_invalidates_review(world, source):
     item = share(world, approve(world, generate(world, create(world, source))), "workspace")
+    with world["app"].state.database.session_factory() as session:
+        notices = session.execute(select(NotificationRow).where(NotificationRow.link_id == item["id"])).scalars().all()
+        jobs = session.execute(select(NotificationEmailRow).where(NotificationEmailRow.link_id == item["id"])).scalars().all()
+        assert notices and all(notice.kind == "workspace.minutes.access_changed" for notice in notices)
+        assert {job.user_id for job in jobs} == {world[who] for who in ("asha", "ben", "cara", "dan")}
     for who in ("asha", "ben", "dan"):
         assert _as(world, who).get(f"/v1/minutes-versions/{item['id']}").status_code == 200
     response = _as(world, "cara").patch(f"/v1/minutes-versions/{item['id']}", json={"revision": item["revision"],

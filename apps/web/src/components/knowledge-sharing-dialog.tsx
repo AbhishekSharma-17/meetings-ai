@@ -11,8 +11,8 @@ export type Visibility = "private" | "organization" | "specific";
 
 const choices: { value: Visibility; label: string; hint: string; icon: typeof Lock }[] = [
   { value: "private", label: "Private to creator and admins", hint: "Only you and workspace admins can browse or ask.", icon: Lock },
-  { value: "organization", label: "Everyone in this organization", hint: "Every member of this workspace can browse and ask.", icon: Building2 },
-  { value: "specific", label: "Specific teammates", hint: "Choose exactly who can browse and ask.", icon: Users },
+  { value: "organization", label: "Everyone in this workspace", hint: "Members can browse, ask questions and add relevant meetings. Everyone gets a workspace notification and email.", icon: Building2 },
+  { value: "specific", label: "Specific teammates", hint: "Selected people can browse, ask questions and add relevant meetings. Access changes are sent privately in the app and by email.", icon: Users },
 ];
 
 export function KnowledgeSharingDialog({ open, onOpenChange, baseName, visibility, onVisibility, userIds, onUserIds, members, currentUserId, busy, error, onSave }: {
@@ -37,7 +37,7 @@ export function KnowledgeSharingDialog({ open, onOpenChange, baseName, visibilit
       <Dialog.Popup className="dialog knowledge-sharing-dialog">
         <Dialog.Close className="close-button" aria-label="Close sharing"><X /></Dialog.Close>
         <Dialog.Title>Share {baseName}</Dialog.Title>
-        <Dialog.Description className="dialog-intro">Access is checked on every search, answer and source link.</Dialog.Description>
+        <Dialog.Description className="dialog-intro">Sharing includes this base’s meeting transcripts and approved minutes. It only applies within this workspace. Viewers can read and ask questions but cannot schedule assistants.</Dialog.Description>
         <fieldset className="dialog-body">
           <legend className="sr-only">Access</legend>
           {choices.map((choice) => <label key={choice.value} className="choice-card"><input type="radio" name="sharing" checked={visibility === choice.value} onChange={() => onVisibility(choice.value)} /><choice.icon className="choice-icon" aria-hidden="true" /><span><b>{choice.label}</b><small>{choice.hint}</small></span></label>)}

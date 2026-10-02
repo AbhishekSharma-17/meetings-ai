@@ -839,6 +839,7 @@ export type NotificationLinkView = "meeting" | "prep" | "knowledge" | "workspace
 export type AppNotification = {
   id: string;
   kind: string;
+  scope?: "personal" | "workspace";
   severity: NotificationSeverity;
   title: string;
   body: string | null;

@@ -139,7 +139,7 @@ def test_members_and_viewers_reach_their_own_notifications(tmp_path, monkeypatch
         accept_invite(client, invited, "a-very-long-new-password")
         page = client.get("/v1/notifications")
         assert page.status_code == 200
-        assert [item["title"] for item in page.json()["items"]] == ["For the viewer"]
+        assert [item["title"] for item in page.json()["items"]] == ["For the viewer", "Welcome to GenAI Protos"]
         note_id = page.json()["items"][0]["id"]
         assert client.post(f"/v1/notifications/{note_id}/read").status_code == 200
         assert client.post("/v1/notifications/read-all").status_code == 200

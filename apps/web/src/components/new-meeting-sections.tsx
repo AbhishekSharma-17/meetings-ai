@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { Collapsible } from "@base-ui/react/collapsible";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Users, Lock } from "lucide-react";
 import type { CalendarEvent, KnowledgeBase, Team, WorkspaceMember } from "@/lib/types";
 import { ChipInput } from "./ui/chip-input";
 import { EmailChips, mergeEmails, PersonChips } from "./ui/email-chips";
@@ -59,13 +59,14 @@ export function KnowledgeOptions({ disabled, bases, basesError, enabled, onEnabl
     <div className="nm-knowledge-fields">
       <div className="field-row">
         <UiSelect id="knowledge-base" label="Knowledge base" value={selectedBaseId} onChange={onSelectBase} disabled={disabled}
-          options={[{ value: "", label: "No named knowledge base" }, ...bases.map((base) => ({ value: base.id, label: base.name }))]} />
+          options={[{ value: "", label: "No named knowledge base" }, ...bases.map((base) => ({ value: base.id, label: base.name, icon: base.visibility === "private" ? <Lock aria-hidden="true" /> : <Users aria-hidden="true" /> }))]} />
         <div className="field">
           <label htmlFor="new-knowledge-base">Or create a knowledge base <span className="optional">optional</span></label>
           <input id="new-knowledge-base" name="new-knowledge-base" maxLength={120} placeholder="e.g. Acme client" value={newBaseName} disabled={disabled} onChange={(event) => onNewBaseNameChange(event.target.value)} />
         </div>
       </div>
       {reusesBase ? <p className="field-hint" role="status">This knowledge base already exists. The meeting will be added to it.</p> : null}
+      <p className="field-hint">You can choose your own knowledge bases or those shared with you. Adding this meeting makes its transcript and approved minutes available to people with access to that base.</p>
       {basesError ? <p className="form-error" role="alert">{basesError}</p> : null}
       <ChipInput id="meeting-tags" name="meeting-tags" kind="tag" label="Knowledge tags" labelSuffix={<span className="optional">optional</span>}
         value={tags} onChange={onTagsChange} placeholder="e.g. discovery, roadmap, Acme" disabled={disabled}

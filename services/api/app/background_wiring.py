@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -14,6 +15,7 @@ from .database import Database
 from .job_kinds import register_job_kinds
 from .notification_events import NotificationEvents
 from .notifications import NotificationService
+from .notification_email_worker import NotificationEmailWorker
 from .routes_jobs import register_job_routes
 from .routes_notifications import register_notification_routes
 
@@ -26,6 +28,11 @@ def install_background_services(
     knowledge_bases: Any, indexing_worker: Any,
 ) -> BackgroundJobService:
     notifications = NotificationService(database)
+    knowledge_bases.notifications = notifications
+    app.state.accounts.notifications = notifications
+    app.state.notification_email_worker = NotificationEmailWorker(
+        database, minutes_service.resend, os.getenv("WEB_ORIGIN", "http://localhost:3020"),
+    )
     events = NotificationEvents(notifications, database)
     # Existing services emit through ``events`` (a no-op until set here); see notification_events.
     for emitter in (meeting_service, minutes_service, post_meeting_worker, calendar_schedule,
@@ -71,6 +78,8 @@ def leadership_callbacks(
     async def lead() -> None:
         await start_background_services(app)
         loops.extend(start_loops())
+        if getattr(app.state, "notification_email_worker", None) is not None:
+            loops.append(asyncio.create_task(app.state.notification_email_worker.run()))
 
     async def step_down() -> None:
         running, loops[:] = list(loops), []

@@ -69,6 +69,54 @@ async function mockApi(page: Page, custom: Custom = () => null) {
 
 const bell = (page: Page) => page.getByRole("button", { name: /^Notifications/ });
 
+test("personal and workspace feeds stay separate and fit on a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const read = new Set<string>();
+  const personal = notification("00000000-0000-4000-8000-000000000901", { scope: "personal", title: "You have access to Acme", link_view: "knowledge" });
+  const broadcast = notification("00000000-0000-4000-8000-000000000902", { scope: "workspace", title: "Acme shared with this workspace", kind: "workspace.knowledge.shared" });
+  const scopes: string[] = [];
+  await mockApi(page, (path, method, route) => {
+    if (path === "/v1/notifications/unread-count") return { json: { unread_count: 2 - read.size } };
+    if (path === "/v1/notifications" && method === "GET") {
+      const scope = new URL(route.request().url()).searchParams.get("scope");
+      scopes.push(scope ?? "all");
+      return { json: { items: [personal, broadcast].filter((item) => !scope || item.scope === scope).map((item) => ({ ...item, read_at: read.has(item.id) ? new Date().toISOString() : null })), next_cursor: null, unread_count: 2 - read.size } };
+    }
+    const match = /^\/v1\/notifications\/([^/]+)\/read$/.exec(path);
+    if (match) { read.add(match[1]); return { json: { ...personal, read_at: new Date().toISOString() } }; }
+    return null;
+  });
+  await page.goto("/");
+  await bell(page).click();
+  const panel = page.getByRole("dialog", { name: "Notifications" });
+  const audiences = panel.getByRole("group", { name: "Notification audience" });
+  await audiences.getByRole("button", { name: "Personal", exact: true }).click();
+  await expect(panel.getByText(personal.title, { exact: true })).toBeVisible();
+  await expect(panel.getByText(broadcast.title, { exact: true })).toHaveCount(0);
+  await panel.getByRole("button", { name: /You have access to Acme/ }).first().click();
+  await expect(panel).toBeVisible();
+  await audiences.getByRole("button", { name: "Workspace", exact: true }).click();
+  await expect(panel.getByText(broadcast.title, { exact: true })).toBeVisible();
+  await expect(panel.getByText(personal.title, { exact: true })).toHaveCount(0);
+  expect(scopes).toContain("personal"); expect(scopes).toContain("workspace");
+  expect(read.has(broadcast.id)).toBe(false);
+  const box = await audiences.boundingBox();
+  expect(box).not.toBeNull(); expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+});
+
+test("an access email opens its knowledge base in the specified workspace", async ({ page }) => {
+  const baseId = "00000000-0000-4000-8000-000000000990";
+  await mockApi(page, (path) => {
+    if (path === "/v1/knowledge-bases") return { json: [{ id: baseId, organization_id: workspace.id, name: "Acme knowledge", visibility: "organization", created_by: owner.user_id, text_profile_id: null, meeting_count: 0, shared_user_ids: [], created_at: new Date().toISOString(), updated_at: new Date().toISOString() }] };
+    if (path === "/v1/notifications/unread-count") return { json: { unread_count: 0 } };
+    return null;
+  });
+  await page.goto(`/?workspace=${workspace.id}&view=knowledge&record=${baseId}`);
+  await expect(page.locator(".topbar-location")).toHaveText("AI knowledge");
+  await expect(page.getByRole("button", { name: /Acme knowledge/ }).first()).toBeVisible();
+  await expect.poll(() => new URL(page.url()).searchParams.has("workspace")).toBe(false);
+});
+
 test("the bell shows unread notifications, marks one read and opens its briefing", async ({ page }) => {
   const read: string[] = [];
   let unread = 2;

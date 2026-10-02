@@ -34,16 +34,18 @@ function NotificationIcon({ item }: { item: AppNotification }) {
 export function NotificationCenter({ identity, onNavigate }: { identity: string; onNavigate(target: NotificationTarget): void }) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState<"all" | "unread">("all");
+  const [audience, setAudience] = useState<"all" | "personal" | "workspace">("all");
   const [query, setQuery] = useState("");
   const [cleared, setCleared] = useState(false);
   const [toast, setToast] = useState<AppNotification | null>(null);
   const closeToast = useCallback(() => setToast(null), []);
-  const feed = useNotificationFeed(identity, open, setToast);
-  const inFilter = filter === "unread" ? feed.items.filter((item) => !item.read_at) : feed.items;
+  const feed = useNotificationFeed(identity, open, setToast, audience === "all" ? undefined : audience);
+  const inAudience = feed.items.filter((item) => audience === "all" || (item.scope ?? "personal") === audience);
+  const inFilter = filter === "unread" ? inAudience.filter((item) => !item.read_at) : inAudience;
   const shown = inFilter.filter((item) => matchesQuery(query, [item.title, item.body]));
   const groups = groupNotifications(shown);
   const searching = Boolean(query.trim()) && inFilter.length > 0;
-  const hasRead = feed.hasMore || feed.items.some((item) => item.read_at);
+  const hasRead = feed.hasMore || inAudience.some((item) => item.read_at);
   const label = feed.unread ? `Notifications, ${feed.unread} unread` : "Notifications";
 
   const openItem = useCallback((item: AppNotification) => {
@@ -77,10 +79,13 @@ export function NotificationCenter({ identity, onNavigate }: { identity: string;
               <Popover.Title className="notification-panel-title">Notifications</Popover.Title>
               <button type="button" className="text-button neutral" disabled={!feed.unread} onClick={() => void feed.markAllRead()}><CheckCheck aria-hidden="true" />Mark all as read</button>
             </header>
+              <div className="segmented notification-audience" role="group" aria-label="Notification audience">
+                {(["all", "personal", "workspace"] as const).map((value) => <button key={value} type="button" aria-pressed={audience === value} onClick={() => { setAudience(value); setQuery(""); }}>{value === "all" ? "All updates" : value === "personal" ? "Personal" : "Workspace"}</button>)}
+              </div>
             <div className="notification-tools">
               <div className="segmented notification-filter" role="group" aria-label="Show notifications">
                 <button type="button" aria-pressed={filter === "all"} onClick={() => setFilter("all")}>All</button>
-                <button type="button" aria-pressed={filter === "unread"} onClick={() => setFilter("unread")}>Unread{feed.unread ? ` · ${feed.unread}` : ""}</button>
+                <button type="button" aria-pressed={filter === "unread"} onClick={() => setFilter("unread")}>Unread{feed.unread && audience === "all" ? ` · ${feed.unread}` : ""}</button>
               </div>
               {feed.items.length || query ? <FilterInput id="notification-search" label="Search notifications" value={query} onChange={setQuery} placeholder="Search" /> : null}
             </div>
@@ -95,7 +100,7 @@ export function NotificationCenter({ identity, onNavigate }: { identity: string;
                 </section>)}
               {feed.hasMore && filter === "all" ? <button type="button" className="button ghost sm block notification-more" disabled={feed.loading} onClick={() => void feed.loadMore()}>{feed.loading ? "Loading…" : "Show older"}</button> : null}
             </div>
-            {feed.items.length ? <NotificationClearBar hasRead={hasRead} onClear={clear} /> : null}
+            {inAudience.length ? <NotificationClearBar key={audience} audience={audience} hasRead={hasRead} onClear={clear} /> : null}
           </Popover.Popup>
         </Popover.Positioner>
       </Popover.Portal>
@@ -121,7 +126,7 @@ function NotificationRow({ item, query, onRead, onOpen, onDismiss }: { item: App
       <span className="notification-copy">
         <span className="notification-title"><Highlight text={item.title} query={query} /></span>
         {item.body ? <span className="notification-body"><Highlight text={item.body} query={query} /></span> : null}
-        <time dateTime={item.created_at} title={formatFullDateTime(item.created_at)}>{relativeTime(item.created_at)}</time>
+        <time dateTime={item.created_at} title={formatFullDateTime(item.created_at)}>{item.scope === "workspace" ? "Workspace · " : ""}{relativeTime(item.created_at)}</time>
       </span>
       {unread ? <span className="notification-dot"><span className="sr-only">Unread</span></span> : null}
     </button>

@@ -15,7 +15,8 @@ from uuid import UUID, uuid4
 
 from meetings_contracts import MeetingMinutesPublic, MinutesStatus
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import and_, select
+from sqlalchemy import and_, select, update
+from .database import NotificationEmailRow
 from sqlalchemy.exc import IntegrityError
 
 from .accounts import Actor
@@ -187,6 +188,17 @@ class MeetingSharingService:
             if row.revoked_at is None:
                 row.revoked_at = datetime.now(UTC)
                 row.revoked_by = str(actor.user_id)
+                if self.notifications is not None:
+                    session.execute(update(NotificationEmailRow).where(
+                        NotificationEmailRow.organization_id == row.organization_id,
+                        NotificationEmailRow.user_id == row.user_id,
+                        NotificationEmailRow.link_id == row.meeting_id,
+                        NotificationEmailRow.status == "pending",
+                    ).values(status="cancelled", last_error="Sharing was revoked before delivery."))
+                    self.notifications.access_notice(
+                        session, row.organization_id, user_ids=[row.user_id], kind="meeting.access_removed",
+                        title="Meeting sharing was removed", body=f"{actor.display_name} removed a meeting shared with you.",
+                    )
         return self.history(actor, meeting_id)
 
     def _announce(self, actor: Actor, meeting_id: UUID, title: str, note: str | None, share_id: str, user_id: str) -> None:

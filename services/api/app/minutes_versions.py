@@ -253,12 +253,17 @@ class MinutesVersionsService:
             if self.minutes.repository.get_transcript_revision(UUID(row.meeting_id)) != row.source_revision:
                 raise MinutesConflictError("transcript changed; generate this version again before approval")
             _validate_references(MeetingMinutesDraft.model_validate(row.content), self.minutes.repository.get_transcript(UUID(row.meeting_id)))
+            previous_status = row.status
             self._advance(session, row, revision, status="approved", approved_at=now())
+            if previous_status != "approved" and row.visibility != "private":
+                self._sharing_notice(session, actor, row, self._audience(session, row), "This shared MOM is approved and ready to read.")
             return self._detail(session, actor, row)
 
     def share(self, actor, version_id, payload):
         with self.database.session_factory.begin() as session:
             row = self._editable(session, actor, version_id, payload.revision)
+            before = self._audience(session, row)
+            old_visibility = row.visibility
             ids = sorted({str(key) for key in payload.user_ids if str(key) != row.creator_id}) if payload.visibility == "specific" else []
             if payload.visibility == "specific" and not ids:
                 raise VersionError("choose at least one teammate", 422)
@@ -271,7 +276,39 @@ class MinutesVersionsService:
             session.add_all([MinutesVersionAccessRow(version_id=row.id, user_id=key, granted_at=now()) for key in ids])
             self._advance(session, row, payload.revision, visibility=payload.visibility)
             session.flush()
+            after = self._audience(session, row)
+            if old_visibility != row.visibility or before != after:
+                self._sharing_notice(session, actor, row, after, "You can read this MOM once its author approves it." if row.status != "approved" else "You can now read this approved MOM.")
+                self._sharing_notice(session, actor, row, before - after, "Your access to this MOM was removed.", removed=True)
             return self._detail(session, actor, row)
+
+    def _audience(self, session, row):
+        if row.visibility == "private":
+            return set()
+        query = select(OrganizationMembershipRow.user_id).where(
+            OrganizationMembershipRow.organization_id == row.organization_id)
+        if row.visibility == "specific":
+            query = query.where(OrganizationMembershipRow.user_id.in_(select(MinutesVersionAccessRow.user_id).where(
+                MinutesVersionAccessRow.version_id == row.id)))
+        return set(session.execute(query).scalars().all())
+
+    def _sharing_notice(self, session, actor, row, audience, message, *, removed=False):
+        notifications = getattr(self.sharing, "notifications", None)
+        if notifications is None:
+            return
+        from .database import NotificationEmailRow
+        session.execute(update(NotificationEmailRow).where(
+            NotificationEmailRow.organization_id == row.organization_id,
+            NotificationEmailRow.link_id == row.id,
+            NotificationEmailRow.user_id.in_(audience),
+            NotificationEmailRow.status == "pending",
+        ).values(status="cancelled", last_error="Superseded by a newer sharing update."))
+        notifications.access_notice(
+            session, row.organization_id, user_ids=audience, kind="minutes.access_changed",
+            scope="workspace" if row.visibility == "workspace" and not removed else "personal",
+            title=f"MOM access updated: {row.label}", body=f"{actor.display_name}: {message}",
+            link_view=None if removed else "shared", link_id=row.id,
+        )
 
     def remove(self, actor, version_id, revision):
         with self.database.session_factory.begin() as session:

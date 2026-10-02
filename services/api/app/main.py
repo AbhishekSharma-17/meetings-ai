@@ -126,6 +126,7 @@ from .research_wiring import install_research
 from .routes_research import research_route_allowed, research_self_audited
 from .stt_route import STTRouteError
 from .tenant import tenant_scope
+from .member_assistants import member_assistant_route
 from .workspace_service import WorkspacePatch, WorkspacePublic, WorkspaceMemberPublic, WorkspaceService
 from .sqlalchemy_repository import SQLAlchemyRepository, TranscriptSegmentNotFoundError, TranscriptReviewConflictError, SpeakerIdentityConflictError, MinutesDeletionConflictError
 from .rate_limit import provider_defaults_limiter, provider_test_limiter
@@ -416,7 +417,10 @@ def create_app(
                     return JSONResponse(status_code=403, content={"detail": "change your temporary password first"})
                 if not actor.is_admin:
                     method = request.method
+                    own_assistant = member_assistant_route(method, path, actor, database)
                     allowed = (
+                        own_assistant
+                        or
                         path == "/v1/auth/change-password"
                         or versions_route_allowed(method, path)
                         or (method == "GET" and path in {"/v1/workspace", "/v1/workspace/members", "/v1/workspaces"})
@@ -472,7 +476,7 @@ def create_app(
                         return JSONResponse(status_code=403, content={"detail": "viewers cannot create knowledge bases"})
                     match = re.fullmatch(r"/v1/meetings/([0-9a-f-]+)(?:/transcript|/leave)?", path)
                     # A meeting whose assistant covers this person (owner or sharing) is readable at any status.
-                    if match and not (method == "GET" and (call_coordination.can_read(actor, match.group(1))
+                    if match and not own_assistant and not (method == "GET" and (call_coordination.can_read(actor, match.group(1))
                                                            or meeting_sharing.can_read(actor, match.group(1)))):
                         try:
                             meeting = repository.get_meeting(UUID(match.group(1)))
@@ -839,9 +843,11 @@ def create_app(
 
     @app.patch("/v1/meetings/{meeting_id}/knowledge", response_model=MeetingPublic)
     def update_meeting_knowledge(
-        meeting_id: UUID, update: MeetingKnowledgeUpdate,
+        meeting_id: UUID, update: MeetingKnowledgeUpdate, request: Request,
     ) -> MeetingPublic:
         try:
+            if update.knowledge_base_id:
+                knowledge_bases.get(update.knowledge_base_id, request.state.actor)
             return meeting_service.to_public(meeting_service.update_knowledge(meeting_id, update))
         except (MeetingNotFoundError, KnowledgeBaseNotFoundError) as exc:
             raise api_error(exc) from exc
@@ -1157,7 +1163,7 @@ def create_app(
     )
     def create_meeting(payload: MeetingCreate, request: Request) -> MeetingPublic:
         try:
-            meeting = meeting_service.create(payload)
+            meeting = meeting_service.create(payload, request.state.actor)
             actor = request.state.actor
             call_coordination.record_owner(actor.organization_id, meeting.id, actor.user_id)
             return meeting_service.to_public(meeting)

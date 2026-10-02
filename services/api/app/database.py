@@ -778,6 +778,25 @@ class NotificationRow(Base):
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class NotificationEmailRow(Base):
+    """Durable, individually addressed access-change emails; no recipient list leakage."""
+
+    __tablename__ = "notification_emails"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    link_view: Mapped[str | None] = mapped_column(String(40))
+    link_id: Mapped[str | None] = mapped_column(String(120))
+    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    next_retry_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class BackgroundJobRow(Base):
     """A tracked background AI job (queued → running → succeeded/failed/cancelled)."""
 
@@ -1285,9 +1304,11 @@ SCHEMA_TABLES_BY_VERSION: dict[int, tuple[str, ...]] = {
     # Version 34 is already reserved by local subscription-connection schemas.
     34: ("chatgpt_connections", "chatgpt_oauth_attempts"),
     35: ("minutes_versions", "minutes_version_access"),
+    36: ("notification_emails",),
 }
 
 SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
+    "notification_emails": ("id", "organization_id", "user_id", "title", "body", "link_view", "link_id", "status", "attempts", "next_retry_at", "last_error", "created_at", "sent_at"),
     "chatgpt_connections": ("id", "organization_id", "user_id", "scope", "label", "subject", "email", "client_id", "credential_ciphertext", "scopes", "purposes", "model", "status", "last_error_code", "expires_at", "created_at", "updated_at"),
     "chatgpt_oauth_attempts": ("state_hash", "organization_id", "user_id", "connection_id", "scope", "label", "client_id", "verifier_ciphertext", "nonce", "redirect_uri", "expires_at"),
     "minutes_versions": ("id", "meeting_id", "organization_id", "creator_id", "label", "perspective", "guidance", "content", "source_revision", "status", "visibility", "revision", "generation_token", "generation_started_at", "provider", "model", "created_at", "updated_at", "approved_at"),
@@ -1449,7 +1470,7 @@ def _migrate_to_v22(connection) -> None:
 class Database:
     """Upgrades known schemas and rejects unknown or incomplete ones."""
 
-    SCHEMA_VERSION = 35
+    SCHEMA_VERSION = 36
 
     def __init__(self, url: str) -> None:
         engine_options: dict[str, object] = {"pool_pre_ping": True}

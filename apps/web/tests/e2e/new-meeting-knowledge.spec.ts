@@ -14,7 +14,7 @@ const base = {
   updated_at: "2026-09-25T00:00:00Z",
 };
 
-async function mockApp(page: Page, options: { firstListEmpty?: boolean; failCreate?: boolean; visibility?: "private" | "organization" | "specific" } = {}) {
+async function mockApp(page: Page, options: { firstListEmpty?: boolean; failCreate?: boolean; role?: "owner" | "member"; visibility?: "private" | "organization" | "specific" } = {}) {
   let baseLists = 0;
   let baseCreates = 0;
   let meetingBody: Record<string, unknown> | null = null;
@@ -26,9 +26,9 @@ async function mockApp(page: Page, options: { firstListEmpty?: boolean; failCrea
     const path = new URL(request.url()).pathname;
     if (path === "/v1/auth/session") return route.fulfill({ json: { authenticated: true } });
     if (path === "/v1/auth/me") return route.fulfill({ json: {
-      user_id: base.created_by, organization_id: base.organization_id,
+      user_id: options.role === "member" ? "00000000-0000-4000-8000-000000000088" : base.created_by, organization_id: base.organization_id,
       email: "developer@genaiprotos.com", display_name: "Workspace owner",
-      role: "owner", must_change_password: false,
+      role: options.role ?? "owner", must_change_password: false,
     } });
     if (path === "/v1/knowledge-bases" && request.method() === "GET") {
       baseLists += 1;
@@ -109,6 +109,20 @@ async function submitWithBaseName(page: Page) {
   await page.getByLabel(/Or create a knowledge base/).fill("mobius_MEET");
   await page.getByRole("button", { name: "Send assistant" }).click();
 }
+
+test("a workspace member can choose a shared base for their own assistant", async ({ page }) => {
+  const state = await mockApp(page, { role: "member", visibility: "organization", failCreate: true });
+  await page.goto("/");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Calendar", exact: true }).click();
+  await page.getByRole("button", { name: "New meeting", exact: true }).click();
+  await page.getByLabel("Meeting link").fill("https://meet.google.com/abc-defg-hij");
+  await page.getByRole("combobox", { name: "Knowledge base", exact: true }).click();
+  await page.getByRole("option", { name: base.name, exact: true }).click();
+  await expect(page.getByText(/those shared with you/)).toBeVisible();
+  await page.getByRole("button", { name: "Send assistant", exact: true }).click();
+  await expect.poll(() => state.meetingBody?.knowledge_base_id).toBe(base.id);
+  expect(state.baseCreates).toBe(0);
+});
 
 test("remembers a successfully scheduled assistant name across dialog closes and reloads", async ({ page }) => {
   const mock = await mockApp(page);
@@ -197,7 +211,7 @@ test("shows and changes sharing for the selected knowledge base", async ({ page 
   await page.getByRole("button", { name: "AI knowledge" }).click();
   await expect(page.getByText("Shared with everyone in this organization")).toBeVisible();
   await page.getByRole("button", { name: "Manage sharing" }).click();
-  await expect(page.getByRole("radio", { name: "Everyone in this organization" })).toBeChecked();
+  await expect(page.getByRole("radio", { name: "Everyone in this workspace" })).toBeChecked();
   await page.getByRole("radio", { name: "Specific teammates" }).check();
   await page.getByRole("dialog").getByRole("checkbox", { name: /Team member/ }).check();
   await page.getByRole("button", { name: "Save sharing" }).click();

@@ -126,6 +126,7 @@ class KnowledgeBaseService:
     def __init__(self, database: Database, repository: object) -> None:
         self.database = database
         self.repository = repository
+        self.notifications = None
 
     def list(self, actor: Actor | None = None) -> list[KnowledgeBasePublic]:
         with self.database.session_factory() as session:
@@ -232,13 +233,32 @@ class KnowledgeBaseService:
 
     def share(self, base_id: UUID, data: KnowledgeShareRequest, actor: Actor | None = None) -> KnowledgeBasePublic:
         with self.database.session_factory.begin() as session:
-            row = self._row(session, base_id, actor)
+            # Serializes concurrent sharing edits; alerts represent committed before/after access.
+            row = session.execute(select(KnowledgeBaseRow).where(
+                KnowledgeBaseRow.id == str(base_id),
+                KnowledgeBaseRow.organization_id == str(self._organization(actor)),
+            ).with_for_update()).scalar_one_or_none()
+            if row is None or not self._can_read(session, row, actor):
+                raise KnowledgeBaseNotFoundError(base_id)
             self._require_manage(row, actor)
             member_ids = set(session.execute(select(OrganizationMembershipRow.user_id).where(
                 OrganizationMembershipRow.organization_id == row.organization_id
             )).scalars().all())
             if any(str(user_id) not in member_ids for user_id in data.user_ids):
                 raise KnowledgeBaseConflictError("sharing target must belong to this workspace")
+            old_ids = set(session.execute(select(KnowledgeBaseAccessRow.user_id).where(
+                KnowledgeBaseAccessRow.knowledge_base_id == row.id,
+            )).scalars().all()) if row.visibility == "specific" else set()
+            new_ids = {str(value) for value in data.user_ids} if data.visibility == "specific" else set()
+            if row.visibility == data.visibility and old_ids == new_ids:
+                return self._public(session, row)
+            old_visibility = row.visibility
+            permanent_ids = set(session.execute(select(OrganizationMembershipRow.user_id).where(
+                OrganizationMembershipRow.organization_id == row.organization_id,
+                OrganizationMembershipRow.role.in_(("owner", "admin")),
+            )).scalars().all()) | {row.created_by}
+            before = (member_ids if old_visibility == "organization" else old_ids) | permanent_ids
+            after = (member_ids if data.visibility == "organization" else new_ids) | permanent_ids
             session.execute(delete(KnowledgeBaseAccessRow).where(KnowledgeBaseAccessRow.knowledge_base_id == row.id))
             if data.visibility == "specific":
                 for user_id in set(data.user_ids):
@@ -248,6 +268,34 @@ class KnowledgeBaseService:
             row.visibility = data.visibility
             row.updated_at = datetime.now(UTC)
             session.flush()
+            if self.notifications is not None:
+                # Replace unsent older access messages with the current sharing decision.
+                from .database import NotificationEmailRow
+                session.execute(update(NotificationEmailRow).where(
+                    NotificationEmailRow.organization_id == row.organization_id,
+                    NotificationEmailRow.link_id == row.id,
+                    NotificationEmailRow.status == "pending",
+                ).values(status="cancelled", last_error="Superseded by a newer sharing update."))
+                by = actor.display_name if actor else "A workspace admin"
+                if data.visibility == "organization":
+                    self.notifications.access_notice(
+                        session, row.organization_id, user_ids=member_ids, kind="knowledge.shared",
+                        scope="workspace", title=f"{row.name} is shared with the workspace",
+                        body=f"{by} shared this knowledge base. You can ask questions about its meetings. Members can add relevant meetings when scheduling an assistant.",
+                        link_view="knowledge", link_id=row.id,
+                    )
+                else:
+                    added = (after - before) | (new_ids - old_ids)
+                    retained = (before & after) - permanent_ids - added
+                    for people, title, body, link in (
+                        (added, f"You have access to {row.name}", f"{by} shared this knowledge base with you. You can ask questions about its meetings. Members can add relevant meetings when scheduling an assistant.", True),
+                        (retained, f"Sharing updated for {row.name}", f"{by} updated sharing for this knowledge base. You still have access.", True),
+                        (before - after, f"Access removed for {row.name}", f"{by} removed your access to this knowledge base. Contact them if you need access again.", False),
+                    ):
+                        self.notifications.access_notice(
+                            session, row.organization_id, user_ids=people, kind="knowledge.access_changed",
+                            title=title, body=body, link_view="knowledge" if link else None, link_id=row.id,
+                        )
             return self._public(session, row)
 
     def delete_base(self, base_id: UUID, actor: Actor | None = None) -> None:
@@ -255,6 +303,24 @@ class KnowledgeBaseService:
         with self.database.session_factory.begin() as session:
             row = self._row(session, base_id, actor)
             self._require_manage(row, actor)
+            if self.notifications is not None:
+                from .database import NotificationEmailRow
+                members = set(session.execute(select(OrganizationMembershipRow.user_id).where(
+                    OrganizationMembershipRow.organization_id == row.organization_id,
+                )).scalars().all())
+                recipients = members if row.visibility == "organization" else set(session.execute(
+                    select(KnowledgeBaseAccessRow.user_id).where(KnowledgeBaseAccessRow.knowledge_base_id == row.id)
+                ).scalars().all())
+                session.execute(update(NotificationEmailRow).where(
+                    NotificationEmailRow.organization_id == row.organization_id,
+                    NotificationEmailRow.link_id == row.id, NotificationEmailRow.status == "pending",
+                ).values(status="cancelled", last_error="Knowledge base was deleted before delivery."))
+                self.notifications.access_notice(
+                    session, row.organization_id, user_ids=recipients, kind="knowledge.deleted",
+                    scope="workspace" if row.visibility == "organization" else "personal",
+                    title=f"{row.name} was deleted",
+                    body="This knowledge base is no longer available. The original meeting records were kept.",
+                )
             meeting_ids = session.execute(select(MeetingKnowledgeBaseRow.meeting_id).where(
                 MeetingKnowledgeBaseRow.knowledge_base_id == row.id,
             )).scalars().all()
