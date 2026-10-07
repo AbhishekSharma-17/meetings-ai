@@ -77,7 +77,7 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
     // Teams and teammates power recipient suggestions; the dialog works without them.
     const loadedTeams = meetingsService.listTeams().catch(() => [] as Team[]);
     void meetingsService.listWorkspaceMembers().then((items) => { if (active) setMembers(items); }).catch(() => undefined);
-    void Promise.all([meetingsService.getCurrentAccount().catch(() => null), loadedTeams, loadedBases]).then(async ([account, teamList, baseList]) => {
+    void Promise.all([meetingsService.getCurrentAccount().catch(() => null), loadedTeams, loadedBases]).then(async ([account, teamList]) => {
       if (!active) return;
       setTeams(teamList);
       if (!account) { setBotName("Meetings AI"); setLoadingName(false); return; }
@@ -88,11 +88,8 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
       if (!active) return;
       setBotName(savedName);
       setLoadingName(false);
-      // Last time's teams and knowledge base, if they still exist. Knowledge stays off until chosen.
+      // Remember recipient teams only. A knowledge base must be chosen for each assistant.
       setGroupIds((current) => current.length ? current : remembered.teamIds.filter((id) => teamList.some((team) => team.id === id)));
-      if (remembered.knowledgeBaseId && baseList.some((base) => base.id === remembered.knowledgeBaseId)) {
-        setSelectedBaseId((current) => current || remembered.knowledgeBaseId);
-      }
     });
     return () => { active = false; };
   }, [open]);
@@ -176,8 +173,7 @@ export function NewMeetingDialog({ open, onClose, onMeetingJoined, calendarSelec
       };
       const remember = () => {
         if (!identity) return;
-        const previous = readSetupDefaults(identity);
-        saveSetupDefaults(identity, { teamIds: deliverySettings.internal_group_ids, knowledgeBaseId: knowledgeEnabled ? knowledgeBaseId ?? "" : previous.knowledgeBaseId });
+        saveSetupDefaults(identity, { teamIds: deliverySettings.internal_group_ids });
         rememberAssistantName(identity, input.botName);
       };
       const shouldSchedule = calendarSelection && new Date(calendarSelection.event.starts_at).getTime() > Date.now() + 60_000;
