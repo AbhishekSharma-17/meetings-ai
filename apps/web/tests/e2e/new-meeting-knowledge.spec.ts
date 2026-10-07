@@ -102,6 +102,55 @@ async function mockApp(page: Page, options: { firstListEmpty?: boolean; failCrea
   return { get baseCreates() { return baseCreates; }, get meetingBody() { return meetingBody; }, get scheduledBody() { return scheduledBody; }, get sharingBody() { return sharingBody; } };
 }
 
+test("new assistants start without a knowledge base even if an older setup remembered one", async ({ page }) => {
+  const state = await mockApp(page, { failCreate: true });
+  await page.addInitScript(({ id, identity }) => {
+    localStorage.setItem(`meetings-ai:new-meeting-knowledge-base:${identity}`, JSON.stringify(id));
+  }, { id: base.id, identity: `${base.organization_id}:${base.created_by}` });
+  await page.goto("/");
+  await page.getByRole("button", { name: "New meeting", exact: true }).click();
+  const picker = page.getByRole("combobox", { name: "Knowledge base", exact: true });
+  await expect(page.getByLabel("Assistant name", { exact: true })).toBeEnabled();
+  await expect(picker).toContainText("No named knowledge base");
+  await expect(page.getByRole("switch", { name: "Add this meeting to AI knowledge" })).not.toBeChecked();
+  await page.getByLabel("Meeting link").fill("https://meet.google.com/abc-defg-hij");
+  await page.getByRole("button", { name: "Send assistant", exact: true }).click();
+  await expect.poll(() => state.meetingBody).toMatchObject({ knowledge_base_id: null, knowledge_enabled: false });
+  await picker.click();
+  await page.getByRole("option", { name: base.name, exact: true }).click();
+  await expect(picker).toContainText(base.name);
+  await expect(page.getByRole("switch", { name: "Add this meeting to AI knowledge" })).toBeChecked();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await page.getByRole("button", { name: "New meeting", exact: true }).click();
+  await expect(page.getByLabel("Assistant name", { exact: true })).toBeEnabled();
+  await expect(picker).toContainText("No named knowledge base");
+  await page.reload();
+  await page.getByRole("button", { name: "New meeting", exact: true }).click();
+  await expect(page.getByLabel("Assistant name", { exact: true })).toBeEnabled();
+  await expect(picker).toContainText("No named knowledge base");
+});
+
+test("a successfully scheduled assistant does not select its knowledge base for the next setup", async ({ page }) => {
+  const state = await mockApp(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "New meeting", exact: true }).click();
+  await page.getByLabel("Meeting link").fill("https://meet.google.com/abc-defg-hij");
+  const picker = page.getByRole("combobox", { name: "Knowledge base", exact: true });
+  await picker.click();
+  await page.getByRole("option", { name: base.name, exact: true }).click();
+  await page.getByLabel("At the meeting start time").check();
+  const tomorrow = new Date(Date.now() + 86_400_000);
+  await page.getByLabel(/Meeting start/).fill(new Date(tomorrow.getTime() - tomorrow.getTimezoneOffset() * 60_000).toISOString().slice(0, 16));
+  await page.getByRole("button", { name: "Schedule assistant", exact: true }).click();
+  await expect.poll(() => state.scheduledBody).toMatchObject({ meeting: { knowledge_base_id: base.id, knowledge_enabled: true } });
+  await expect(page.getByRole("heading", { name: /^Scheduled · the assistant joins/ })).toBeVisible();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Overview", exact: true }).click();
+  await page.getByRole("button", { name: "New meeting", exact: true }).click();
+  await expect(page.getByLabel("Assistant name", { exact: true })).toBeEnabled();
+  await expect(picker).toContainText("No named knowledge base");
+  expect(await page.evaluate((identity) => localStorage.getItem(`meetings-ai:new-meeting-knowledge-base:${identity}`), `${base.organization_id}:${base.created_by}`)).toBeNull();
+});
+
 async function submitWithBaseName(page: Page) {
   await page.goto("/");
   await page.getByRole("button", { name: "New meeting" }).click();
