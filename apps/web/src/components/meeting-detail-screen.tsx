@@ -14,6 +14,7 @@ import { MeetingSharingCard } from "./meeting-sharing-card";
 import { MeetingTranscript, namedSpeakersOf, relativeTime, transcriptSeconds } from "./meeting-transcript";
 import { MeetingPeopleCard } from "./meeting-people-card";
 import { MeetingKnowledgeSettings } from "./meeting-knowledge-settings";
+import { MeetingAutomationCard } from "./meeting-automation-card";
 import { CallCoordinationPanel } from "./call-coordination-panel";
 import { MeetingDetailsCard, MeetingDangerZone, MeetingSourceCard, formatTimestamp } from "./meeting-record-cards";
 import { PageHeader } from "./ui/page-header";
@@ -312,6 +313,7 @@ export function MeetingDetailScreen({ meetingId, focusSegmentId, backLabel = "Al
         {didNotRun && !segments.length ? null : <MeetingTranscript meetingTitle={meeting.title} assistantName={meeting.botName} segments={segments} focusSegmentId={activeFocus} isPolling={pollableStatuses.has(meeting.status)} isLive={meeting.status === "live"} saving={savingSpeaker} onSaveSpeaker={saveSpeaker} onDownload={downloadTranscript} />}
       </div>
       <aside className="record-side" aria-label="Meeting information">
+        <MeetingAutomationCard meetingId={meetingId} onChanged={() => void meetingsService.getCalendarSchedule(meetingId).then(setSchedule).catch(() => undefined)} />
         {inPerson || didNotRun ? null : <CallCoordinationPanel meetingId={meetingId} reloadKey={`${meeting.status}:${schedule?.status ?? ""}`} onChanged={() => void meetingsService.getCalendarSchedule(meetingId).then(setSchedule).catch(() => undefined)} />}
         <MeetingDetailsCard meeting={meeting} route={transcriptionRoute} inPerson={inPerson ? { recordedOn: inPersonSession.session ? recordedOn(inPersonSession.session) : "Recorded in person" } : undefined} />
         <MeetingPeopleCard meetingId={meetingId} participants={participants} assistantName={meeting.botName} namedSpeakers={namedSpeakers} speakerIdentities={speakerIdentities} source={source} onSaveIdentity={saveIdentity} onIdentitiesSaved={setSpeakerIdentities} />

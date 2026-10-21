@@ -30,6 +30,7 @@ from meetings_contracts import (
 )
 
 from .database import (
+    CalendarAutomationOccurrenceRow, MeetingAutomationRow, AutomaticMinutesDeliveryRow,
     CalendarScheduleRow,
     InPersonChunkRow,
     InPersonSessionRow,
@@ -434,7 +435,11 @@ class SQLAlchemyRepository:
             version_ids = select(MinutesVersionRow.id).where(MinutesVersionRow.meeting_id == key)
             session.execute(delete(MinutesVersionAccessRow).where(MinutesVersionAccessRow.version_id.in_(version_ids)))
             session.execute(delete(MinutesVersionRow).where(MinutesVersionRow.meeting_id == key))
+            # Keep an occurrence tombstone so deleting a meeting cannot auto-enrol
+            # its calendar event again, while removing the deleted meeting reference.
+            session.execute(update(CalendarAutomationOccurrenceRow).where(CalendarAutomationOccurrenceRow.meeting_id == key).values(meeting_id=None, status="cancelled", reason="meeting deleted"))
             for model in (
+                MeetingAutomationRow, AutomaticMinutesDeliveryRow,
                 CalendarScheduleRow, MeetingSourceRow, KnowledgeEmbeddingRow, KnowledgeChunkRow, MeetingKnowledgeBaseRow, MeetingKnowledgeSettingsRow, MeetingMomGuidanceRow,
                 MeetingDeliverySettingsRow, PostMeetingJobRow, TranscriptSegmentRow,
                 TranscriptSegmentMetadataRow, TranscriptSpeakerCorrectionRow,
@@ -813,7 +818,7 @@ class SQLAlchemyRepository:
                 job.next_retry_at = None
                 job.last_error = None
 
-    def save_minutes(self, minutes: MeetingMinutes) -> MeetingMinutes:
+    def save_minutes(self, minutes: MeetingMinutes, *, source_revision=None, on_save=None) -> MeetingMinutes:
         self.get_meeting(minutes.meeting_id)
         with self.database.session_factory.begin() as session:
             self._purge_knowledge_embeddings(session, minutes.meeting_id)
@@ -845,6 +850,14 @@ class SQLAlchemyRepository:
                 session.add(evidence)
             evidence.speaker_contributions = [item.model_dump() for item in minutes.speaker_contributions]
             evidence.questions_asked = [item.model_dump() for item in minutes.questions_asked]
+            if source_revision is not None:
+                source = session.get(MinutesSourceRow, str(minutes.meeting_id))
+                if source is None:
+                    source = MinutesSourceRow(meeting_id=str(minutes.meeting_id))
+                    session.add(source)
+                source.transcript_revision = source_revision
+            if on_save is not None:
+                on_save(session, minutes)
         return minutes
 
     def save_email_delivery(self, delivery: EmailDelivery) -> EmailDelivery:

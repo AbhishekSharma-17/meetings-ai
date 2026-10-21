@@ -125,10 +125,11 @@ def register_job_kinds(jobs: BackgroundJobService, *, database: Database, notifi
 
     # ----- minutes draft (workspace-level, per meeting) ------------------------------------
     async def run_minutes(context: JobContext) -> dict[str, Any]:
-        # Same rule as the synchronous endpoint: only a current owner/admin may draft minutes.
-        if not resolve_actor(database, context).is_admin:
-            raise JobFailure("Only workspace owners and admins can draft minutes.", 403)
         meeting_id = UUID(context.payload["meeting_id"])
+        actor = resolve_actor(database, context)
+        from .member_assistants import member_assistant_route
+        if not actor.is_admin and not member_assistant_route("POST", f"/v1/meetings/{meeting_id}/minutes/generate", actor, database):
+            raise JobFailure("Only this meeting's owner or a workspace admin can draft minutes.", 403)
         try:
             minutes_service.require_not_sent(meeting_id)
             meeting = repository.get_meeting(meeting_id)

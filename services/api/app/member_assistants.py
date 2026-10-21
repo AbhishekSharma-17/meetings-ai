@@ -4,7 +4,7 @@ from sqlalchemy import select
 from .database import CalendarScheduleRow, InPersonSessionRow, MeetingCoverageRow, MeetingTenantRow
 
 _CREATE = {"/v1/meetings", "/v1/meetings/schedules", "/v1/calendar/meetings", "/v1/calendar/schedules", "/v1/call-coordination/check"}
-_MEETING = re.compile(r"/v1/meetings/([0-9a-f-]{36})(?:/(join|stop|refresh|knowledge|delivery-settings|mom-guidance|transcription-route|post-meeting-job|participants))?")
+_MEETING = re.compile(r"/v1/meetings/([0-9a-f-]{36})(?:/(join|stop|refresh|knowledge|delivery-settings|mom-guidance|transcription-route|post-meeting-job(?:/retry)?|participants|minutes(?:/(?:generate|approve|send|send-configured|jobs))?))?")
 _SCHEDULE = re.compile(r"/v1/calendar/schedules/([0-9a-f-]{36})(?:/(cancel))?")
 
 
@@ -15,12 +15,15 @@ def member_assistant_route(method, path, actor, database):
         return True
     if method == "GET" and path == "/v1/calendar/schedules":
         return True
+    if method == "GET" and path == "/v1/integrations/resend/status":
+        return True
     match = _MEETING.fullmatch(path)
     if match:
         action = match.group(2)
-        allowed = method == "GET" or method == "POST" and action in {"join", "stop", "refresh"} \
+        allowed = method == "GET" or method == "POST" and action in {"join", "stop", "refresh", "post-meeting-job/retry", "minutes/generate", "minutes/approve", "minutes/send", "minutes/send-configured", "minutes/jobs"} \
             or method == "PATCH" and action == "knowledge" \
-            or method == "PUT" and action in {"delivery-settings", "mom-guidance"}
+            or method == "PUT" and action in {"delivery-settings", "mom-guidance", "minutes"} \
+            or method == "DELETE" and action == "minutes"
     else:
         match = _SCHEDULE.fullmatch(path)
         allowed = bool(match and (method == "GET" or method == "POST" and match.group(2) == "cancel"))
@@ -30,7 +33,7 @@ def member_assistant_route(method, path, actor, database):
         tenant = session.get(MeetingTenantRow, match.group(1))
         if tenant is None or tenant.organization_id != str(actor.organization_id):
             return False
-        if method == "POST" and session.get(InPersonSessionRow, match.group(1)) is not None:
+        if method == "POST" and match.group(2) in {"join", "stop", "refresh"} and session.get(InPersonSessionRow, match.group(1)) is not None:
             return False  # In-person recordings use their own recording controls, not Vexa joins/stops.
         owner = session.execute(select(MeetingCoverageRow.user_id).where(
             MeetingCoverageRow.meeting_id == match.group(1),

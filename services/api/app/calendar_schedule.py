@@ -85,6 +85,7 @@ class CalendarScheduleService:
     watcher: Any = None
     # Call coordination (call_coordination.CallCoordinationService); a no-op unless wired.
     coordination: Any = NO_EVENTS
+    automation: Any = None
 
     def __init__(self, database: Database, calendar: ComposioCalendar, meetings: MeetingService):
         self.database, self.calendar, self.meetings = database, calendar, meetings
@@ -187,24 +188,31 @@ class CalendarScheduleService:
         # Never trust the event URL or start time posted by the browser. Re-read
         # this account's calendar and bind the capture to that source event.
         event = await self._verified_event(actor, payload)
+        return self.create_verified(actor, event, payload.meeting, coordination=payload.coordination)
+
+    def create_verified(self, actor: Actor, event: CalendarEvent, meeting_payload: MeetingCreate,
+                        *, coordination: str | None = None, before_schedule: Any = None) -> tuple[CalendarSchedulePublic, MeetingPublic]:
+        """Schedule an event from an already verified provider batch (never browser event data)."""
         now = datetime.now(UTC)
         if event.starts_at.astimezone(UTC) <= now + timedelta(minutes=1):
             raise CalendarScheduleError("this meeting starts too soon to schedule; use Send assistant now")
-        self._assert_not_imported(actor, event, payload.coordination)
+        self._assert_not_imported(actor, event, coordination)
         with self.database.session_factory() as session:
             existing = session.execute(select(CalendarScheduleRow).where(
                 CalendarScheduleRow.organization_id == str(actor.organization_id),
-                CalendarScheduleRow.connection_id == payload.connection_id,
+                CalendarScheduleRow.connection_id == event.connection_id,
                 CalendarScheduleRow.event_id == event.event_id,
                 CalendarScheduleRow.starts_at == _utc(event.starts_at),
             )).scalar_one_or_none()
             if existing:
                 raise CalendarScheduleError("this calendar event already has a record in this workspace; delete that record before importing it again")
-        meeting_payload = payload.meeting.model_copy(update={
+        meeting_payload = meeting_payload.model_copy(update={
             "meeting_url": event.meeting_url,
-            "title": payload.meeting.title or event.title,
+            "title": meeting_payload.title or event.title,
         })
         meeting = self.meetings.create(meeting_payload, actor)
+        if before_schedule is not None:
+            before_schedule(meeting)
         self._save_source(actor, meeting.id, event)
         with self.database.session_factory.begin() as session:
             row = CalendarScheduleRow(
@@ -217,7 +225,7 @@ class CalendarScheduleService:
             )
             session.add(row)
         self.events.schedule_created(actor.organization_id, meeting.id, meeting.title, event.starts_at)
-        self.coordination.announce(actor, meeting.id, payload.coordination)
+        self.coordination.announce(actor, meeting.id, coordination)
         return _public(row), self.meetings.to_public(meeting)
 
     def create_manual(self, actor: Actor, payload: ManualScheduleCreate) -> tuple[CalendarSchedulePublic, MeetingPublic]:
@@ -322,6 +330,8 @@ class CalendarScheduleService:
                 CalendarScheduleRow.starts_at <= now,
             )).all()
         for organization_id, meeting_id, starts_at, ends_at, provider in rows:
+            if self.automation is not None and not await self.automation.allow_join(meeting_id):
+                continue
             starts_at = starts_at.replace(tzinfo=starts_at.tzinfo or UTC)
             ends_at = ends_at.replace(tzinfo=ends_at.tzinfo or UTC)
             if self.watcher is not None and provider != "manual":
@@ -350,6 +360,8 @@ class CalendarScheduleService:
                     CalendarScheduleRow.starts_at <= now,  # not moved later in the meantime
                 ).values(status="joining", attempts=CalendarScheduleRow.attempts + 1, updated_at=now)).rowcount
             if not claimed:
+                continue
+            if self.automation is not None and not await self.automation.allow_join(meeting_id):
                 continue
             try:
                 with tenant_scope(UUID(organization_id)):

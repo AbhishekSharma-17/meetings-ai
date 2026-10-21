@@ -3,11 +3,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Popover } from "@base-ui/react/popover";
 import { Tabs } from "@base-ui/react/tabs";
-import { CalendarDays, CalendarRange, ChevronLeft, ChevronRight, Mic, Plug, Plus, RefreshCw } from "lucide-react";
+import { CalendarDays, CalendarRange, ChevronLeft, ChevronRight, Mic, Plug, Plus, RefreshCw, Settings2 } from "lucide-react";
 import { meetingsService } from "@/lib/meetings-service";
 import type { CachedCalendarEvent, CalendarConnection, CalendarSchedule, CalendarSnapshot, ScheduledOnDisconnect } from "@/lib/types";
 import type { CalendarSelection } from "./calendar-import-dialog";
 import { CalendarIntegrations } from "./calendar-integrations";
+import { CalendarAutomationPanel } from "./calendar-automation-panel";
 import { CalendarConnectWaiting } from "./calendar-connect-waiting";
 import { SettingsToast, type SettingsNotice } from "./settings-toast";
 import { useCalendarConnect } from "./use-calendar-connect";
@@ -29,7 +30,7 @@ const shortDate: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" }
 
 type CalendarPreferences = {
   startDate: string; endDate: string; selectedDay: string; month: string;
-  accountFilter: string; tab: "calendar" | "integrations"; selectedEventId: string | null;
+  accountFilter: string; tab: "calendar" | "integrations" | "automation"; selectedEventId: string | null;
 };
 
 function validDate(value: unknown): value is string {
@@ -59,7 +60,7 @@ function initialPreferences(storageKey: string): CalendarPreferences {
       selectedDay: validDate(saved.selectedDay) ? saved.selectedDay : fallback.selectedDay,
       month,
       accountFilter: typeof saved.accountFilter === "string" ? saved.accountFilter : "all",
-      tab: saved.tab === "integrations" ? "integrations" : "calendar",
+      tab: saved.tab === "integrations" || saved.tab === "automation" ? saved.tab : "calendar",
       selectedEventId: typeof saved.selectedEventId === "string" ? saved.selectedEventId : null,
     };
   } catch { return fallback; }
@@ -105,7 +106,7 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
 }) {
   const storageKey = `meetings-ai:calendar-view:${calendarIdentity}`;
   const [initial] = useState(() => initialPreferences(storageKey));
-  const [tab, setTab] = useState<"calendar" | "integrations">(initial.tab);
+  const [tab, setTab] = useState<CalendarPreferences["tab"]>(initial.tab);
   const [month, setMonth] = useState(() => new Date(`${initial.month}T12:00:00`));
   const [startDate, setStartDate] = useState(initial.startDate);
   const [endDate, setEndDate] = useState(initial.endDate);
@@ -315,14 +316,15 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
       description="Meetings from your connected calendars, saved between visits."
       actions={<>
         <button type="button" className="button secondary" title={`Sync ${syncScope}`} disabled={syncing || !active.length || !rangeValid} onClick={() => void sync()}><RefreshCw aria-hidden="true" className={busy ? "calendar-spin" : undefined} /> {busy ? "Syncing…" : "Sync now"}</button>
-        {onRecordInPerson ? <button type="button" className={onNewMeeting && canSchedule ? "button secondary" : "button primary"} onClick={() => onRecordInPerson(BLANK_SEED)}><Mic aria-hidden="true" /> Record in person</button> : null}
-        {onNewMeeting && canSchedule ? <button type="button" className="button primary" onClick={onNewMeeting}><Plus aria-hidden="true" /> New meeting</button> : null}
+        {onRecordInPerson && tab !== "automation" ? <button type="button" className={onNewMeeting && canSchedule ? "button secondary" : "button primary"} onClick={() => onRecordInPerson(BLANK_SEED)}><Mic aria-hidden="true" /> Record in person</button> : null}
+        {onNewMeeting && canSchedule && tab !== "automation" ? <button type="button" className="button primary" onClick={onNewMeeting}><Plus aria-hidden="true" /> New meeting</button> : null}
       </>}
     />
-    <Tabs.Root value={tab} onValueChange={(value) => setTab(value === "integrations" ? "integrations" : "calendar")}>
+    <Tabs.Root value={tab} onValueChange={(value) => setTab(value === "integrations" || value === "automation" ? value : "calendar")}>
       <Tabs.List className="tabs-list" aria-label="Calendar sections">
         <Tabs.Tab value="calendar"><CalendarDays aria-hidden="true" />Calendar</Tabs.Tab>
         <Tabs.Tab value="integrations"><Plug aria-hidden="true" />Integrations <span className="count">{active.length}</span></Tabs.Tab>
+        <Tabs.Tab value="automation"><Settings2 aria-hidden="true" />Automation</Tabs.Tab>
       </Tabs.List>
       {error ? <p className="form-error calendar-error" role="alert">{error}</p> : null}
       <CalendarConnectWaiting wait={connectFlow.wait} onReopen={connectFlow.reopen} onRecheck={connectFlow.recheck} onCancel={connectFlow.cancel} />
@@ -355,6 +357,7 @@ export function CalendarWorkspace({ calendarIdentity, preferredConnectionId, onP
         </div>
       </Tabs.Panel>
 
+      <Tabs.Panel value="automation"><CalendarAutomationPanel connections={connections} identity={calendarIdentity} canSchedule={canSchedule} /></Tabs.Panel>
       <Tabs.Panel value="integrations">
         <CalendarIntegrations connections={connections} syncs={snapshot.syncs} busy={busy} connecting={connectFlow.wait !== null} syncingIds={syncingIds} canSync={rangeValid} onSync={(connectionId) => void syncAccount(connectionId)} onConnect={connect} onRename={rename} onDisconnect={disconnect} />
       </Tabs.Panel>

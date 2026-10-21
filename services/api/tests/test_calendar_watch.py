@@ -301,7 +301,7 @@ def test_link_change_updates_the_meeting_and_keeps_passcodes_out_of_history(tmp_
 
 def test_moved_notification_uses_each_readers_zone(tmp_path) -> None:
     fake = FakeGoogle()
-    start = datetime(2026, 10, 12, 9, 30, tzinfo=UTC)
+    start = (datetime.now(UTC) + timedelta(days=2)).replace(hour=9, minute=30, second=0, microsecond=0)
     fake.add("evt-1", start)
     app = _app(tmp_path, fake)
     with TestClient(app) as client:
@@ -309,10 +309,13 @@ def test_moved_notification_uses_each_readers_zone(tmp_path) -> None:
             session.add(UserPreferenceRow(user_id=str(LEGACY_ADMIN_USER_ID), timezone="Asia/Kolkata",
                                           detected_timezone=None, time_format="auto", updated_at=datetime.now(UTC)))
         meeting_id = _schedule(client, start)
-        fake.move("evt-1", datetime(2026, 10, 13, 11, 30, tzinfo=UTC))
+        moved_start = start + timedelta(days=1, hours=2)
+        fake.move("evt-1", moved_start)
         asyncio.run(app.state.calendar_watch.tick())
         moved = next(item for item in _notifications(client) if item["kind"] == "calendar.event_moved")
-        assert moved["title"] == "“Customer call” moved to Tue, Oct 13, 5:00 PM IST"
+        assert moved["title"].startswith("“Customer call” moved to ")
+        assert f"{moved_start:%b} {moved_start.day}" in moved["title"]
+        assert moved["title"].endswith(", 5:00 PM IST")
         assert moved["body"].startswith("Was ") and "3:00 PM IST" in moved["body"]
         assert moved["meeting_id"] == meeting_id
 

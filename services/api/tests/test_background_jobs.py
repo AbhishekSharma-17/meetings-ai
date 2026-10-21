@@ -335,7 +335,7 @@ def test_minutes_job_rechecks_the_requesters_current_role() -> None:
             subject_id=meeting_id, payload={"meeting_id": meeting_id, "actor": {}}))
         finished = _poll(client, str(job.id))
         assert finished["status"] == "failed"
-        assert "owners and admins" in finished["error"]
+        assert "meeting's owner or a workspace admin" in finished["error"]
 
 
 def _queued_row(database: Database) -> str:

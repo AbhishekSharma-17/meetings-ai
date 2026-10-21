@@ -44,7 +44,7 @@ export function MeetingKnowledgeSettings({ meeting, onSaved }: {
       const updated = await meetingsService.updateMeetingKnowledge(meeting.id, tags, included, baseId || null);
       setTags(updated.tags);
       onSaved(updated);
-      setMessage("Knowledge settings saved. Opt-out takes effect on the next search.");
+      setMessage(updated.knowledgeEnabled ? "Knowledge settings saved. The saved transcript can be indexed without recording again; approved minutes are included when available." : "Knowledge settings saved. Opt-out takes effect on the next search.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not update knowledge settings.");
     } finally { setSaving(false); }
@@ -53,15 +53,15 @@ export function MeetingKnowledgeSettings({ meeting, onSaved }: {
   const baseOptions = [{ value: NO_BASE, label: "No named knowledge base" }, ...bases.map((base) => ({ value: base.id, label: base.name }))];
   return <section className="card" aria-labelledby="meeting-knowledge-title">
     <div className="card-header">
-      <div><h2 id="meeting-knowledge-title">AI knowledge</h2></div>
+      <div><h2 id="meeting-knowledge-title">AI knowledge</h2><p>Add this meeting now or later, including after minutes are generated or emailed.</p></div>
       <Badge className="record-card-badge" tone={meeting.knowledgeEnabled ? "brand" : "neutral"} dot>{meeting.knowledgeEnabled ? "Included after completion" : "Not included"}</Badge>
     </div>
     <form className="card-body form-stack" onSubmit={(event) => void submit(event)}>
-      <SwitchField id="meeting-knowledge-included" label="Include in AI knowledge" description="Search and ask questions about the transcript and approved minutes." checked={included} onChange={setIncluded} disabled={saving} />
+      <SwitchField id="meeting-knowledge-included" label="Include in AI knowledge" description="Search and ask questions about the saved transcript. Approved minutes are included separately when available; no new recording is needed." checked={included} onChange={setIncluded} disabled={saving} />
       <UiSelect id="meeting-detail-base" label="Knowledge base" value={baseId || NO_BASE} options={baseOptions} onChange={(value) => setBaseId(value === NO_BASE ? "" : value)} disabled={saving} />
       <ChipInput id="meeting-detail-tags" kind="tag" label="Tags" value={tags} onChange={changeTags} placeholder="Add tags, press Enter"
         maxItems={MAX_TAGS} maxItemLength={MAX_TAG_LENGTH} disabled={saving} />
-      <p className="field-hint">Opting out removes the meeting from new searches and answers at once. Earlier answers are not recalled.</p>
+      <p className="field-hint">Saved content is subject to workspace retention. Opting out removes the meeting from new searches and answers at once. Earlier answers are not recalled.</p>
       {error ? <p className="form-error" role="alert">{error}</p> : null}
       {message ? <p className="form-success" role="status">{message}</p> : null}
       <div><button className="button secondary sm" disabled={saving}>{saving ? "Saving…" : "Save knowledge settings"}</button></div>

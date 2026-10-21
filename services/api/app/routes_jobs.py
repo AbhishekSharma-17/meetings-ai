@@ -2,7 +2,7 @@
 
 Roles: every signed-in user can list/read/cancel their own jobs; owners/admins also see
 workspace-level jobs (minutes drafts, knowledge re-index). Creating a briefing job follows
-the prep rules (viewers cannot); minutes jobs live under /v1/meetings (owners/admins only,
+the prep rules (viewers cannot); minutes jobs live under /v1/meetings (meeting owner or workspace admin,
 enforced by the middleware); re-index follows the knowledge-base creator/admin rule.
 """
 
@@ -79,6 +79,9 @@ def register_job_routes(app: FastAPI, *, jobs: BackgroundJobService, meeting_pre
     async def start_minutes_job(meeting_id: UUID, request: Request) -> JobPublic:
         """Generate (or regenerate) the MOM draft in the background; one active job per meeting."""
         actor = request.state.actor
+        automation = getattr(minutes_service, "automation", None)
+        if automation is not None:
+            automation.suspend(meeting_id, "MOM regeneration requested manually; automatic delivery held")
         try:
             repository.get_meeting(meeting_id)
             minutes_service.require_not_sent(meeting_id)

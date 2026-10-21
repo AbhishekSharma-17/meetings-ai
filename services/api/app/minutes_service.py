@@ -55,6 +55,7 @@ _CAPTURE_IN_PROGRESS = {
 class MinutesService:
     # Notification hooks (NotificationEvents); a no-op unless wired in create_app.
     events: Any = NO_EVENTS
+    automation: Any = None
 
     def __init__(
         self,
@@ -171,7 +172,9 @@ class MinutesService:
             raise MinutesConflictError("transcript changed while MOM was generating; try again")
         return draft, profile, result, source_revision
 
-    async def generate(self, meeting_id: UUID) -> MeetingMinutes:
+    async def generate(self, meeting_id: UUID, *, automated: bool = False) -> MeetingMinutes:
+        if self.automation is not None and not automated:
+            self.automation.suspend(meeting_id, "MOM generation requested manually; automatic delivery held")
         self.require_not_sent(meeting_id)
         draft, profile, result, source_revision = await self.generate_draft(meeting_id)
         now = datetime.now(UTC)
@@ -198,11 +201,16 @@ class MinutesService:
             created_at=created_at,
             updated_at=now,
         )
+        if automated and self.automation is not None:
+            return self.repository.save_minutes(minutes, source_revision=source_revision,
+                on_save=lambda session, saved: self.automation.persist_generated(session, saved, source_revision))
         saved = self.repository.save_minutes(minutes)
         self.repository.save_minutes_source_revision(meeting_id, source_revision)
         return saved
 
     def update(self, meeting_id: UUID, draft: MeetingMinutesDraft) -> MeetingMinutes:
+        if self.automation is not None:
+            self.automation.suspend(meeting_id, "MOM edited manually; automatic delivery held")
         minutes = self.get(meeting_id)
         if minutes.status is MinutesStatus.SENT:
             raise MinutesConflictError("sent MOM cannot be edited; regenerate a new draft")
@@ -221,7 +229,9 @@ class MinutesService:
         minutes.updated_at = datetime.now(UTC)
         return self.repository.save_minutes(minutes)
 
-    def approve(self, meeting_id: UUID) -> MeetingMinutes:
+    def approve(self, meeting_id: UUID, *, automated: bool = False, on_save=None) -> MeetingMinutes:
+        if self.automation is not None and not automated:
+            self.automation.suspend(meeting_id, "MOM approved manually; automatic delivery held")
         minutes = self.get(meeting_id)
         if minutes.status is MinutesStatus.SENT:
             return minutes
@@ -231,14 +241,19 @@ class MinutesService:
         minutes.approved_at = now
         minutes.updated_at = now
         minutes.last_error = None
+        if on_save is not None:
+            return self.repository.save_minutes(minutes, on_save=on_save)
         return self.repository.save_minutes(minutes)
 
     async def send(
         self, meeting_id: UUID, request: MinutesEmailRequest,
         groups: list[dict[str, object]] | None = None, *, on_attempt: Callable[[UUID], None] | None = None,
+        automated: bool = False,
     ) -> EmailDelivery:
         """Send the approved MOM. `groups` records which teams were expanded into the recipients;
         `on_attempt(delivery_id)` runs once the checks pass, just before the email goes out."""
+        if self.automation is not None and not automated:
+            self.automation.suspend(meeting_id, "MOM sent manually; automatic delivery held")
         meeting = self.repository.get_meeting(meeting_id)
         minutes = self.get(meeting_id)
         if minutes.status is not MinutesStatus.APPROVED:

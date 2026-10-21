@@ -51,6 +51,8 @@ from .adapters.resend import EmailDeliveryError, ResendAdapter
 from .adapters.base import ProviderExecutionError
 from .composio_calendar import CalendarConnection, WorkspaceCalendarConnection, CalendarConnectRequest, CalendarAliasRequest, CalendarConnectResponse, CalendarEvent, CalendarEventsResponse, CalendarError, CalendarProvider, CalendarRange, ComposioCalendar, calendar_callback_url
 from .calendar_schedule import CalendarScheduleError, CalendarSchedulePublic, CalendarScheduleService, ManualScheduleCreate, ScheduleCreate
+from .calendar_automation import CalendarAutomationService
+from .routes_calendar_automation import register_calendar_automation_routes, automation_route_allowed
 from .calendar_accounts import CalendarAccountOverview, CalendarAccountService, CalendarDisconnectResult, ScheduledChoice
 from .calendar_cache import CalendarCacheService, CalendarSyncRequest, CalendarSyncResponse, CachedCalendarResponse
 from .calendar_relink import CalendarRelinker
@@ -254,6 +256,7 @@ def create_app(
             tasks.append(asyncio.create_task(retention.run()))
         if os.getenv("AUTO_CALENDAR_SCHEDULE_ENABLED") == "1":
             tasks.append(asyncio.create_task(calendar_schedule.run()))
+            tasks.append(asyncio.create_task(calendar_automation.run()))
             if calendar_watch.enabled:
                 tasks.append(asyncio.create_task(calendar_watch.run()))
         # On by default: an assistant that never leaves a call is worse than any other failure here.
@@ -316,6 +319,10 @@ def create_app(
     app.state.organization_brief = organization_brief
     app.state.meeting_prep = meeting_prep
     app.state.calendar_schedule = calendar_schedule
+    calendar_automation = CalendarAutomationService(database, calendar, calendar_schedule, meeting_service, worker, minutes_service, knowledge_bases)
+    app.state.calendar_automation = calendar_automation
+    calendar_schedule.automation = worker.automation = minutes_service.automation = calendar_automation
+    register_calendar_automation_routes(app, calendar_automation)
     app.state.calendar_watch = calendar_watch
     register_calendar_change_routes(app, database=database, calendar_schedule=calendar_schedule,
                                     calendar_cache=calendar_cache)
@@ -420,6 +427,7 @@ def create_app(
                     own_assistant = member_assistant_route(method, path, actor, database)
                     allowed = (
                         own_assistant
+                        or automation_route_allowed(method, path)
                         or
                         path == "/v1/auth/change-password"
                         or versions_route_allowed(method, path)
@@ -1212,7 +1220,9 @@ def create_app(
     @app.put("/v1/meetings/{meeting_id}/delivery-settings", response_model=MeetingDeliverySettings)
     def save_delivery_settings(meeting_id: UUID, payload: MeetingDeliverySettings) -> MeetingDeliverySettings:
         try:
-            return repository.save_delivery_settings(meeting_id, payload)
+            calendar_automation.suspend(meeting_id, "recap recipients configured manually; automatic delivery held")
+            saved = repository.save_delivery_settings(meeting_id, payload)
+            return saved
         except MeetingNotFoundError as exc:
             raise api_error(exc) from exc
         except RecipientGroupNotFoundError as exc:
@@ -1286,6 +1296,7 @@ def create_app(
     @app.post("/v1/meetings/{meeting_id}/stop", response_model=MeetingPublic)
     async def stop_meeting(meeting_id: UUID) -> MeetingPublic:
         try:
+            calendar_automation.suspend(meeting_id, "assistant stopped manually; review MOM before sending")
             return meeting_service.to_public(await meeting_service.stop(meeting_id))
         except MEETING_EXCEPTIONS as exc:
             raise api_error(exc) from exc
@@ -1398,6 +1409,7 @@ def create_app(
     @app.delete("/v1/meetings/{meeting_id}/minutes", status_code=204)
     def delete_meeting_minutes(meeting_id: UUID) -> Response:
         try:
+            calendar_automation.suspend(meeting_id, "MOM deleted manually; automatic delivery held")
             repository.delete_minutes(meeting_id)
         except (MeetingNotFoundError, MinutesNotFoundError, MinutesDeletionConflictError) as exc:
             raise api_error(exc) from exc
@@ -1409,6 +1421,7 @@ def create_app(
     )
     async def generate_meeting_minutes(meeting_id: UUID) -> MeetingMinutesPublic:
         try:
+            calendar_automation.suspend(meeting_id, "MOM regeneration requested manually; automatic delivery held")
             minutes_service.require_not_sent(meeting_id)
             meeting = repository.get_meeting(meeting_id)
             if meeting.vexa_meeting_id is not None:

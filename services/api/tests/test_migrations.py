@@ -41,12 +41,32 @@ def test_v35_upgrade_adds_email_outbox_without_changing_existing_notifications(t
             "user": "00000000-0000-4000-8000-000000000002", "now": datetime.now(UTC),
         })
         connection.execute(text("DROP TABLE notification_emails"))
-        connection.execute(text("DELETE FROM schema_version WHERE version=36"))
+        for version in range(Database.SCHEMA_VERSION, 36, -1):
+            for name in reversed(SCHEMA_TABLES_BY_VERSION[version]):
+                connection.execute(text(f"DROP TABLE {name}"))
+        connection.execute(text("DELETE FROM schema_version WHERE version>=36"))
     database.migrate()
     database.migrate()
     with database.engine.connect() as connection:
         assert connection.execute(text("SELECT title FROM notifications")).scalar_one() == "Existing alert"
         assert connection.execute(text("SELECT COUNT(*) FROM notification_emails")).scalar_one() == 0
+    database.engine.dispose()
+
+
+def test_v36_upgrade_adds_opt_in_automation_without_backfilling_existing_meetings(tmp_path):
+    database = _database(tmp_path, "automation-upgrade.db")
+    database.migrate()
+    with database.engine.begin() as connection:
+        connection.execute(text("INSERT INTO provider_defaults (capability, policy) VALUES ('text_generation', 'cloud_only')"))
+        for name in reversed(SCHEMA_TABLES_BY_VERSION[37]):
+            connection.execute(text(f"DROP TABLE {name}"))
+        connection.execute(text("DELETE FROM schema_version WHERE version=37"))
+    database.migrate()
+    database.migrate()
+    with database.engine.connect() as connection:
+        assert connection.execute(text("SELECT policy FROM provider_defaults")).scalar_one() == "cloud_only"
+        for name in SCHEMA_TABLES_BY_VERSION[37]:
+            assert connection.execute(text(f"SELECT COUNT(*) FROM {name}")).scalar_one() == 0
     database.engine.dispose()
 
 

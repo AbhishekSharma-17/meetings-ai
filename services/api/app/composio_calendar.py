@@ -88,6 +88,11 @@ class CalendarEvent(BaseModel):
     # True when this id stands for a whole recurring series rather than one occurrence (a Zoom
     # recurring meeting, which Zoom lists once, at its next occurrence).
     series: bool = False
+    # Recurrence metadata is independent of Zoom's shared event-id semantics above.
+    is_recurring: bool = False
+    series_id: str | None = None
+    original_starts_at: datetime | None = None
+    self_response_status: str | None = None
 
 
 # Zoom meeting types 3 (recurring, no fixed time) and 8 (recurring, fixed time) share one id.
@@ -292,6 +297,13 @@ def _event(item: dict, connection: CalendarConnection, timezone: str) -> Calenda
         agenda=_plain(item.get("description") or item.get("body") or item.get("meeting_notes_plain") or item.get("meeting_notes_html") or item.get("agenda")),
         organizer=_plain(organizer, 160), invitees=_people(item),
         series=connection.provider == "zoom" and item.get("type") in _ZOOM_SERIES_TYPES,
+        is_recurring=bool(item.get("recurringEventId") or item.get("recurrence") or item.get("seriesMasterId")
+                          or item.get("type") in {"occurrence", "exception", "seriesMaster", 3, 8}),
+        series_id=str(item.get("recurringEventId") or item.get("seriesMasterId") or "") or None,
+        original_starts_at=_event_time(item.get("originalStartTime") or item.get("originalStart"), timezone),
+        self_response_status=next((str(person.get("responseStatus") or "") for person in (item.get("attendees") or [])
+                                   if isinstance(person, dict) and person.get("self")), None)
+            or ((item.get("responseStatus") or {}).get("response") if isinstance(item.get("responseStatus"), dict) else None),
     )
 
 

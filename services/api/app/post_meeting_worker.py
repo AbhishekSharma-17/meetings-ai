@@ -26,6 +26,7 @@ class PostMeetingJobConflictError(RuntimeError):
 class PostMeetingWorker:
     # Notification hooks (NotificationEvents); a no-op unless wired in create_app.
     events: Any = NO_EVENTS
+    automation: Any = None
 
     def __init__(self, repository: object, meetings: object, minutes: object, interval_seconds: int = 20):
         self.repository = repository
@@ -110,7 +111,10 @@ class PostMeetingWorker:
             return
         try:
             await self.meetings.transcript(meeting.id)
-            await self.minutes.generate(meeting.id)
+            if self.automation is not None:
+                await self.minutes.generate(meeting.id, automated=True)
+            else:
+                await self.minutes.generate(meeting.id)
             completed = datetime.now(UTC)
             self.repository.save_post_meeting_job(
                 meeting.id, attempts=job.attempts,

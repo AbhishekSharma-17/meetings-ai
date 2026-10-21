@@ -1242,6 +1242,68 @@ class MinutesVersionAccessRow(Base):
     granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class CalendarAutomationRuleRow(Base):
+    __tablename__ = "calendar_automation_rules"
+    organization_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    settings: Mapped[dict] = mapped_column(JSON, nullable=False)
+    baselined_connections: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    last_scan_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    lease_token: Mapped[str | None] = mapped_column(String(36))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class WorkspaceAutomationPolicyRow(Base):
+    __tablename__ = "workspace_automation_policies"
+    organization_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    settings: Mapped[dict] = mapped_column(JSON, nullable=False)
+    authorized_by: Mapped[str] = mapped_column(String(36), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CalendarAutomationOccurrenceRow(Base):
+    __tablename__ = "calendar_automation_occurrences"
+    __table_args__ = (UniqueConstraint("organization_id", "call_identity", name="uq_automatic_calendar_call"),)
+    organization_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    connection_id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    occurrence_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    call_identity: Mapped[str | None] = mapped_column(String(64))
+    meeting_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class MeetingAutomationRow(Base):
+    __tablename__ = "meeting_automation"
+    meeting_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    settings: Mapped[dict] = mapped_column(JSON, nullable=False)
+    overrides: Mapped[dict] = mapped_column(JSON, nullable=False)
+    generated_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    source_revision: Mapped[int | None] = mapped_column(Integer)
+    suspended_reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AutomaticMinutesDeliveryRow(Base):
+    __tablename__ = "automatic_minutes_deliveries"
+    meeting_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    authorized_by: Mapped[str] = mapped_column(String(36), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    frozen: Mapped[dict] = mapped_column(JSON, nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class SchemaVersionRow(Base):
     __tablename__ = "schema_version"
 
@@ -1305,9 +1367,15 @@ SCHEMA_TABLES_BY_VERSION: dict[int, tuple[str, ...]] = {
     34: ("chatgpt_connections", "chatgpt_oauth_attempts"),
     35: ("minutes_versions", "minutes_version_access"),
     36: ("notification_emails",),
+    37: ("calendar_automation_rules", "workspace_automation_policies", "calendar_automation_occurrences", "meeting_automation", "automatic_minutes_deliveries"),
 }
 
 SCHEMA_COLUMNS: dict[str, tuple[str, ...]] = {
+    "calendar_automation_rules": ("organization_id", "user_id", "settings", "baselined_connections", "last_scan_at", "last_error", "updated_at", "lease_token", "lease_until"),
+    "workspace_automation_policies": ("organization_id", "settings", "authorized_by", "updated_at"),
+    "calendar_automation_occurrences": ("organization_id", "user_id", "connection_id", "occurrence_key", "call_identity", "meeting_id", "status", "reason", "created_at"),
+    "meeting_automation": ("meeting_id", "organization_id", "user_id", "settings", "overrides", "generated_fingerprint", "source_revision", "suspended_reason", "created_at"),
+    "automatic_minutes_deliveries": ("meeting_id", "organization_id", "authorized_by", "status", "frozen", "attempts", "next_retry_at", "last_error", "created_at", "completed_at"),
     "notification_emails": ("id", "organization_id", "user_id", "title", "body", "link_view", "link_id", "status", "attempts", "next_retry_at", "last_error", "created_at", "sent_at"),
     "chatgpt_connections": ("id", "organization_id", "user_id", "scope", "label", "subject", "email", "client_id", "credential_ciphertext", "scopes", "purposes", "model", "status", "last_error_code", "expires_at", "created_at", "updated_at"),
     "chatgpt_oauth_attempts": ("state_hash", "organization_id", "user_id", "connection_id", "scope", "label", "client_id", "verifier_ciphertext", "nonce", "redirect_uri", "expires_at"),
@@ -1470,7 +1538,7 @@ def _migrate_to_v22(connection) -> None:
 class Database:
     """Upgrades known schemas and rejects unknown or incomplete ones."""
 
-    SCHEMA_VERSION = 36
+    SCHEMA_VERSION = 37
 
     def __init__(self, url: str) -> None:
         engine_options: dict[str, object] = {"pool_pre_ping": True}

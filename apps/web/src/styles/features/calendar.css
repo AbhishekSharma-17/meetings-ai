@@ -35,6 +35,9 @@
 .calendar-range-title { font-size:13px; font-weight:600; }
 .calendar-layout { display:grid; grid-template-columns:minmax(0,1fr) 360px; gap:16px; align-items:start; }
 .calendar-side { display:grid; gap:16px; min-width:0; }
+/* Long account identities and team names stay inside automation cards on phones. */
+.calendar-automation-settings fieldset, .calendar-automation-settings .choice-card > span { min-width:0; }
+.calendar-automation-settings .choice-card > span { overflow-wrap:anywhere; }
 
 /* Month grid */
 .calendar-month { overflow:hidden; }

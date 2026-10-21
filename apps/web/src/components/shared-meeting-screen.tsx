@@ -16,6 +16,9 @@ import { inPersonService } from "@/lib/in-person-service";
 import { sharingService, type SharedMeetingView } from "@/lib/sharing-service";
 import { InPersonMemberMeeting } from "./in-person-member-meeting";
 import { MinutesVersionsPanel } from "./minutes-versions-panel";
+import { MeetingKnowledgeSettings } from "./meeting-knowledge-settings";
+import { MeetingAutomationCard } from "./meeting-automation-card";
+import { MinutesPanel } from "./minutes-panel";
 
 const POLL_MS = 15_000;
 const LIVE = new Set<MeetingDetail["status"]>(["joining", "waiting_room", "live", "needs_attention", "stopping", "processing"]);
@@ -60,6 +63,7 @@ function SharedMeetingScreen({ meetingId, coverage, share, backLabel, onBack }: 
   const [segments, setSegments] = useState<TranscriptSegment[]>([]);
   const [minutes, setMinutes] = useState<MeetingMinutes | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const managesOwn = coverage?.can_manage === true && coverage.owner?.is_you === true;
 
   useEffect(() => {
     let active = true;
@@ -71,7 +75,7 @@ function SharedMeetingScreen({ meetingId, coverage, share, backLabel, onBack }: 
         if (next.status !== "created") {
           const [turns, approved] = await Promise.all([
             meetingsService.getTranscript(meetingId).catch(() => [] as TranscriptSegment[]),
-            share ? Promise.resolve(share.minutes) : coordinationService.sharedMinutes(meetingId).catch(() => null),
+            share ? Promise.resolve(share.minutes) : managesOwn ? Promise.resolve(null) : coordinationService.sharedMinutes(meetingId).catch(() => null),
           ]);
           if (active) { setSegments(turns.filter((turn) => turn.isFinal)); setMinutes(approved); }
         }
@@ -83,11 +87,11 @@ function SharedMeetingScreen({ meetingId, coverage, share, backLabel, onBack }: 
     let timer: number | undefined;
     void load();
     return () => { active = false; if (timer) window.clearTimeout(timer); };
-  }, [meetingId, share]);
+  }, [meetingId, share, managesOwn]);
 
   const owner = coverage?.owner ?? (share?.shared_by ? { ...share.shared_by, is_you: false } : null);
   return <section className="page narrow shared-meeting" aria-labelledby="shared-meeting-title">
-    <PageHeader back={{ label: backLabel, onClick: onBack }} eyebrow={`Shared by ${owner?.display_name ?? "a teammate"}`} titleId="shared-meeting-title"
+    <PageHeader back={{ label: backLabel, onClick: onBack }} eyebrow={managesOwn ? "Your meeting" : `Shared by ${owner?.display_name ?? "a teammate"}`} titleId="shared-meeting-title"
       title={meeting?.title ?? (error ? "Meeting unavailable" : <span className="skeleton record-title-skeleton" aria-hidden="true" />)}
       badge={meeting ? <MeetingBadge meeting={meeting} /> : undefined}
       description={meeting ? `${meeting.platform} · ${meeting.joinedAt ? `Joined ${formatFullDateTime(meeting.joinedAt)}` : `${possessive(firstName(owner))} assistant hasn't joined yet`}` : undefined} />
@@ -95,8 +99,9 @@ function SharedMeetingScreen({ meetingId, coverage, share, backLabel, onBack }: 
     {coverage ? <CallCoordinationPanel meetingId={meetingId} onChanged={() => void coordinationService.forMeeting(meetingId).catch(() => onBack())} /> : null}
     {share?.note ? <p className="shared-note"><b>Note from {share.shared_by?.display_name ?? "the sender"}:</b> {share.note}</p> : null}
     {meeting ? <>
-      <MinutesVersionsPanel key={meetingId} meetingId={meetingId} segments={segments} />
-      <section className="card" aria-labelledby="shared-minutes-title">
+      <MeetingAutomationCard meetingId={meetingId} />
+      {managesOwn ? <MeetingKnowledgeSettings key={meetingId} meeting={meeting} onSaved={setMeeting} /> : null}
+      {managesOwn ? <MinutesPanel key={`minutes:${meetingId}`} meeting={meeting} transcriptCount={segments.length} segments={segments} /> : <section className="card" aria-labelledby="shared-minutes-title">
         <div className="card-header"><div><h2 id="shared-minutes-title">Minutes</h2><p>Shown once {owner?.display_name ?? "the owner"} approves them.</p></div></div>
         <div className="card-body">
           {minutes ? <div className="shared-minutes">
@@ -105,7 +110,8 @@ function SharedMeetingScreen({ meetingId, coverage, share, backLabel, onBack }: 
             {minutes.action_items.length ? <><h3>Action items</h3><ul>{minutes.action_items.map((item, index) => <li key={`${item.description}-${index}`}>{item.description}{item.owner ? <small> · {item.owner}</small> : null}{item.due_date ? <small> · {item.due_date}</small> : null}</li>)}</ul></> : null}
           </div> : <EmptyState plain icon={<FileText />} title="No approved minutes yet">{meeting.status === "ready" ? "The minutes are still being reviewed." : "Minutes appear here after the call is recorded and reviewed."}</EmptyState>}
         </div>
-      </section>
+      </section>}
+      <MinutesVersionsPanel key={meetingId} meetingId={meetingId} segments={segments} />
       <section className="card transcript-card" aria-labelledby="shared-transcript-title">
         <div className="card-header"><div><h2 id="shared-transcript-title">Transcript</h2><p>Recorded conversation. Speaker names are reviewed by the meeting owner.</p></div><span className="section-count">{segments.length} turn{segments.length === 1 ? "" : "s"}</span></div>
         <div className="card-body transcript-body">

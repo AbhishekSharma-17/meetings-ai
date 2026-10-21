@@ -283,7 +283,7 @@ export function MinutesPanel({ meeting, transcriptCount, segments, onDelivered }
   return <div className="mom-stack">
     <section className="card mom-card" aria-labelledby="minutes-title">
       <div className="card-header">
-        <div><h2 id="minutes-title">MOM & follow-up</h2><p>{minutes ? minutesSubtitle[minutes.status] : "Drafted automatically after capture. Nothing is sent until you approve it."}</p></div>
+        <div><h2 id="minutes-title">MOM & follow-up</h2><p>{minutes ? minutesSubtitle[minutes.status] : "Drafted automatically after capture. Review and approve the minutes before sending manually."}</p></div>
         {minutes ? <span className={`status ${minutes.status}`}>{minutesStatusLabel[minutes.status]}</span> : null}
       </div>
       <div className="card-body mom-body">
