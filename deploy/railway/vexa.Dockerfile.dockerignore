@@ -1,4 +1,4 @@
-# This image includes four patched Python files and redistribution notices.
+# Signed-STT overlay, still-image branding, and redistribution notices only.
 # Never upload app secrets, recordings, node_modules, or the rest of the Vexa tree.
 **
 !LICENSE
@@ -11,3 +11,6 @@
 !vendor/vexa/core/meetings/services/meeting-api/src/meeting_api/bot_spawn/router.py
 !vendor/vexa/core/meetings/services/meeting-api/src/meeting_api/bot_spawn/service.py
 !vendor/vexa/core/meetings/services/meeting-api/src/meeting_api/bot_spawn/signed_stt.py
+!apps/web/public/brand/meetings-ai-avatar-1024.png
+!deploy/railway/branding/apply.py
+!deploy/railway/branding/static-image.ts
