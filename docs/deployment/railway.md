@@ -33,6 +33,10 @@ with the stock Vexa image: the API verifies the signed-STT capability before
 sending a per-meeting transcription route. The Vexa image is large; its first
 Railway build and cold start can take several minutes.
 
+The same custom image also bundles the global Meetings AI still-image camera.
+See [assistant image implementation and safe rollout](assistant-image.md) for
+its kill switch, local media checks, and the mandatory active-call drain check.
+
 ## Configuration and release
 
 Keep all credentials in Railway service variables, never in Git. The API
